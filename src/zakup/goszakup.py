@@ -1,8 +1,9 @@
 """Клиент REST API портала госзакупок (ows.goszakup.gov.kz/v3).
 
-Списки отдаются по возрастанию id, страница за страницей: в ответе есть `items`
-и `next_page` вида `/v3/lots?page=next&search_after=123`. Курсор search_after —
-это id последней записи, поэтому дальше по API можно идти от любого id.
+Списки отдаются по убыванию id, от самых новых: в ответе есть `items` и
+`next_page` вида `/v3/lots?page=next&search_after=123`. search_after=X отдаёт
+записи с id строго меньше X, поэтому вниз по API можно идти от любого id.
+Проверено на живом API 2026-11-06.
 """
 
 import logging
@@ -21,7 +22,7 @@ BASE_URL = "https://ows.goszakup.gov.kz"
 ENTITIES = {"announcements": "/v3/trd-buy", "lots": "/v3/lots"}
 # Даты в API приходят без часового пояса, по времени Астаны.
 PORTAL_TZ = ZoneInfo("Asia/Almaty")
-PAGE_LIMIT = 200
+PAGE_LIMIT = 500
 
 
 class GoszakupError(Exception):

@@ -8,7 +8,8 @@
 ## Как устроено
 
 - **worker** — раз в 10 минут забирает новые объявления (`/v3/trd-buy`) и лоты
-  (`/v3/lots`), продолжая с сохранённого курсора `search_after`. Затем проверяет
+  (`/v3/lots`). API отдаёт их от новых к старым, поэтому сборщик идёт сверху вниз
+  до уже загруженного; прерванный проход продолжается с того же места. Затем проверяет
   подписки и отправляет совпадения в Telegram. Заодно перечитывает открытые
   объявления, чтобы обновлять статусы и сроки.
 - **web** — FastAPI с серверными шаблонами: поиск по лотам (полнотекстовый,
@@ -18,17 +19,24 @@
   а нужные поля разложены по колонкам. Поэтому новые поля можно добавить без
   повторной загрузки.
 
-API отдаёт записи по возрастанию id. Чтобы не тянуть всю историю, команда
-`start-from` бинарным поиском находит курсор, с которого начинается нужная дата.
+Чтобы не тянуть всю историю (это 13 млн объявлений), команда `start-from`
+бинарным поиском по id находит первое объявление нужной даты. Без неё
+сборщик при первом запуске берёт последние 7 дней.
 
 ## Запуск
 
+Секреты живут в Infisical (https://infisical.sarsembai.com, проект `zakup`,
+окружение Production). `scripts/fetch-secrets.sh` переносит их в `.env`
+поверх локальных значений. Машинная учётка `zakup-server` (роль Viewer) лежит
+в `~/.config/infisical/zakup.env`.
+
 ```bash
-cp .env.example .env              # заполнить GOSZAKUP_TOKEN, пароли, Telegram
+cp .env.example .env              # пароль Postgres, вход в веб
+./scripts/fetch-secrets.sh        # GOSZAKUP_TOKEN и прочее из Infisical
 docker compose build
-docker compose run --rm --entrypoint zakup worker migrate
 docker compose run --rm --entrypoint zakup worker probe          # токен работает? какие поля?
-docker compose run --rm --entrypoint zakup worker start-from 2026-10-01
+docker compose run --rm --entrypoint zakup worker migrate
+docker compose run --rm --entrypoint zakup worker start-from 2026-10-01   # необязательно
 docker compose up -d
 ```
 
@@ -57,7 +65,8 @@ docker compose run --rm --no-deps -e TEST_DATABASE_URL=postgresql://zakup:<pw>@p
 
 ## Дальше
 
-- Сверить названия полей с ответом `probe` и поправить разбор в `db.py`.
+- В списке объявлений нет заказчика: он есть только в карточке `/v3/trd-buy/{id}`,
+  её сейчас читает `refresh` для открытых объявлений.
 - Справочники (статусы, способы закупки, КАТО) из `/v3/refs/...`, фильтр по региону.
 - Договоры и итоги (`/v3/contract`, протоколы) — аналитика по заказчикам и поставщикам.
 - Многопользовательский вход, тарифы, оплата.

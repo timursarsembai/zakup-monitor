@@ -21,6 +21,8 @@ CREATE TABLE IF NOT EXISTS announcements (
     raw              jsonb NOT NULL,
     fetched_at       timestamptz NOT NULL DEFAULT now()
 );
+-- Когда последний раз читали карточку /v3/trd-buy/{id}: только в ней есть заказчик.
+ALTER TABLE announcements ADD COLUMN IF NOT EXISTS card_fetched_at timestamptz;
 CREATE INDEX IF NOT EXISTS announcements_end_date ON announcements (end_date);
 CREATE INDEX IF NOT EXISTS announcements_customer_bin ON announcements (customer_bin);
 
@@ -46,16 +48,27 @@ CREATE TABLE IF NOT EXISTS lots (
         to_tsvector('russian', coalesce(name_ru, '') || ' ' || coalesce(description_ru, ''))
     ) STORED
 );
+-- Порядок первого появления лота в базе. Подписки идут по нему, а не по id:
+-- id выдаётся черновику, и опубликованный позже лот получает id «из прошлого».
+ALTER TABLE lots ADD COLUMN IF NOT EXISTS seen_seq bigint GENERATED ALWAYS AS IDENTITY;
+CREATE UNIQUE INDEX IF NOT EXISTS lots_seen_seq ON lots (seen_seq);
 CREATE INDEX IF NOT EXISTS lots_tsv ON lots USING gin (tsv);
 CREATE INDEX IF NOT EXISTS lots_trd_buy_id ON lots (trd_buy_id);
 CREATE INDEX IF NOT EXISTS lots_customer_bin ON lots (customer_bin);
 
--- Курсор search_after для каждой сущности API.
+-- Состояние синхронизации. API отдаёт записи от новых к старым, search_after=X —
+-- это «id меньше X». Всё с id <= last_id уже загружено. Проход сверху вниз
+-- начинается с самой новой записи (walk_top) и идёт страницами; resume_after —
+-- где он прервался. Когда проход доходит до last_id, last_id := walk_top.
 CREATE TABLE IF NOT EXISTS sync_state (
-    entity     text PRIMARY KEY,
-    last_id    bigint NOT NULL,
-    updated_at timestamptz NOT NULL DEFAULT now()
+    entity       text PRIMARY KEY,
+    last_id      bigint NOT NULL,
+    walk_top     bigint,
+    resume_after bigint,
+    updated_at   timestamptz NOT NULL DEFAULT now()
 );
+ALTER TABLE sync_state ADD COLUMN IF NOT EXISTS walk_top bigint;
+ALTER TABLE sync_state ADD COLUMN IF NOT EXISTS resume_after bigint;
 
 -- Пользователи заложены сразу, чтобы потом открыть сервис другим без переделки схемы.
 CREATE TABLE IF NOT EXISTS users (
@@ -75,8 +88,8 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     max_amount    numeric(20, 2),
     customer_bins text[],
     active        boolean NOT NULL DEFAULT true,
-    -- Лоты с id не больше этого уже проверены. Новая подписка начинает с текущего
-    -- максимума, чтобы не прислать всю историю разом.
+    -- Лоты с seen_seq не больше этого уже проверены. Новая подписка начинает с
+    -- текущего максимума, чтобы не прислать всю историю разом.
     matched_up_to bigint NOT NULL DEFAULT 0,
     created_at    timestamptz NOT NULL DEFAULT now()
 );

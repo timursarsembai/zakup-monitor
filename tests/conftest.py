@@ -24,18 +24,20 @@ def conn():
 
 
 class FakeClient:
-    """Отдаёт записи как API: по возрастанию id, строго после search_after."""
+    """Отдаёт записи как настоящий API: по убыванию id, search_after=X — id меньше X."""
 
     def __init__(self, data: dict[str, list[dict]]):
-        self.data = {entity: sorted(items, key=lambda i: i["id"]) for entity, items in data.items()}
+        self.data = {
+            entity: sorted(items, key=lambda i: i["id"], reverse=True)
+            for entity, items in data.items()
+        }
         self.requests = 0
 
-    def page(self, entity, after=None, limit=200):
+    def page(self, entity, after=None, limit=500):
         self.requests += 1
-        rest = [i for i in self.data.get(entity, []) if after is None or i["id"] > after]
+        rest = [i for i in self.data.get(entity, []) if not after or i["id"] < after]
         items = rest[:limit]
-        more = len(rest) > limit
-        return Page(items, items[-1]["id"] if more else None, len(self.data.get(entity, [])))
+        return Page(items, items[-1]["id"] if items else None, len(self.data.get(entity, [])))
 
 
 @pytest.fixture

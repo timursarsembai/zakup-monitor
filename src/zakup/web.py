@@ -157,7 +157,8 @@ def create_subscription(
         conn.execute(
             """INSERT INTO subscriptions (user_id, name, query, min_amount, max_amount,
                                           matched_up_to)
-               VALUES (%s, %s, %s, %s, %s, (SELECT coalesce(max(id), 0) FROM lots))""",
+               VALUES (%s, %s, %s, %s, %s,
+                       (SELECT coalesce(max(seen_seq), 0) FROM lots))""",
             (user, name.strip(), query.strip(), _amount(min_amount), _amount(max_amount)),
         )
     return RedirectResponse("/subscriptions", status_code=303)

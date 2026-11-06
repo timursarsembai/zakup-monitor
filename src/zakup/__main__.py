@@ -3,10 +3,13 @@ import json
 import logging
 import os
 import sys
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 
 from zakup import db, matcher, notify, sync
 from zakup.goszakup import ENTITIES, PORTAL_TZ, Client
+
+# Сколько истории грузить, если start-from не запускали.
+DEFAULT_HISTORY_DAYS = 7
 
 
 def main() -> int:
@@ -18,7 +21,10 @@ def main() -> int:
     start.add_argument("since", type=date.fromisoformat, help="ГГГГ-ММ-ДД")
     run = sub.add_parser("sync", help="догрузить новое, сопоставить подписки, разослать")
     run.add_argument("--max-pages", type=int, default=50)
-    refresh = sub.add_parser("refresh", help="перечитать открытые объявления (статусы, сроки)")
+    again = sub.add_parser("rescan", help="перечитать последние дни: поздние публикации, статусы")
+    again.add_argument("--days", type=int, default=30)
+    again.add_argument("--max-pages", type=int, default=20)
+    refresh = sub.add_parser("refresh", help="дочитать карточки открытых объявлений (заказчик)")
     refresh.add_argument("--limit", type=int, default=500)
     user = sub.add_parser("add-user", help="завести пользователя")
     user.add_argument("email")
@@ -58,6 +64,8 @@ def main() -> int:
         with db.connect(os.environ["DATABASE_URL"]) as conn:
             if args.command == "start-from":
                 return _start_from(conn, client, args.since)
+            if args.command == "rescan":
+                return _rescan(conn, client, args.days, args.max_pages)
             if args.command == "refresh":
                 return _refresh(conn, client, args.limit)
             return _sync(conn, client, args.max_pages)
@@ -76,21 +84,30 @@ def _probe(client: Client) -> int:
 
 def _start_from(conn, client: Client, since: date) -> int:
     since_at = datetime.combine(since, time.min, PORTAL_TZ)
-    announcements_after = sync.find_start(client, "announcements", sync.published_since(since_at))
-    if announcements_after is None:
+    first_announcement = sync.find_start(client, "announcements", sync.published_since(since_at))
+    if first_announcement is None:
         print("Объявлений после этой даты нет.", file=sys.stderr)
         return 1
-    first = client.page("announcements", after=announcements_after, limit=1).items[0]
-    lots_after = sync.find_start(client, "lots", sync.lot_of_announcement_from(int(first["id"])))
-    db.set_cursor(conn, "announcements", announcements_after)
-    if lots_after is not None:
-        db.set_cursor(conn, "lots", lots_after)
+    first_lot = sync.find_start(
+        client, "lots", sync.lot_of_announcement_from(first_announcement)
+    )
+    if first_lot is None:
+        print("Лотов этих объявлений пока нет.", file=sys.stderr)
+        return 1
+    # Всё, что ниже первой нужной записи, считаем уже загруженным.
+    db.save_state(conn, "announcements", db.SyncState(first_announcement - 1, None, None))
+    db.save_state(conn, "lots", db.SyncState(first_lot - 1, None, None))
     conn.commit()
-    print(f"announcements after {announcements_after}, lots after {lots_after}")
+    print(f"start: announcement {first_announcement}, lot {first_lot}")
     return 0
 
 
 def _sync(conn, client: Client, max_pages: int) -> int:
+    if any(db.get_state(conn, entity) is None for entity in ENTITIES):
+        since = date.today() - timedelta(days=DEFAULT_HISTORY_DAYS)
+        print(f"Начальной точки нет, начинаю с {since}.")
+        if _start_from(conn, client, since) != 0:
+            return 1
     try:
         for entity in ENTITIES:
             print(sync.sync(conn, client, entity, max_pages))
@@ -102,19 +119,46 @@ def _sync(conn, client: Client, max_pages: int) -> int:
     return 0
 
 
+def _rescan(conn, client: Client, days: int, max_pages: int) -> int:
+    # Граница по id: самое старое объявление, опубликованное за эти дни. Черновики,
+    # созданные раньше и опубликованные позже, сюда не попадут, но таких единицы.
+    floor = conn.execute(
+        "SELECT min(id) FROM announcements WHERE publish_date >= now() - make_interval(days => %s)",
+        (days,),
+    ).fetchone()[0]
+    if floor is None:
+        print("Нечего перечитывать: объявлений за эти дни нет.")
+        return 0
+    lot_floor = conn.execute(
+        "SELECT min(id) FROM lots WHERE trd_buy_id >= %s", (floor,)
+    ).fetchone()[0]
+    try:
+        saved = sync.rescan(conn, client, "announcements", floor, max_pages)
+        print(f"announcements rescanned: {saved}")
+        if lot_floor is not None:
+            print(f"lots rescanned: {sync.rescan(conn, client, 'lots', lot_floor, max_pages)}")
+        print(f"matches: {matcher.run(conn)}, delivered: {matcher.deliver(conn)}")
+    except Exception as error:
+        # Only the type: database errors can quote the connection string.
+        notify.send(f"zakup: повторный проход упал с ошибкой {type(error).__name__}.")
+        raise
+    return 0
+
+
 def _refresh(conn, client: Client, limit: int) -> int:
     ids = [
         row[0]
         for row in conn.execute(
             """SELECT id FROM announcements WHERE end_date > now()
-               ORDER BY fetched_at LIMIT %s""",
+               ORDER BY card_fetched_at NULLS FIRST, id DESC LIMIT %s""",
             (limit,),
         )
     ]
     for item_id in ids:
         if item := client.get("announcements", item_id):
             db.upsert_announcement(conn, item)
-            conn.commit()
+        conn.execute("UPDATE announcements SET card_fetched_at = now() WHERE id = %s", (item_id,))
+        conn.commit()
     print(f"refreshed {len(ids)}")
     return 0
 

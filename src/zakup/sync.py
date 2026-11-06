@@ -14,63 +14,74 @@ logger = logging.getLogger(__name__)
 class SyncResult(NamedTuple):
     entity: str
     saved: int
-    last_id: int | None
+    last_id: int
     caught_up: bool
 
 
 def sync(conn: psycopg.Connection, client: Client, entity: str, max_pages: int) -> SyncResult:
-    """Догружает записи с id больше сохранённого курсора. Курсор пишется после каждой страницы."""
-    after = db.get_cursor(conn, entity)
+    """Загружает записи новее last_id, идя от самой новой вниз.
+
+    Состояние сохраняется после каждой страницы, так что прерванный проход
+    продолжится с того же места, а не начнётся заново сверху.
+    """
+    state = db.get_state(conn, entity)
+    if state is None:
+        raise RuntimeError(f"{entity}: нет начальной точки, сначала `zakup start-from`")
     upsert = db.UPSERT[entity]
+    last_id, walk_top, after = state
     saved = 0
     for _ in range(max_pages):
         page = client.page(entity, after=after)
-        if not page.items:
-            return SyncResult(entity, saved, after, True)
-        for item in page.items:
+        items = page.items
+        if walk_top is None:
+            if not items or int(items[0]["id"]) <= last_id:
+                return SyncResult(entity, saved, last_id, True)
+            walk_top = int(items[0]["id"])
+        fresh = [item for item in items if int(item["id"]) > last_id]
+        for item in fresh:
             upsert(conn, item)
-        saved += len(page.items)
-        after = page.next_after or max(int(item["id"]) for item in page.items)
-        db.set_cursor(conn, entity, after)
+        saved += len(fresh)
+        done = len(fresh) < len(items) or page.next_after is None
+        if done:
+            # Дошли до уже загруженного: всё до верха прохода есть, следующий — снова сверху.
+            last_id, walk_top, after = walk_top, None, None
+        else:
+            after = page.next_after
+        db.save_state(conn, entity, db.SyncState(last_id, walk_top, after))
         conn.commit()
-        if page.next_after is None:
-            return SyncResult(entity, saved, after, True)
-    return SyncResult(entity, saved, after, False)
+        if done:
+            return SyncResult(entity, saved, last_id, True)
+    return SyncResult(entity, saved, last_id, False)
 
 
 def find_start(
     client: Client, entity: str, reached: Callable[[dict[str, Any]], bool]
 ) -> int | None:
-    """Ищет курсор, с которого начинается нужный период, чтобы не качать всю историю.
+    """Находит id самой старой записи, для которой `reached` истинна.
 
-    `reached(item)` должна быть монотонной по id: ложь для старых записей, истина для
-    новых. Возвращает search_after для первой записи, где она истинна, или None,
-    если такой записи нет.
+    `reached` должна быть монотонной по id: ложь для старых записей, истина для
+    новых. Бинарный поиск по id, а не листание страниц: записей миллионы.
+    Возвращает None, если подходящих записей нет.
     """
 
-    def first_after(after: int) -> dict[str, Any] | None:
-        items = client.page(entity, after=after, limit=1).items
+    def at_most(x: int) -> dict[str, Any] | None:
+        # search_after=x+1 отдаёт первую запись с id <= x.
+        items = client.page(entity, after=x + 1, limit=1).items
         return items[0] if items else None
 
-    first = first_after(0)
-    if first is None:
+    newest = client.page(entity, limit=1).items
+    if not newest or not reached(newest[0]):
         return None
-    if reached(first):
-        return 0
-    # Сначала нащупываем верхнюю границу удвоением, затем бинарный поиск.
-    lo, hi = int(first["id"]) - 1, max(int(first["id"]) * 2, 1024)
-    while (item := first_after(hi)) is not None and not reached(item):
-        lo, hi = hi, hi * 2
-    # Инвариант: после lo идёт старая запись, после hi — новая или ничего.
+    # Инвариант: запись с id <= hi подходит, с id <= lo — нет или её нет вовсе.
+    lo, hi = 0, int(newest[0]["id"])
     while hi - lo > 1:
         mid = (lo + hi) // 2
-        item = first_after(mid)
-        if item is None or reached(item):
-            hi = mid
+        item = at_most(mid)
+        if item is not None and reached(item):
+            hi = int(item["id"])
         else:
             lo = mid
-    item = first_after(hi)
-    return hi if item is not None and reached(item) else None
+    return hi
 
 
 def published_since(since: datetime) -> Callable[[dict[str, Any]], bool]:
@@ -87,3 +98,33 @@ def lot_of_announcement_from(first_announcement_id: int) -> Callable[[dict[str, 
         return trd_buy_id is not None and int(trd_buy_id) >= first_announcement_id
 
     return reached
+
+
+def rescan(
+    conn: psycopg.Connection, client: Client, entity: str, floor_id: int, max_pages: int
+) -> int:
+    """Перечитывает записи с id >= floor_id сверху вниз, по max_pages страниц за вызов.
+
+    Нужен потому, что id выдаётся черновику: объявление, опубликованное через
+    несколько дней, появляется в API ниже уже загруженного, и `sync` его не увидит.
+    Заодно обновляет статусы. Место остановки хранится в sync_state под
+    ключом rescan:<entity>, проход идёт по кругу.
+    """
+    key = f"rescan:{entity}"
+    state = db.get_state(conn, key)
+    after = state.resume_after if state else None
+    upsert = db.UPSERT[entity]
+    saved = 0
+    for _ in range(max_pages):
+        page = client.page(entity, after=after)
+        items = [item for item in page.items if int(item["id"]) >= floor_id]
+        for item in items:
+            upsert(conn, item)
+        saved += len(items)
+        done = len(items) < len(page.items) or page.next_after is None
+        after = None if done else page.next_after
+        db.save_state(conn, key, db.SyncState(floor_id, None, after))
+        conn.commit()
+        if done:
+            break
+    return saved

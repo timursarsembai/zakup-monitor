@@ -26,24 +26,24 @@ class Match(NamedTuple):
 
 def run(conn: psycopg.Connection) -> int:
     """Сопоставляет лоты, пришедшие после прошлого запуска. Возвращает число совпадений."""
-    max_lot = conn.execute("SELECT coalesce(max(id), 0) FROM lots").fetchone()[0]
+    max_seq = conn.execute("SELECT coalesce(max(seen_seq), 0) FROM lots").fetchone()[0]
     found = conn.execute(
         """INSERT INTO matches (subscription_id, lot_id)
            SELECT s.id, l.id
            FROM subscriptions s
-           JOIN lots l ON l.id > s.matched_up_to AND l.id <= %(max_lot)s
+           JOIN lots l ON l.seen_seq > s.matched_up_to AND l.seen_seq <= %(max_seq)s
            WHERE s.active
              AND l.tsv @@ websearch_to_tsquery('russian', s.query)
              AND (s.min_amount IS NULL OR l.amount >= s.min_amount)
              AND (s.max_amount IS NULL OR l.amount <= s.max_amount)
              AND (s.customer_bins IS NULL OR l.customer_bin = ANY (s.customer_bins))
            ON CONFLICT DO NOTHING""",
-        {"max_lot": max_lot},
+        {"max_seq": max_seq},
     ).rowcount
     conn.execute(
         # И для выключенных: после включения они не должны прислать накопившееся.
         "UPDATE subscriptions SET matched_up_to = %s WHERE matched_up_to < %s",
-        (max_lot, max_lot),
+        (max_seq, max_seq),
     )
     conn.commit()
     return found

@@ -1,6 +1,6 @@
 from decimal import Decimal, InvalidOperation
 from importlib.resources import files
-from typing import Any
+from typing import Any, NamedTuple
 
 import psycopg
 from psycopg.types.json import Jsonb
@@ -17,16 +17,27 @@ def migrate(conn: psycopg.Connection) -> None:
     conn.commit()
 
 
-def get_cursor(conn: psycopg.Connection, entity: str) -> int | None:
-    row = conn.execute("SELECT last_id FROM sync_state WHERE entity = %s", (entity,)).fetchone()
-    return row[0] if row else None
+class SyncState(NamedTuple):
+    last_id: int
+    walk_top: int | None
+    resume_after: int | None
 
 
-def set_cursor(conn: psycopg.Connection, entity: str, last_id: int) -> None:
+def get_state(conn: psycopg.Connection, entity: str) -> SyncState | None:
+    row = conn.execute(
+        "SELECT last_id, walk_top, resume_after FROM sync_state WHERE entity = %s", (entity,)
+    ).fetchone()
+    return SyncState(*row) if row else None
+
+
+def save_state(conn: psycopg.Connection, entity: str, state: SyncState) -> None:
     conn.execute(
-        """INSERT INTO sync_state (entity, last_id) VALUES (%s, %s)
-           ON CONFLICT (entity) DO UPDATE SET last_id = excluded.last_id, updated_at = now()""",
-        (entity, last_id),
+        """INSERT INTO sync_state (entity, last_id, walk_top, resume_after)
+           VALUES (%s, %s, %s, %s)
+           ON CONFLICT (entity) DO UPDATE SET last_id = excluded.last_id,
+               walk_top = excluded.walk_top, resume_after = excluded.resume_after,
+               updated_at = now()""",
+        (entity, *state),
     )
 
 
@@ -56,9 +67,12 @@ def upsert_announcement(conn: psycopg.Connection, item: dict[str, Any]) -> None:
            ON CONFLICT (id) DO UPDATE SET
                number_anno = excluded.number_anno, name_ru = excluded.name_ru,
                name_kz = excluded.name_kz, total_sum = excluded.total_sum,
-               count_lots = excluded.count_lots, trade_method_id = excluded.trade_method_id,
-               status_id = excluded.status_id, customer_bin = excluded.customer_bin,
-               customer_name_ru = excluded.customer_name_ru, org_bin = excluded.org_bin,
+               -- В списке этих полей нет, они приходят только из карточки.
+               count_lots = coalesce(excluded.count_lots, announcements.count_lots),
+               customer_bin = coalesce(excluded.customer_bin, announcements.customer_bin),
+               customer_name_ru = coalesce(excluded.customer_name_ru, announcements.customer_name_ru),
+               trade_method_id = excluded.trade_method_id, status_id = excluded.status_id,
+               org_bin = excluded.org_bin,
                org_name_ru = excluded.org_name_ru, publish_date = excluded.publish_date,
                start_date = excluded.start_date, end_date = excluded.end_date,
                last_update_date = excluded.last_update_date, raw = excluded.raw,

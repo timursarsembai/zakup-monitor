@@ -31,7 +31,15 @@ def test_matches_new_lots_by_words_and_amount_once(conn):
     assert matcher.pending(conn) == []
     assert conn.execute(
         "SELECT matched_up_to FROM subscriptions WHERE id = %s", (sub,)
-    ).fetchone()[0] == 4
+    ).fetchone()[0] == 4  # seen_seq: четвёртый вставленный лот
+
+
+def test_late_published_lot_with_low_id_still_matches(conn):
+    _lot(conn, 100, "Бумага", 5000)
+    _subscription(conn, "картридж", matched_up_to=1)
+    _lot(conn, 7, "Картриджи", 5000)
+    assert matcher.run(conn) == 1
+    assert [m.lot_id for m in matcher.pending(conn)] == [7]
 
 
 def test_subscription_skips_lots_before_its_watermark(conn):
