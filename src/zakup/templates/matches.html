@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Совпадения{% endblock %}
+{% block main %}
+<div class="table-wrap"><table>
+  <tr><th>Когда</th><th>Подписка</th><th>Лот</th><th>Заказчик</th><th>Сумма, ₸</th><th>Приём до</th></tr>
+  {% for r in rows %}
+  <tr>
+    <td class="muted">{{ r[0].strftime("%d.%m %H:%M") }}</td>
+    <td>{{ r[1] }}</td>
+    <td>{% if r[2] %}<a href="{{ announcement_url(r[2]) }}" target="_blank" rel="noopener">{{ r[3] or "—" }}</a>{% else %}{{ r[3] or "—" }}{% endif %}</td>
+    <td>{{ r[5] or "" }}</td>
+    <td class="num">{{ r[4] | money }}</td>
+    <td>{{ r[6].strftime("%d.%m.%Y") if r[6] else "" }}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="6" class="muted">Совпадений пока нет.</td></tr>
+  {% endfor %}
+</table></div>
+{% endblock %}

@@ -1,0 +1,72 @@
+x-app-env: &app-env
+  DATABASE_URL: postgresql://zakup:${POSTGRES_PASSWORD}@postgres:5432/zakup
+  # libpq показывает даты по времени Астаны.
+  PGTZ: Asia/Almaty
+  GOSZAKUP_TOKEN: ${GOSZAKUP_TOKEN:-}
+  GOSZAKUP_REQUEST_DELAY: ${GOSZAKUP_REQUEST_DELAY:-0.5}
+  ZAKUP_TELEGRAM_BOT_TOKEN: ${ZAKUP_TELEGRAM_BOT_TOKEN:-}
+  ZAKUP_TELEGRAM_CHAT_ID: ${ZAKUP_TELEGRAM_CHAT_ID:-}
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "3"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: zakup-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: zakup
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: zakup
+    ports:
+      - "127.0.0.1:5437:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    mem_limit: 768m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zakup"]
+      interval: 10s
+      retries: 6
+    logging: *logging
+
+  worker:
+    build: .
+    image: zakup
+    container_name: zakup-worker
+    restart: unless-stopped
+    init: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Новое — каждые 10 минут, перечитывание открытых объявлений — заодно.
+    entrypoint:
+      - sh
+      - -c
+      - zakup migrate; while true; do zakup sync; zakup refresh --limit 300; sleep 600; done
+    environment: *app-env
+    mem_limit: 256m
+    logging: *logging
+
+  web:
+    image: zakup
+    container_name: zakup-web
+    restart: unless-stopped
+    depends_on:
+      worker:
+        condition: service_started
+    entrypoint: ["uvicorn", "zakup.web:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]
+    environment:
+      <<: *app-env
+      ZAKUP_WEB_USER: ${ZAKUP_WEB_USER:-}
+      ZAKUP_WEB_PASSWORD: ${ZAKUP_WEB_PASSWORD:-}
+    ports:
+      - "127.0.0.1:8096:8000"
+    mem_limit: 256m
+    logging: *logging
+
+volumes:
+  pgdata:

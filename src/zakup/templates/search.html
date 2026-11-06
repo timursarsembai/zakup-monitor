@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Поиск лотов{% endblock %}
+{% block main %}
+<form class="filters" method="get">
+  <input name="q" value="{{ q }}" placeholder="ноутбук -аренда" size="30">
+  <input name="min_amount" value="{{ min_amount }}" placeholder="сумма от" size="10">
+  <input name="max_amount" value="{{ max_amount }}" placeholder="до" size="10">
+  <label><input type="checkbox" name="open_only" value="true" {% if open_only %}checked{% endif %}> только открытые</label>
+  <button>Найти</button>
+</form>
+<p class="muted">В базе {{ stats[0] }} объявлений и {{ stats[1] }} лотов{% if stats[2] %}, последняя синхронизация {{ stats[2].strftime("%d.%m.%Y %H:%M") }}{% endif %}.</p>
+<div class="table-wrap"><table>
+  <tr><th>Объявление</th><th>Лот</th><th>Заказчик</th><th>Сумма, ₸</th><th>Приём до</th></tr>
+  {% for r in rows %}
+  <tr>
+    <td>{% if r[1] %}<a href="{{ announcement_url(r[1]) }}" target="_blank" rel="noopener">{{ r[2] or r[1] }}</a>{% endif %}</td>
+    <td>{{ r[4] or "—" }}<div class="muted">№ {{ r[3] or "—" }}</div></td>
+    <td>{{ r[6] or "" }}</td>
+    <td class="num">{{ r[5] | money }}</td>
+    <td>{{ r[7].strftime("%d.%m.%Y") if r[7] else "" }}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="5" class="muted">Ничего не нашлось.</td></tr>
+  {% endfor %}
+</table></div>
+<p>
+  {% if page > 1 %}<a href="?q={{ q|urlencode }}&min_amount={{ min_amount|urlencode }}&max_amount={{ max_amount|urlencode }}&open_only={{ open_only|lower }}&page={{ page - 1 }}">← назад</a>{% endif %}
+  {% if has_next %}<a href="?q={{ q|urlencode }}&min_amount={{ min_amount|urlencode }}&max_amount={{ max_amount|urlencode }}&open_only={{ open_only|lower }}&page={{ page + 1 }}">дальше →</a>{% endif %}
+</p>
+{% endblock %}

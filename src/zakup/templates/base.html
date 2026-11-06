@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Закупки{% endblock %} · zakup</title>
+<style>
+  :root { --bg: #fff; --fg: #1d1d1f; --muted: #6b6b70; --line: #e4e4e7; --accent: #0b6bcb; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #151517; --fg: #ececee; --muted: #9a9aa0; --line: #2c2c30; --accent: #5aa7ff; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.45 system-ui, sans-serif; }
+  header, main { max-width: 1100px; margin: 0 auto; padding: 12px 16px; }
+  header { display: flex; gap: 20px; align-items: baseline; border-bottom: 1px solid var(--line); }
+  header b { font-size: 17px; }
+  a { color: var(--accent); text-decoration: none; }
+  form.filters, form.inline-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 12px 0; }
+  input[type=text], input:not([type]) { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; }
+  button { padding: 6px 12px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; cursor: pointer; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; font-size: 13px; }
+  td.num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .muted { color: var(--muted); font-size: 13px; }
+  .table-wrap { overflow-x: auto; }
+</style>
+</head>
+<body>
+<header>
+  <b>zakup</b>
+  <a href="/">Поиск</a>
+  <a href="/subscriptions">Подписки</a>
+  <a href="/matches">Совпадения</a>
+</header>
+<main>{% block main %}{% endblock %}</main>
+</body>
+</html>
