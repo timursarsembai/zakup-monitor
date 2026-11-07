@@ -43,6 +43,7 @@ ACTIONS = {
     "user_delete": "Удалил пользователя",
     "source_add": "Добавил источник",
     "spec_summary": "Выжимка техспецификации",
+    "supplier_questions": "Вопросы поставщику (ИИ)",
     "source_toggle": "Вкл./выкл. источник",
 }
 

@@ -660,7 +660,7 @@ def _work_summaries(conn: psycopg.Connection, providers: list[str]) -> bool:
 
 def work(database_url: str, providers: list[str], once: bool = False) -> None:
     """Берёт задачи по очереди. Одна за раз: подписку и ключи не нагружаем."""
-    from zakup import db
+    from zakup import db, questions
 
     first = True
     while True:
@@ -674,13 +674,14 @@ def work(database_url: str, providers: list[str], once: bool = False) -> None:
                 (providers, first),
             )
             first = False
-            conn.execute(
-                """UPDATE spec_summaries SET status = 'error', error = 'прервано'
-                   WHERE status = 'running' AND started_at < now() - interval '10 minutes'"""
-            )
+            for table in ("spec_summaries", "supplier_questions"):
+                conn.execute(
+                    f"""UPDATE {table} SET status = 'error', error = 'прервано'
+                        WHERE status = 'running' AND started_at < now() - interval '10 minutes'"""
+                )
             conn.commit()
             # Выжимки короткие (секунды) — их вперёд длинных поисков товаров.
-            while _work_summaries(conn, providers):
+            while _work_summaries(conn, providers) or questions.work_one(conn, providers):
                 pass
             row = conn.execute(
                 """UPDATE lot_research SET status = 'running', started_at = now()

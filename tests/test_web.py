@@ -588,3 +588,35 @@ def test_customer_contacts_on_lot_page(client, conn):
     assert page.count("ул. Абая, 1") == 1
     announcement = client.get("/a/500").text
     assert "mailto:school@mail.kz" in announcement and "Найти официальный сайт" not in announcement
+
+
+def test_supplier_questions_on_demand_and_shared(client, conn, monkeypatch):
+    from zakup import questions, research
+
+    _announcement_with_lots(conn)
+    conn.execute("""INSERT INTO lot_research (lot_id, user_id, provider, region, status, finished_at, result)
+        SELECT 5001, id, 'claude_code', 'г.Алматы', 'done', now(),
+        '{"summary": "s", "items": [{"name": "Бумага Svetocopy", "url": "https://m.kz/p1", "in_region": true,
+          "matches": ["формат А4"], "mismatches": ["плотность не указана"]}]}' FROM users LIMIT 1""")
+    conn.commit()
+    _login(client)
+    page = client.get("/lots/5001").text
+    assert "Что спросить у поставщика" in page and 'data-questions="https://m.kz/p1"' in page
+    assert conn.execute("SELECT count(*) FROM supplier_questions").fetchone()[0] == 0  # сам не запускается
+    assert client.post("/lots/5001/questions", data={"url": "https://evil.kz/x"},
+                       headers=ORIGIN).status_code == 404
+    assert client.post("/lots/5001/questions", data={"url": "https://m.kz/p1"},
+                       headers=ORIGIN).json() == {"status": "queued"}
+    assert 'data-q-status="queued"' in client.get("/lots/5001/questions?url=https://m.kz/p1").text
+    prompts = []
+    monkeypatch.setattr(research, "_claude_code", lambda prompt, model, schema=None, web=True: (
+        prompts.append(prompt) or {"confirm": ["Формат точно А4?"], "clarify": ["Плотность 80 г/м²?"],
+                                   "terms": ["Цена на сайте актуальна?"]}))
+    assert questions.work_one(conn, ["claude_code"]) is True
+    assert "плотность не указана" in prompts[0] and "Бумага Svetocopy" in prompts[0]
+    page = client.get("/lots/5001/questions?url=https://m.kz/p1").text
+    assert "Плотность 80 г/м²?" in page and "Цена на сайте актуальна?" in page
+    # Повторное нажатие (в т.ч. другим пользователем) не запускает ИИ заново.
+    assert client.post("/lots/5001/questions", data={"url": "https://m.kz/p1"},
+                       headers=ORIGIN).json() == {"status": "done"}
+    assert questions.work_one(conn, ["claude_code"]) is False

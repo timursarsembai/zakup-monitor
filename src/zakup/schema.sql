@@ -386,3 +386,17 @@ CREATE TABLE IF NOT EXISTS subjects (
     addresses  jsonb NOT NULL DEFAULT '[]',
     fetched_at timestamptz NOT NULL DEFAULT now()
 );
+-- «Что спросить у поставщика»: чек-лист от ИИ по найденному предложению, общий для всех.
+CREATE TABLE IF NOT EXISTS supplier_questions (
+    lot_id      bigint NOT NULL,
+    url         text NOT NULL,
+    status      text NOT NULL DEFAULT 'queued',
+    provider    text NOT NULL,
+    model       text,
+    result      jsonb,
+    error       text,
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    started_at  timestamptz,
+    finished_at timestamptz,
+    PRIMARY KEY (lot_id, url)
+);

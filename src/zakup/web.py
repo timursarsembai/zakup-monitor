@@ -35,6 +35,7 @@ from zakup import (
     i18n,
     marks,
     matcher,
+    questions,
     research,
     results,
     secrets_box,
@@ -599,6 +600,23 @@ def spec_summary(request: Request, _: User, lot_id: int):
     return templates.TemplateResponse(request, "summary_fragment.html", {"s": summary})
 
 
+@app.post("/lots/{lot_id}/questions", dependencies=[Depends(same_origin)])
+def request_questions(request: Request, user: User, lot_id: int, url: Annotated[str, Form()]):
+    with pool.connection() as conn:
+        status = questions.request(conn, lot_id, url)
+    if status is None:
+        raise HTTPException(404, "Такого предложения нет в результатах подбора")
+    _audit(request, user, "supplier_questions", f"/lots/{lot_id}", url=url[:300])
+    return {"status": status}
+
+
+@app.get("/lots/{lot_id}/questions")
+def questions_fragment(request: Request, _: User, lot_id: int, url: str):
+    with pool.connection() as conn:
+        found = questions.of(conn, lot_id, url)
+    return templates.TemplateResponse(request, "questions_fragment.html", {"q": found})
+
+
 @app.get("/lots/{lot_id}/research")
 def research_fragment(request: Request, _: User, lot_id: int):
     with pool.connection() as conn:
@@ -997,7 +1015,7 @@ async def create_filter_subscription(request: Request, user: User):
     current = Filters.from_form(data)
     if not current.relative():
         raise HTTPException(
-            422, "Подписка работает только без конкретных дат: срок — «через 2 рабочих дня» "
+            422, "Подписка работает только без конкретных дат: срок — «в течение 2 рабочих дней» "
                  "или без ограничения."
         )
     scope = "announcements" if form.get("scope") == "announcements" else "lots"

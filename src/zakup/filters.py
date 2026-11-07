@@ -129,7 +129,7 @@ TODAY = "today"
 
 
 def deadline_by_rule(today: date) -> date:
-    """День окончания приёма «через 2 рабочих дня»: пн → ср, ср → пт, чт → пн,
+    """Последний день срока «в течение 2 рабочих дней»: пн → ср, ср → пт, чт → пн,
     пт, сб и вс → вт. Праздники не учитываются."""
     day, left = today, 2
     while left:
@@ -161,7 +161,7 @@ class Filters:
     years: list[int] = field(default_factory=list)
     min_sum: Decimal | None = Decimal(300_000)
     max_sum: Decimal | None = None
-    # Окончание приёма. DEADLINE_RULE — ровно в день по правилу выше (каждый день
+    # Окончание приёма. DEADLINE_RULE — от сегодня по день по правилу выше (каждый день
     # сдвигается сам — для подписок), ГГГГ-ММ-ДД — «по» эту дату, "" — без ограничения.
     deadline: str = DEADLINE_RULE
     end_from: str = TODAY
@@ -287,9 +287,8 @@ class Filters:
               subscription: bool = False) -> tuple[str, dict[str, Any]]:
         """SQL-условие и параметры. scope="lots": алиасы l и a; "announcements": только a.
 
-        subscription=True — для подписок: срок «через 2 рабочих дня» — окном от
-        сегодня до этого дня, а не одним днём. Иначе лот, который пришёл поздно
-        (или подробности подгрузились после полуночи), не попал бы никогда.
+        subscription — прежний параметр, срок «в течение 2 рабочих дней» теперь везде
+        окном от сегодня до дня по правилу.
         """
         lots = scope == "lots"
         clauses = ["l.trd_buy_id = a.id"] if lots else []
@@ -348,14 +347,11 @@ class Filters:
             params["max_sum"] = self.max_sum
         if (deadline := self.deadline_date(now.astimezone(PORTAL_TZ).date())) is not None:
             # «По» включительно: до конца этого дня по времени Астаны. По правилу —
-            # только этот день.
+            # «в течение 2 рабочих дней»: от сегодня до этого дня включительно.
             clauses.append("a.end_date < %(deadline_end)s")
             params["deadline_end"] = datetime.combine(
                 deadline + timedelta(days=1), time.min, PORTAL_TZ
             )
-            if self.deadline == DEADLINE_RULE and not subscription:
-                clauses.append("a.end_date >= %(deadline_start)s")
-                params["deadline_start"] = datetime.combine(deadline, time.min, PORTAL_TZ)
         end_from = (
             now.astimezone(PORTAL_TZ).date().isoformat() if self.end_from == TODAY else self.end_from
         )
@@ -462,7 +458,7 @@ class Filters:
         if self.max_sum is not None:
             parts.append(_("до {sum} ₸", sum=f"{self.max_sum:,.0f}".replace(",", " ")))
         if self.deadline == DEADLINE_RULE:
-            parts.append(_("окончание через 2 рабочих дня"))
+            parts.append(_("окончание в течение 2 рабочих дней"))
         elif self.deadline:
             parts.append(_("окончание по {date}", date=self.deadline))
         for label, start, end in (("окончание", "" if self.end_from == TODAY else self.end_from, ""),

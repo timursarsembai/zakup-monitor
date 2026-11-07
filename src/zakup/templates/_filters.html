@@ -163,7 +163,7 @@
       </div></div>
     <div><label class="fl" for="f-deadline">{{ _("Окончание приема заявок") }}</label>
       <select id="f-deadline" name="deadline_mode">
-        <option value="rule" {% if f.deadline == rule %}selected{% endif %}>{{ _("через 2 рабочих дня —") }} {{ rule_date.strftime("%d.%m") }}, {{ _(["пн", "вт", "ср", "чт", "пт", "сб", "вс"][rule_date.weekday()]) }}</option>
+        <option value="rule" {% if f.deadline == rule %}selected{% endif %}>{{ _("в течение 2 рабочих дней — по") }} {{ rule_date.strftime("%d.%m") }}, {{ _(["пн", "вт", "ср", "чт", "пт", "сб", "вс"][rule_date.weekday()]) }}</option>
         <option value="date" {% if f.deadline and f.deadline != rule %}selected{% endif %}>{{ _("по дате (поле «по»)") }}</option>
         <option value="" {% if not f.deadline %}selected{% endif %}>{{ _("без ограничения") }}</option>
       </select></div>
@@ -216,7 +216,7 @@
     <button formmethod="post" formaction="/subscriptions/filter" class="primary">{{ _("Подписаться на этот поиск") }}</button>
     <span class="muted">{{ _("Новые") }} {{ _("лоты") if lots else _("объявления") }} {{ _("по этим условиям придут в Telegram. Подписок может быть несколько —") }} <a href="/subscriptions">{{ _("мои подписки") }}</a>.</span>
     {% else %}
-    <span class="muted">{{ _("Подписаться можно, когда в фильтре нет конкретных дат: окончание «через 2 рабочих дня» или без ограничения — тогда условия сами сдвигаются каждый день.") }}</span>
+    <span class="muted">{{ _("Подписаться можно, когда в фильтре нет конкретных дат: окончание «в течение 2 рабочих дней» или без ограничения — тогда условия сами сдвигаются каждый день.") }}</span>
     {% endif %}
   </aside>
   </div>

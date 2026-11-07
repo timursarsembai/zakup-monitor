@@ -103,7 +103,7 @@ def test_where_applies_every_default_per_lot(conn):
     _announcement(conn, 5, kato=("196855100",))      # Алматинская область
     _announcement(conn, 6, total=299999)
     _announcement(conn, 7, ends_in_days=4)           # после вторника
-    _announcement(conn, 12, ends_in_days=2)          # понедельник: раньше дня по правилу
+    _announcement(conn, 12, ends_in_days=2)          # понедельник: в пределах 2 рабочих дней
     _announcement(conn, 8, ends_in_days=-1)          # уже закончилось
     _announcement(conn, 9, prepayment=0)
     # Объявление на 1 млн, но лоты мелкие или в другом регионе — подходит только один.
@@ -112,12 +112,12 @@ def test_where_applies_every_default_per_lot(conn):
         {"id": 112, "amount": 400_000, "prepayment": 30, "kato": ["711410000"], "name": "Астана"},
         {"id": 113, "amount": 500_000, "prepayment": 0, "kato": ["191010000"], "name": "годится"},
     ])
-    assert _lot_ids(conn, Filters()) == [10, 50]  # по умолчанию аванс от 30%
-    assert _lot_ids(conn, Filters(advance_min=0)) == [10, 50, 90, 113]
-    assert _lot_ids(conn, Filters(advance_min=0, advance_only=True)) == [10, 50]
+    assert _lot_ids(conn, Filters()) == [10, 50, 120]  # по умолчанию аванс от 30%
+    assert _lot_ids(conn, Filters(advance_min=0)) == [10, 50, 90, 113, 120]
+    assert _lot_ids(conn, Filters(advance_min=0, advance_only=True)) == [10, 50, 120]
     assert _lot_ids(conn, Filters(advance_min=35)) == []
     assert _lot_ids(conn, Filters(advance_min=0, advance_max=0)) == [90, 113]
-    assert _lot_ids(conn, Filters(advance_min=0, q="Лот или годится")) == [10, 50, 90, 113]
+    assert _lot_ids(conn, Filters(advance_min=0, q="Лот или годится")) == [10, 50, 90, 113, 120]
     assert Filters.from_json({"statuses": [240]}).advance_min == 0
     # «Окончание с» по умолчанию — сегодня, и на подписку это не влияет.
     assert Filters().end_from == "today" and Filters().relative()

@@ -38,6 +38,15 @@
   .research-box h3 { font-size: 15px; margin: 16px 0 6px; }
   .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin 1s linear infinite; vertical-align: -2px; }
   @keyframes spin { to { transform: rotate(360deg); } }
+  table.research .ask-btn { display: block; margin-top: 6px; white-space: normal; text-align: left; font-size: 13px; padding: 5px 9px; }
+  dialog.questions { width: 100vw; height: 100vh; max-width: none; max-height: none; margin: 0; border: 0; padding: 0; background: var(--bg); color: var(--fg); }
+  dialog.questions::backdrop { background: rgba(0, 0, 0, .5); }
+  .q-wrap { max-width: 820px; margin: 0 auto; padding: 16px 16px 40px; }
+  .q-head { display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; position: sticky; top: 0; background: var(--bg); padding: 8px 0; }
+  .q-head h2 { margin: 0; font-size: 18px; }
+  .q-tools { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0 4px; }
+  .q-list { padding-left: 22px; } .q-list li { margin: 8px 0; } .q-list label { display: flex; gap: 8px; align-items: flex-start; cursor: pointer; }
+  .q-list input { margin-top: 4px; flex: none; } .q-list input:checked + span { text-decoration: line-through; color: var(--muted); }
 {% endblock %}
 {% block main %}
 {% if refresh_error %}<p class="notice">{{ refresh_error }}</p>{% endif %}
@@ -103,8 +112,53 @@
 {% endif %}
 
 <p class="muted" style="margin-top:24px">{{ _("Данные с портала обновлены") }} {{ (fetched_at|local).strftime("%d.%m.%Y %H:%M") if fetched_at else "—" }}. <a href="{{ portal_url }}" target="_blank" rel="noopener">{{ _("Объявление на портале ↗") }}</a></p>
+<dialog class="questions" id="questions" aria-labelledby="questions-title">
+  <div class="q-wrap">
+    <div class="q-head"><div><h2 id="questions-title">{{ _("Что спросить у поставщика") }}</h2><div class="muted" data-q-title></div></div>
+      <button type="button" data-q-close aria-label="{{ _("Закрыть") }}">✕</button></div>
+    <div class="q-tools"><button type="button" data-q-copy hidden>📋 {{ _("Скопировать вопросы") }}</button></div>
+    <div data-q-body></div>
+  </div>
+</dialog>
 <script>
 {{ lot_scripts() }}
+  // «Что спросить у поставщика»: чек-лист от ИИ по кнопке; готовый — общий для всех.
+  const qDialog = document.getElementById("questions");
+  const qBody = qDialog.querySelector("[data-q-body]");
+  const qCopy = qDialog.querySelector("[data-q-copy]");
+  let qUrl = null;
+  const qSrc = (url) => "/lots/{{ lot.id }}/questions?url=" + encodeURIComponent(url);
+  const qShow = async (url) => {
+    if (url !== qUrl) return;  // окно закрыли или открыли другое предложение
+    try {
+      const response = await fetch(qSrc(url));
+      if (response.redirected) { qBody.innerHTML = '<p class="muted"><a href="/login">' + {{ _("войдите заново")|tojson }} + '</a></p>'; return; }
+      if (response.ok && url === qUrl) qBody.innerHTML = await response.text();
+    } catch {}
+    const status = qBody.querySelector("[data-q-status]")?.dataset.qStatus;
+    qCopy.hidden = status !== "done";
+    if (status === "queued" || status === "running") setTimeout(() => qShow(url), 3000);
+  };
+  document.addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-questions]");
+    if (!button) return;
+    qUrl = button.dataset.questions;
+    qDialog.querySelector("[data-q-title]").textContent = button.dataset.title || "";
+    qBody.innerHTML = '<p><span class="spinner"></span></p>';
+    qCopy.hidden = true;
+    qDialog.showModal();
+    const body = new URLSearchParams({ url: qUrl });
+    await fetch("/lots/{{ lot.id }}/questions", { method: "POST", body }).catch(() => {});
+    qShow(qUrl);
+  });
+  qDialog.querySelector("[data-q-close]").addEventListener("click", () => { qUrl = null; qDialog.close(); });
+  qDialog.addEventListener("close", () => { qUrl = null; });
+  qCopy.addEventListener("click", async () => {
+    const parts = [...qBody.querySelectorAll("h3, li")].map((el) => el.tagName === "H3" ? "\n" + el.textContent.trim() + ":" : "— " + el.textContent.trim());
+    try { await navigator.clipboard.writeText(parts.join("\n").trim()); qCopy.textContent = {{ _("Скопировано ✓")|tojson }}; }
+    catch { qCopy.textContent = {{ _("Не удалось скопировать")|tojson }}; }
+    setTimeout(() => { qCopy.textContent = "📋 " + {{ _("Скопировать вопросы")|tojson }}; }, 2000);
+  });
 {{ share_script() }}
   // Пока поиск идёт — обновляем результат раз в 10 секунд.
   const research = document.querySelector("[data-research]");
