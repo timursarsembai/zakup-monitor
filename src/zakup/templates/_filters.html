@@ -26,11 +26,11 @@
   .multi-list h4 { margin: 8px 0 2px; font-size: 12px; color: var(--muted); font-weight: 500; }
   .panel-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
   .panel-actions select, .panel-actions input { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; font: inherit; }
-  .primary { background: var(--accent); color: #fff; border-color: transparent; font-weight: 600; }
+  .primary { background: var(--accent); color: var(--on-accent); border-color: transparent; font-weight: 600; }
   .spacer { flex: 1; }
   .scope-tabs { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
   .scope-tabs a { padding: 6px 14px; border-radius: 999px; border: 1px solid var(--line); color: inherit; }
-  .scope-tabs a.on { background: var(--accent); color: #fff; border-color: transparent; font-weight: 600; }
+  .scope-tabs a.on { background: var(--accent); color: var(--on-accent); border-color: transparent; font-weight: 600; }
   /* Два ползунка поверх одной дорожки. Дорожку и закрашенный отрезок рисуем сами,
      по центру по высоте: у браузеров своя дорожка сидит на разной высоте. */
   .range2 { --thumb: 18; position: relative; height: 32px; }
@@ -56,7 +56,7 @@
   }
   .filter-open, .sheet-head { display: none; }
   @media (max-width: 760px) {
-    .filter-open { display: block; width: 100%; text-align: left; margin: 12px 0; padding: 12px 14px; border: 0; border-radius: 10px; background: var(--accent); color: #fff; }
+    .filter-open { display: block; width: 100%; text-align: left; margin: 12px 0; padding: 12px 14px; border: 0; border-radius: 10px; background: var(--accent); color: var(--on-accent); }
     .filter-open .filter-title { display: block; font-size: 17px; font-weight: 600; }
     .filter-open .filter-sum { display: block; margin-top: 2px; font-size: 13px; opacity: .85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .filters-panel { display: none; }
@@ -112,7 +112,7 @@
   <a href="/announcements?{{ query }}" class="{{ '' if lots else 'on' }}">Поиск объявлений</a>
 </nav>
 <button type="button" class="filter-open" data-filter-open><span class="filter-title">⚙ Фильтр и подписка</span>{% if f.describe() %}<span class="filter-sum">{{ f.describe()|truncate(90) }}</span>{% endif %}</button>
-<form method="get" action="/{{ scope }}" class="filters-panel" id="filters">
+<form method="get" action="/{{ scope }}" class="filters-panel" id="filters" aria-label="Фильтр">
   <div class="sheet-head"><b>Фильтр</b><button type="button" data-filter-close aria-label="Закрыть">✕</button></div>
   <input type="hidden" name="applied" value="1">
   <input type="hidden" name="sort" value="{{ f.sort }}">
@@ -226,6 +226,23 @@
   document.querySelector("[data-filter-close]").addEventListener("click", () => {
     sheet.classList.remove("open"); document.body.classList.remove("sheet-open");
   });
+  // Поля подписки живут в той же форме, что и поиск: в обычный поиск их не отправляем,
+  // а Enter в названии подписки — подписывает, а не ищет.
+  const subscribeButton = sheet.querySelector('[formaction="/subscriptions/filter"]');
+  sheet.addEventListener("submit", (event) => {
+    if (event.submitter !== subscribeButton) {
+      for (const field of sheet.querySelectorAll(".subscribe [name]")) field.disabled = true;
+    }
+  });
+  sheet.querySelector('.subscribe [name="name"]')?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") { event.preventDefault(); subscribeButton?.click(); }
+  });
+  // Escape закрывает полноэкранный фильтр на телефоне.
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && sheet.classList.contains("open")) {
+      sheet.classList.remove("open"); document.body.classList.remove("sheet-open");
+    }
+  });
   // Выпадающие списки: клик мимо — закрыть.
   document.addEventListener("click", (event) => {
     for (const d of document.querySelectorAll("details.multi[open]")) if (!d.contains(event.target)) d.open = false;
@@ -273,7 +290,7 @@
 </div>
 <script>
   document.querySelector("[data-sort]").addEventListener("change", (event) => {
-    const url = new URL(location.pathname + "?{{ query }}", location.origin);
+    const url = new URL(location.pathname + "?" + {{ query|tojson }}, location.origin);
     url.searchParams.set("sort", event.target.value);
     {% if hidden %}url.searchParams.set("hidden", "1");{% endif %}
     location.href = url;

@@ -20,8 +20,8 @@
 
 <div class="head">
   <dl class="facts">
-    <dt>Дата публикации</dt><dd>{{ (dt(a.publishDate)|local).strftime("%d.%m.%Y %H:%M") if a.publishDate else "—" }}</dd>
-    <dt>Начало приема заявок</dt><dd>{{ (dt(a.startDate)|local).strftime("%d.%m.%Y %H:%M") if a.startDate else "—" }}</dd>
+    <dt>Дата публикации</dt><dd>{{ a.publishDate | portal_date }}</dd>
+    <dt>Начало приема заявок</dt><dd>{{ a.startDate | portal_date }}</dd>
     <dt>Окончание приема заявок</dt><dd><b>{{ (end|local).strftime("%d.%m.%Y %H:%M") if end else "—" }}</b></dd>
     <dt>Способ закупки</dt><dd>{{ (a.RefTradeMethods or {}).nameRu or "—" }}</dd>
     <dt>Тип закупки</dt><dd>{{ ((a.RefTypeTrade or {}).nameRu or "—")|trim }}</dd>
@@ -67,7 +67,7 @@
 <section data-panel="docs" hidden>
   <ul class="files">
     {% for f in documents %}
-    <li><a href="{{ f.filePath }}" target="_blank" rel="noopener">{{ f.nameRu or f.originalName }}</a>{% if f.originalName %} <span class="muted">{{ f.originalName }}</span>{% endif %}</li>
+    <li><a href="{{ f.filePath | safe_url }}" target="_blank" rel="noopener">{{ f.nameRu or f.originalName }}</a>{% if f.originalName %} <span class="muted">{{ f.originalName }}</span>{% endif %}</li>
     {% else %}<li class="muted">Файлов нет.</li>{% endfor %}
   </ul>
 </section>
@@ -75,7 +75,7 @@
 <section data-panel="protocols" hidden>
   <ul class="files">
     {% for f in protocols %}
-    <li><a href="{{ f.filePath }}" target="_blank" rel="noopener">{{ f.nameRu or f.originalName }}</a></li>
+    <li><a href="{{ f.filePath | safe_url }}" target="_blank" rel="noopener">{{ f.nameRu or f.originalName }}</a></li>
     {% else %}<li class="muted">Протоколов пока нет: они появляются после окончания приема заявок.</li>{% endfor %}
   </ul>
 </section>
@@ -96,11 +96,11 @@
     <tr><th>Договор</th><th>Поставщик</th><th>Лоты</th><th>Сумма, ₸</th><th>Подписан</th><th>Статус</th></tr>
     {% for c in contracts %}
     <tr>
-      <td>{{ c.contractNumberSys }}{% if c.File %}{% for f in c.File if f.filePath %}<div><a href="{{ f.filePath }}" target="_blank" rel="noopener">{{ f.nameRu or "файл" }}</a></div>{% endfor %}{% endif %}</td>
+      <td>{{ c.contractNumberSys }}{% if c.File %}{% for f in c.File if f.filePath %}<div><a href="{{ f.filePath | safe_url }}" target="_blank" rel="noopener">{{ f.nameRu or "файл" }}</a></div>{% endfor %}{% endif %}</td>
       <td>{{ (c.Supplier or {}).nameRu or "" }}<div class="muted">{{ c.supplierBiin }}</div></td>
       <td class="muted">{% for u in c.ContractUnits or [] %}{{ lot_numbers.get(u.lotId) or u.lotId }}{% if not loop.last %}, {% endif %}{% endfor %}</td>
       <td class="num">{{ c.contractSum | money }}</td>
-      <td>{{ (dt(c.signDate)|local).strftime("%d.%m.%Y") if c.signDate else "—" }}</td>
+      <td>{{ c.signDate | portal_date("%d.%m.%Y") }}</td>
       <td>{{ (c.RefContractStatus or {}).nameRu or "" }}</td>
     </tr>
     {% endfor %}
@@ -113,8 +113,8 @@
 <section data-panel="appeals" hidden>
   <ul class="files">
     {% for ap in appeals %}
-    <li>Обращение № {{ ap.numberAppeal or ap.id }}{% if ap.dateApply %} от {{ (dt(ap.dateApply)|local).strftime("%d.%m.%Y") }}{% endif %}{% if ap.decisionDate %}, решение {{ (dt(ap.decisionDate)|local).strftime("%d.%m.%Y") }}{% endif %}
-      {% for f in ap.Files or [] if f.filePath %}<a href="{{ f.filePath }}" target="_blank" rel="noopener">файл {{ loop.index }}</a> {% endfor %}</li>
+    <li>Обращение № {{ ap.numberAppeal or ap.id }}{% if ap.dateApply %} от {{ ap.dateApply | portal_date("%d.%m.%Y") }}{% endif %}{% if ap.decisionDate %}, решение {{ ap.decisionDate | portal_date("%d.%m.%Y") }}{% endif %}
+      {% for f in ap.Files or [] if f.filePath %}<a href="{{ f.filePath | safe_url }}" target="_blank" rel="noopener">файл {{ loop.index }}</a> {% endfor %}</li>
     {% else %}<li class="muted">Апелляций нет.</li>{% endfor %}
   </ul>
 </section>

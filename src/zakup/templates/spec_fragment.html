@@ -1,2 +1,2 @@
 {% if text %}<div class="spec-text">{{ text }}</div>{% else %}<p class="muted">{{ error }} <button type="button" data-spec-retry>Обновить</button></p>{% endif %}
-{% if url %}<p><a href="{{ url }}" target="_blank" rel="noopener">Скачать PDF спецификации</a></p>{% endif %}
+{% if url %}<p><a href="{{ url | safe_url }}" target="_blank" rel="noopener">Скачать PDF спецификации</a></p>{% endif %}

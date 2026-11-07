@@ -60,7 +60,12 @@ def test_group_links_by_code_and_moves_to_supergroup(conn, monkeypatch):
     bot.handle(conn, {"chat": {"id": -100, "type": "group"}, "migrate_to_chat_id": -1009})
     assert conn.execute("SELECT chat_id FROM user_groups").fetchone()[0] == "-1009"
     assert conn.execute("SELECT chat_id FROM subscriptions").fetchone()[0] == "-1009"
-    stop = {"chat": {"id": -1009, "type": "supergroup"}, "text": "/stop@zakup_bot"}
+    stop = {"chat": {"id": -1009, "type": "supergroup"}, "text": "/stop@zakup_bot", "from": {"id": 7}}
+    statuses = {7: "member"}
+    monkeypatch.setattr(bot.telegram, "call", lambda method, **kw: {"status": statuses[kw["user_id"]]})
+    assert "только администратор" in bot.handle(conn, stop)
+    assert conn.execute("SELECT count(*) FROM user_groups").fetchone()[0] == 1
+    statuses[7] = "administrator"
     assert "отключена" in bot.handle(conn, stop)
     assert conn.execute("SELECT count(*) FROM user_groups").fetchone()[0] == 0
     assert conn.execute("SELECT chat_id FROM subscriptions").fetchone()[0] is None

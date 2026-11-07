@@ -6,7 +6,7 @@
   <p><span class="spinner"></span> {% if job.status == "queued" %}В очереди{% if job.ahead %}: впереди {{ job.ahead }}{% endif %}…{% else %}Ищу товары по спецификации — обычно 2–5 минут…{% endif %}
     <span class="muted">· регион: {{ job.region }}{% if job.whole_kz %} и весь Казахстан{% endif %}</span></p>
 {% elif job.status == "error" %}
-  <p class="notice">Поиск не удался: {{ job.error }}</p>
+  <p class="notice">Поиск не удался{% if is_admin %}: {{ job.error }}{% else %}. Попробуйте ещё раз позже.{% endif %}</p>
 {% else %}
   {% set r = job.result %}
   {% set lot_price = lot_info.price if lot_info else none %}
@@ -21,8 +21,8 @@
     {% for item in group %}
     {% set margin = (lot_price - item.unit_price) if (lot_price and item.unit_price) else none %}
     <tr>
-      <td class="photo">{% if item.image %}<a href="{{ item.url }}" target="_blank" rel="noopener noreferrer"><img src="{{ item.image }}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()"></a>{% endif %}</td>
-      <td><a href="{{ item.url }}" target="_blank" rel="noopener noreferrer">{{ item.name }}</a>
+      <td class="photo">{% if item.image %}<a href="{{ item.url | safe_url }}" target="_blank" rel="noopener noreferrer"><img src="{{ item.image | safe_url }}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()"></a>{% endif %}</td>
+      <td><a href="{{ item.url | safe_url }}" target="_blank" rel="noopener noreferrer">{{ item.name }}</a>
         <div class="muted">{{ item.seller }}{% if item.city %} · {{ item.city }}{% endif %}</div>
         <div class="muted url">{{ item.url | truncate(70) }}</div>
         {% if item.note %}<div class="muted">{{ item.note }}</div>{% endif %}</td>
@@ -38,6 +38,6 @@
   {% endif %}
   {% endfor %}
   {% if not r["items"] %}<p class="muted">Подходящих предложений не нашлось.</p>{% endif %}
-  <p class="muted">Найдено {{ (job.finished_at|local).strftime("%d.%m %H:%M") }} · {{ job.email }} · {{ job.provider }}{% if job.model %} ({{ job.model }}){% endif %}. Цены и наличие проверяйте у продавца: это предварительная оценка. Маржа — от цены за единицу в лоте (максимальной), до налогов и доставки.</p>
+  <p class="muted">Найдено {{ (job.finished_at|local).strftime("%d.%m %H:%M") }}{% if is_admin %} · {{ job.email }}{% endif %} · {{ job.provider }}{% if job.model %} ({{ job.model }}){% endif %}. Цены и наличие проверяйте у продавца: это предварительная оценка. Маржа — от цены за единицу в лоте (максимальной), до налогов и доставки.</p>
 {% endif %}
 </div>

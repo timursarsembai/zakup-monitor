@@ -98,7 +98,9 @@ services:
       - --host=0.0.0.0
       - --port=8000
       - --proxy-headers
-      - --forwarded-allow-ips=*
+      # Доверяем X-Forwarded-For только от прокси (сеть NPM): иначе клиент сам
+      # подставляет «свой» IP и обходит ограничение попыток входа.
+      - --forwarded-allow-ips=172.18.0.0/16
     environment: *app-env
     ports:
       - "127.0.0.1:8096:8000"

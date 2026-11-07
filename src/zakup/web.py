@@ -75,6 +75,19 @@ templates.env.globals["mark_statuses"] = marks.STATUSES
 templates.env.globals["site_url"] = SITE_URL
 
 
+def _portal_date(value, fmt: str = "%d.%m.%Y %H:%M") -> str:
+    """Дата из ответа портала → местное время; неразборчивая — прочерк, а не ошибка."""
+    parsed = parse_date(value)
+    return parsed.astimezone(PORTAL_TZ).strftime(fmt) if parsed else "—"
+
+
+templates.env.filters["portal_date"] = _portal_date
+# Ссылки из данных портала и ответов модели — только http(s), иначе пусто.
+templates.env.filters["safe_url"] = (
+    lambda url: url if isinstance(url, str) and url.startswith(("https://", "http://")) else ""
+)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     pool.open()
@@ -84,6 +97,18 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 app.mount("/static", StaticFiles(directory=str(files("zakup").joinpath("static"))), name="static")
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    # Сайт не встраивается в чужие страницы (кнопки удаления и т.п. — в один клик).
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "same-origin")
+    if request.url.path.startswith("/settings"):
+        # Здесь показываются выданные пароли: не кэшировать.
+        response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 class LoginRequired(Exception):
@@ -412,12 +437,14 @@ def lot_page(request: Request, user: User, lot_id: int):
     context.update(lot=lot, others=[other for other in context["lots"] if other["id"] != lot_id],
                    here=request.url.path, job=job, lot_info=lot_info,
                    region=research.default_region(lot_info) if lot_info else "",
-                   provider_name=research.PROVIDERS.get(provider, provider))
+                   provider_name=research.PROVIDERS.get(provider, provider),
+                   is_admin=request.state.role == "admin")
     return templates.TemplateResponse(request, "lot.html", context)
 
 
 @app.post("/lots/{lot_id}/research", dependencies=[Depends(same_origin)])
 def start_research(
+    request: Request,
     user: User,
     lot_id: int,
     region: Annotated[str, Form()] = "",
@@ -426,7 +453,11 @@ def start_research(
     with pool.connection() as conn:
         if research.lot_context(conn, lot_id) is None:
             raise HTTPException(404, "Нет данных лота: откройте страницу объявления")
-        research.enqueue(conn, user, lot_id, region.strip() or "Казахстан", whole_kz == "1")
+        try:
+            research.enqueue(conn, user, lot_id, region, whole_kz == "1",
+                             is_admin=request.state.role == "admin")
+        except research.QuotaExceeded as error:
+            raise HTTPException(429, f"Лимит поиска товаров: {error}") from None
     return RedirectResponse(f"/lots/{lot_id}#research", status_code=303)
 
 
@@ -436,7 +467,8 @@ def research_fragment(request: Request, _: User, lot_id: int):
         job = research.latest(conn, lot_id)
         lot_info = research.lot_context(conn, lot_id)
     return templates.TemplateResponse(
-        request, "research_fragment.html", {"job": job, "lot_info": lot_info}
+        request, "research_fragment.html",
+        {"job": job, "lot_info": lot_info, "is_admin": request.state.role == "admin"},
     )
 
 
@@ -620,7 +652,8 @@ def my_lots(request: Request, user: User):
         sections = {status: items for status, items in sections.items() if status in chosen}
     return templates.TemplateResponse(
         request, "my.html",
-        {"sections": sections, "counts": counts, "chosen": chosen, "now": datetime.now(UTC)},
+        {"sections": sections, "counts": counts, "chosen": chosen, "now": datetime.now(UTC),
+         "here": request.url.path + (f"?{request.url.query}" if request.url.query else "")},
     )
 
 

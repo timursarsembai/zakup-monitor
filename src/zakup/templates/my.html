@@ -55,10 +55,10 @@
         <b>{{ r[7] | money }} ₸</b>
         {% if r[8] %}<div><span class="badge {% if r[8] >= 30 %}hot{% endif %}">аванс {{ '%g'|format(r[8]) }}%</span></div>{% endif %}
         <div class="{{ 'urgent' if urgent else 'muted' }}">{% if r[10] %}до {{ (r[10]|local).strftime("%d.%m %H:%M") }}{% if open %} · {{ time_left(r[10]) }}{% else %} · приём окончен{% endif %}{% endif %}</div>
-        <div style="margin-top:6px">{{ mark_control(r[3], mark, "/my") }}</div>
+        <div style="margin-top:6px">{{ mark_control(r[3], mark, here) }}</div>
       </div>
     </div>
-    {{ note_form(r[3], mark, "/my") }}
+    {{ note_form(r[3], mark, here) }}
   </div>
   {% endfor %}
 {% endset %}

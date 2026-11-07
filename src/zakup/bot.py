@@ -72,7 +72,18 @@ def unlink_group(conn: psycopg.Connection, chat_id: str) -> None:
     conn.execute("DELETE FROM telegram_groups WHERE chat_id = %s", (chat_id,))
 
 
-def _handle_group(conn: psycopg.Connection, chat: dict, command: str, argument: str) -> str | None:
+def _is_chat_admin(chat_id: str, user_id: int | None) -> bool:
+    if user_id is None:
+        return False
+    try:
+        member = telegram.call("getChatMember", chat_id=chat_id, user_id=user_id)
+    except telegram.TelegramError:
+        return False
+    return member.get("status") in ("creator", "administrator")
+
+
+def _handle_group(conn: psycopg.Connection, chat: dict, command: str, argument: str,
+                  sender: int | None = None) -> str | None:
     chat_id = str(chat["id"])
     if command == "/start" and argument:
         user_id = _take_code(conn, argument, "group")
@@ -95,6 +106,9 @@ def _handle_group(conn: psycopg.Connection, chat: dict, command: str, argument: 
             f"группу в подписке на сайте: {SITE_URL}/subscriptions"
         )
     if command == "/stop":
+        # Отключить группу может только её администратор, а не любой участник.
+        if not _is_chat_admin(chat_id, sender):
+            return "Отключить уведомления может только администратор группы."
         unlink_group(conn, chat_id)
         conn.commit()
         return "Группа отключена: уведомления сюда больше не придут."
@@ -118,7 +132,7 @@ def handle(conn: psycopg.Connection, message: dict) -> str | None:
             return None
         if addressee and addressee.lower() != (telegram.bot_username() or "").lower():
             return None
-        return _handle_group(conn, chat, command, argument)
+        return _handle_group(conn, chat, command, argument, (message.get("from") or {}).get("id"))
     if chat.get("type") != "private":
         return None
     chat_id = str(chat["id"])

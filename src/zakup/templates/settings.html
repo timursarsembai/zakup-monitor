@@ -1,5 +1,11 @@
 {% extends "base.html" %}
-{% block title %}Настройки{% endblock %}
+{% block title %}Настройки<script>
+  // Текст подтверждения — из data-атрибута: логин не попадает в код JS.
+  for (const form of document.querySelectorAll("form[data-confirm]")) {
+    form.addEventListener("submit", (event) => { if (!confirm(form.dataset.confirm)) event.preventDefault(); });
+  }
+</script>
+{% endblock %}
 {% block style %}
   .panel { max-width: 560px; border: 1px solid var(--line); border-radius: 12px; padding: 20px; margin-top: 12px; }
   .panel h2 { font-size: 17px; margin: 0 0 6px; }
@@ -9,7 +15,7 @@
   .dot.on { background: #1e9e5a; }
   .actions { display: flex; flex-wrap: wrap; gap: 8px; }
   .actions form { margin: 0; }
-  .primary { background: var(--accent); color: #fff; border-color: transparent; font-weight: 600; }
+  .primary { background: var(--accent); color: var(--on-accent); border-color: transparent; font-weight: 600; }
   .note { margin-top: 14px; font-size: 14px; }
   .flash { max-width: 760px; padding: 12px 16px; border-radius: 10px; background: color-mix(in srgb, #1e9e5a 18%, transparent); font-weight: 500; user-select: all; }
   .flash.bad { background: color-mix(in srgb, #c0392b 20%, transparent); user-select: auto; }
@@ -17,6 +23,12 @@
   form.pw { display: grid; gap: 8px; max-width: 360px; }
   form.pw input, .actions input[name=login] { padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; font: inherit; }
   .actions input { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; font: inherit; }
+<script>
+  // Текст подтверждения — из data-атрибута: логин не попадает в код JS.
+  for (const form of document.querySelectorAll("form[data-confirm]")) {
+    form.addEventListener("submit", (event) => { if (!confirm(form.dataset.confirm)) event.preventDefault(); });
+  }
+</script>
 {% endblock %}
 {% block main %}
 {% if notice %}<p class="flash">{{ notice }}</p>{% endif %}
@@ -92,7 +104,7 @@
       <td>{{ "администратор" if u[2] == "admin" else "пользователь" }}</td>
       <td>{{ "подключён" if u[3] else "—" }}</td>
       <td class="muted">{{ (u[4]|local).strftime("%d.%m.%Y %H:%M") if u[4] else "—" }}</td>
-      <td>{% if u[0] != me %}<form method="post" action="/settings/users/{{ u[0] }}/reset" onsubmit="return confirm('Сбросить пароль {{ u[1] }}? Старый перестанет работать.')"><button>Сбросить пароль</button></form>{% endif %}</td>
+      <td>{% if u[0] != me %}<form method="post" action="/settings/users/{{ u[0] }}/reset" data-confirm="Сбросить пароль {{ u[1] }}? Старый перестанет работать."><button>Сбросить пароль</button></form>{% endif %}</td>
     </tr>
     {% endfor %}
   </table></div>
@@ -113,4 +125,10 @@
   </form>
   <p class="note muted">После смены пароля нужно войти заново — на всех устройствах.</p>
 </section>
+<script>
+  // Текст подтверждения — из data-атрибута: логин не попадает в код JS.
+  for (const form of document.querySelectorAll("form[data-confirm]")) {
+    form.addEventListener("submit", (event) => { if (!confirm(form.dataset.confirm)) event.preventDefault(); });
+  }
+</script>
 {% endblock %}

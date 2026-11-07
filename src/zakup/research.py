@@ -162,8 +162,23 @@ def build_prompt(context: dict[str, Any], region: str, whole_kz: bool) -> str:
     )
 
 
+# Пользователь (не администратор) за сутки запускает не больше стольких поисков:
+# каждый расходует подписку или ключ администратора.
+USER_DAILY_LIMIT = 20
+
+
+class QuotaExceeded(Exception):
+    pass
+
+
+def clean_region(region: str) -> str:
+    """Регион — короткий текст: буквы, цифры, пробелы и знаки препинания, без переносов."""
+    allowed = "".join(c for c in region if c.isalnum() or c in " .,-()«»\"'/")
+    return " ".join(allowed.split())[:120] or "Казахстан"
+
+
 def enqueue(conn: psycopg.Connection, user_id: int, lot_id: int, region: str,
-            whole_kz: bool) -> int:
+            whole_kz: bool, is_admin: bool = False) -> int:
     # Кто ищет — решает администратор в своих настройках, для всех пользователей.
     provider, model = conn.execute(
         "SELECT ai_provider, ai_model FROM users WHERE role = 'admin' ORDER BY id LIMIT 1"
@@ -175,10 +190,19 @@ def enqueue(conn: psycopg.Connection, user_id: int, lot_id: int, region: str,
     ).fetchone()
     if active:
         return active[0]
+    if not is_admin:
+        used = conn.execute(
+            """SELECT count(*) FROM lot_research
+               WHERE user_id = %s AND created_at > now() - interval '1 day'""",
+            (user_id,),
+        ).fetchone()[0]
+        if used >= USER_DAILY_LIMIT:
+            raise QuotaExceeded(f"не больше {USER_DAILY_LIMIT} поисков в сутки")
     job = conn.execute(
         """INSERT INTO lot_research (lot_id, user_id, provider, model, region, whole_kz)
            VALUES (%s, %s, %s, %s, %s, %s) RETURNING id""",
-        (lot_id, user_id, provider, model or DEFAULT_MODELS[provider], region[:200], whole_kz),
+        (lot_id, user_id, provider, model or DEFAULT_MODELS[provider], clean_region(region),
+         whole_kz),
     ).fetchone()[0]
     conn.commit()
     return job
@@ -208,6 +232,15 @@ class ResearchError(Exception):
     pass
 
 
+# Текст спецификации и страниц чужой: не даём ему увести WebFetch на сам сервер.
+_LOCAL_DENY = {"permissions": {"deny": [
+    f"WebFetch(domain:{host})" for host in (
+        "localhost", "127.0.0.1", "0.0.0.0", "[::1]", "161.97.156.44",
+        "sarsembai.com", "*.sarsembai.com", "host.docker.internal",
+    )
+]}}
+
+
 def _claude_code(prompt: str, model: str) -> dict[str, Any]:
     binary = shutil.which("claude") or os.path.expanduser("~/.local/bin/claude")
     with tempfile.TemporaryDirectory(prefix="zakup-research-") as workdir:
@@ -217,6 +250,7 @@ def _claude_code(prompt: str, model: str) -> dict[str, Any]:
             "--allowedTools", "WebSearch WebFetch",
             "--disallowedTools", "Bash Edit Write Read Glob Grep Task NotebookEdit",
             "--strict-mcp-config", "--setting-sources", "", "--no-session-persistence",
+            "--settings", json.dumps(_LOCAL_DENY),
             "--max-turns", "60", "--json-schema", json.dumps(RESULT_SCHEMA),
         ]
         try:
@@ -376,6 +410,7 @@ def work(database_url: str, providers: list[str], once: bool = False) -> None:
                     result, error = run_job(conn, job), None
                 except (ResearchError, httpx.HTTPError) as exc:
                     conn.rollback()
+                    logger.warning("research %s failed: %s", job["id"], exc)
                     result, error = None, str(exc)[:500]
                 conn.execute(
                     """UPDATE lot_research SET status = %s, result = %s, error = %s,

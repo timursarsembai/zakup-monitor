@@ -22,13 +22,11 @@
   })();
 </script>
 <style>
-  :root { --bg: #fff; --fg: #1d1d1f; --muted: #6b6b70; --line: #e4e4e7; --accent: #0b6bcb; --ok: #137a43; --bad: #c0392b; color-scheme: light; }
-  :root[data-theme=dark] { --bg: #151517; --fg: #ececee; --muted: #9a9aa0; --line: #2c2c30; --accent: #5aa7ff; --ok: #6fdc9f; --bad: #ff7b6b; color-scheme: dark; }
-  :root[data-contrast=high] { --bg: #fff; --fg: #000; --muted: #1d1d1f; --line: #000; --accent: #0033cc; --ok: #005a1e; --bad: #a00000; }
-  :root[data-contrast=high][data-theme=dark] { --bg: #000; --fg: #fff; --muted: #f2f2f2; --line: #fff; --accent: #ffd400; --ok: #7dffb0; --bad: #ff8a80; }
+  :root { --bg: #fff; --fg: #1d1d1f; --muted: #6b6b70; --line: #e4e4e7; --accent: #0b6bcb; --ok: #137a43; --bad: #c0392b; --on-accent: #fff; color-scheme: light; }
+  :root[data-theme=dark] { --bg: #151517; --fg: #ececee; --muted: #9a9aa0; --line: #2c2c30; --accent: #5aa7ff; --ok: #6fdc9f; --bad: #ff7b6b; --on-accent: #0b1a2e; color-scheme: dark; }
+  :root[data-contrast=high] { --bg: #fff; --fg: #000; --muted: #1d1d1f; --line: #000; --accent: #0033cc; --ok: #005a1e; --bad: #a00000; --on-accent: #fff; }
+  :root[data-contrast=high][data-theme=dark] { --bg: #000; --fg: #fff; --muted: #f2f2f2; --line: #fff; --accent: #ffd400; --ok: #7dffb0; --bad: #ff8a80; --on-accent: #000; }
   :root[data-contrast=high] a { text-decoration: underline; }
-  :root[data-contrast=high] .primary, :root[data-contrast=high] .filter-open,
-  :root[data-contrast=high] .scope-tabs a.on { color: var(--bg) !important; }
   :root[data-contrast=high] .main-nav a, :root[data-contrast=high] .icon-button { text-decoration: none; }
   :root[data-contrast=high] :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
   * { box-sizing: border-box; }
@@ -61,7 +59,8 @@
   td.num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
   .muted { color: var(--muted); font-size: 13px; }
   .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-  form.logout { margin-left: auto; display: flex; gap: 10px; align-items: center; }
+  .logout { margin-left: auto; display: flex; gap: 10px; align-items: center; }
+  .logout form { margin: 0; }
   @media (max-width: 760px) {
     header, main { padding: 10px 12px; }
     header { gap: 8px 12px; }
@@ -91,7 +90,7 @@
     <a href="/subscriptions" class="{{ 'on' if path == '/subscriptions' }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg><span>Подписки</span></a>
     <a href="/matches" class="{{ 'on' if path == '/matches' }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg><span>Совпадения</span></a>
   </nav>
-  <form class="logout" method="post" action="/logout">
+  <div class="logout">
     <span class="muted who">{{ request.state.email }}</span>
     <span class="a11y">
       <button type="button" class="a11y-toggle" data-a11y-toggle title="Режим для слабовидящих" aria-label="Режим для слабовидящих" aria-expanded="false">Aa</button>
@@ -108,8 +107,8 @@
     </span>
     <button type="button" class="theme-toggle" data-theme-toggle title="Светлая / тёмная тема" aria-label="Переключить тему"></button>
     <a href="/settings" class="icon-button {{ 'on' if path == '/settings' }}" title="Настройки" aria-label="Настройки"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></a>
-    <button>Выйти</button>
-  </form>
+    <form method="post" action="/logout"><button>Выйти</button></form>
+  </div>
 </header>
 {% endblock %}
 <main{% block main_class %}{% endblock %}>{% block main %}{% endblock %}</main>

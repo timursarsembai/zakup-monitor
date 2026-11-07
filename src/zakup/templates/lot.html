@@ -14,7 +14,7 @@
   .research-box { border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin-top: 16px; }
   .research-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
   .research-form input[name=region] { flex: 1; min-width: 220px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); font: inherit; }
-  .research-form .primary { background: var(--accent); color: #fff; border-color: transparent; font-weight: 600; }
+  .research-form .primary { background: var(--accent); color: var(--on-accent); border-color: transparent; font-weight: 600; }
   table.research td.photo { width: 76px; }
   table.research img { width: 72px; height: 72px; object-fit: contain; border-radius: 6px; background: #fff; }
   table.research .url { word-break: break-all; }
@@ -97,6 +97,11 @@
     if (status !== "queued" && status !== "running") return;
     try {
       const response = await fetch(research.dataset.src);
+      // Сессия истекла — fetch молча пришёл на страницу входа: не вставляем её сюда.
+      if (response.redirected) {
+        research.innerHTML = '<p class="muted">Сессия истекла — <a href="/login">войдите заново</a>.</p>';
+        return;
+      }
       if (response.ok) research.innerHTML = await response.text();
     } catch {}
     const now = research.querySelector("[data-research-status]")?.dataset.researchStatus;
