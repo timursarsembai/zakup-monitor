@@ -2,7 +2,7 @@ import os
 
 from cryptography.fernet import Fernet
 
-from zakup import auth, db, details, research, secrets_box
+from zakup import auth, db, details, research, secrets_box, spec
 
 
 def _lot(conn):
@@ -57,3 +57,14 @@ def test_api_keys_are_encrypted(conn, monkeypatch):
     assert b"sk-test" not in bytes(stored)
     assert secrets_box.user_key(conn, user, "openai") == "sk-test"
     assert secrets_box.saved_providers(conn, user) == {"openai"}
+
+
+def test_prefetch_stores_both_languages(conn, monkeypatch):
+    _lot(conn)
+    conn.execute("DELETE FROM lot_specs")
+    conn.execute("UPDATE lots SET spec_url = 'https://ows.goszakup.gov.kz/download/1'")
+    monkeypatch.setattr(spec, "download", lambda url: b"pdf")
+    monkeypatch.setattr(spec, "extract_both", lambda pdf: ("Стол дубовый", "Емен үстел"))
+    assert spec.prefetch(conn, 10) == 1
+    assert conn.execute("SELECT text, text_kk FROM lot_specs").fetchone() == ("Стол дубовый", "Емен үстел")
+    assert spec.prefetch(conn, 10) == 0

@@ -75,9 +75,11 @@
     {% if r %}<p style="margin:10px 0 0">{% if r.outcome == "winner" %}🏁 Победитель: <b>{{ r.winner_name }}</b>{% if r.winner_total is not none %} — {{ r.winner_total | money }} ₸{% endif %}{% if company_bin and r.winner_bin == company_bin %} <span class="badge hot">это вы</span>{% endif %}{% else %}🏁 Не состоялась{% if r.reason %} в связи с {{ r.reason }}{% endif %}{% endif %} <span class="muted">· предложений: {{ r.offers|length }}</span></p>{% endif %}
     {% if marks.get(lot.id) %}{{ note_form(lot.id, marks.get(lot.id), here) }}{% endif %}
     {% if spec_file(lot) %}
-    <details class="spec" open data-src="/a/{{ a.id }}/lots/{{ lot.id }}/spec">
+    {% set cached = specs.get(lot.id) %}
+    {# Текст уже в базе — показываем сразу; нет — догружаем с портала из браузера. #}
+    <details class="spec" open data-src="/a/{{ a.id }}/lots/{{ lot.id }}/spec"{% if cached and cached[0] %} data-loaded="1"{% endif %}>
       <summary>Техническая спецификация</summary>
-      <div class="spec-body"><p class="muted">Загружаю…</p></div>
+      <div class="spec-body">{% if cached and cached[0] %}<div class="spec-text">{{ cached[0] }}</div><p><a href="{{ spec_file(lot) | safe_url }}" target="_blank" rel="noopener">Скачать PDF спецификации</a></p>{% else %}<p class="muted">Загружаю…</p>{% endif %}</div>
     </details>
     {% endif %}
   </div>
@@ -140,6 +142,6 @@
     if (retry) loadSpec(retry.closest("details.spec"), true);
   });
   (async () => {
-    for (const spec of document.querySelectorAll("details.spec")) await loadSpec(spec, false);
+    for (const spec of document.querySelectorAll("details.spec:not([data-loaded])")) await loadSpec(spec, false);
   })();
 {% endmacro %}

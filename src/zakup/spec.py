@@ -56,36 +56,76 @@ def _clean(text: str) -> str:
     return "\n".join(line for line in lines if line)
 
 
-def extract(pdf: bytes) -> str:
+def extract_both(pdf: bytes) -> tuple[str, str | None]:
+    """(русский текст, казахский текст). Русский — раздел с характеристиками,
+    если он нашёлся, иначе вся русская часть; казахский — казахская часть целиком."""
     try:
         pages = [page.extract_text() or "" for page in PdfReader(io.BytesIO(pdf)).pages]
     except Exception as error:  # pypdf бросает много разных исключений на битых файлах
         raise SpecError(f"не удалось прочитать PDF: {type(error).__name__}") from None
     russian = [p for p in pages if any(marker in p for marker in _RUSSIAN_MARKERS)]
+    kazakh = [p for p in pages if p not in russian] if russian else []
     text = _clean("\n".join(russian or pages))
     if match := _SECTION.search(text):
-        section = text[match.end():].strip()
-        if section:
-            return section
-    return text
+        text = text[match.end():].strip() or text
+    return text, _clean("\n".join(kazakh)) or None
+
+
+def extract(pdf: bytes) -> str:
+    return extract_both(pdf)[0]
+
+
+def fetch(conn: psycopg.Connection, lot_id: int, url: str) -> tuple[str | None, str | None]:
+    """Скачивает и разбирает PDF, сохраняет текст (сам файл не храним)."""
+    try:
+        (text, text_kk), error = extract_both(download(url)), None
+    except (SpecError, httpx.HTTPError) as exc:
+        text, text_kk = None, None
+        error = str(exc) if isinstance(exc, SpecError) else "портал недоступен"
+    conn.execute(
+        """INSERT INTO lot_specs (lot_id, file_url, text, text_kk, error, attempts)
+           VALUES (%s, %s, %s, %s, %s, 1)
+           ON CONFLICT (lot_id) DO UPDATE SET file_url = excluded.file_url,
+               text = excluded.text, text_kk = excluded.text_kk, error = excluded.error,
+               fetched_at = now(),
+               attempts = CASE WHEN excluded.text IS NULL THEN lot_specs.attempts + 1 ELSE 0 END""",
+        (lot_id, url, text, text_kk, error),
+    )
+    conn.commit()
+    return text, error
 
 
 def get(conn: psycopg.Connection, lot_id: int, url: str) -> tuple[str | None, str | None]:
-    """Текст спецификации из кэша или с портала. Возвращает (текст, ошибка)."""
+    """Текст спецификации из базы, а если его ещё нет — с портала."""
     row = conn.execute(
         "SELECT text, error FROM lot_specs WHERE lot_id = %s AND file_url = %s", (lot_id, url)
     ).fetchone()
     if row:
         return row[0], row[1]
-    try:
-        text, error = extract(download(url)), None
-    except (SpecError, httpx.HTTPError) as exc:
-        text, error = None, str(exc) if isinstance(exc, SpecError) else "портал недоступен"
-    conn.execute(
-        """INSERT INTO lot_specs (lot_id, file_url, text, error) VALUES (%s, %s, %s, %s)
-           ON CONFLICT (lot_id) DO UPDATE SET file_url = excluded.file_url,
-               text = excluded.text, error = excluded.error, fetched_at = now()""",
-        (lot_id, url, text, error),
-    )
-    conn.commit()
-    return text, error
+    return fetch(conn, lot_id, url)
+
+
+# Сетевые ошибки повторяем, но не бесконечно: битый PDF не исправится.
+MAX_ATTEMPTS = 4
+
+
+def prefetch(conn: psycopg.Connection, limit: int) -> int:
+    """Заранее разбирает спецификации открытых лотов: сначала нужные (подписки,
+    отметки, фильтр владельца), потом те, что заканчиваются раньше."""
+    rows = conn.execute(
+        """SELECT l.id, l.spec_url FROM lots l
+           JOIN announcements a ON a.id = l.trd_buy_id
+           LEFT JOIN lot_specs s ON s.lot_id = l.id
+           WHERE a.end_date > now() AND l.spec_url IS NOT NULL
+             AND (s.lot_id IS NULL OR s.file_url <> l.spec_url
+                  OR (s.text IS NULL AND s.attempts < %(max)s
+                      AND s.fetched_at < now() - interval '1 hour' * s.attempts))
+           ORDER BY (EXISTS (SELECT 1 FROM matches m WHERE m.lot_id = l.id)
+                     OR EXISTS (SELECT 1 FROM lot_marks k WHERE k.lot_id = l.id)) DESC,
+                    a.disable_person DESC NULLS LAST, a.end_date
+           LIMIT %(limit)s""",
+        {"max": MAX_ATTEMPTS, "limit": limit},
+    ).fetchall()
+    for lot_id, url in rows:
+        fetch(conn, lot_id, url)
+    return len(rows)

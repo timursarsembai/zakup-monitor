@@ -155,6 +155,8 @@ def test_finished_announcement_shows_winners_and_contracts(client, conn, monkeyp
     conn.execute("UPDATE announcements SET details_fetched_at = now()")
     conn.commit()
     _login(client)
+    # Итоги перечитываются в фоне после ответа: видны со следующего открытия.
+    client.get("/a/7")
     page = client.get("/a/7").text
     for text in ("Победители (2)", "Договоры (1)", 'объединение &#34;ОКА&#34;', "37 950.00",
                  "C-1", "отсутствием представленных ценовых предложений"):
@@ -390,3 +392,15 @@ def test_admin_manages_roles_disable_delete(client, conn):
     assert auth.login(conn, "serik", "serik-password-1", None, None) is not None
     assert "удалён" in client.post(f"/settings/users/{serik}/delete", headers=ORIGIN).text
     assert conn.execute("SELECT count(*) FROM users WHERE email = 'serik'").fetchone()[0] == 0
+
+
+def test_spec_shown_from_database_without_portal(client, conn, monkeypatch):
+    _announcement_with_lots(conn)
+    conn.execute("""UPDATE announcements SET detail = jsonb_set(detail, '{Lots,0,Files}',
+        '[{"id": 9, "nameRu": "Техническая спецификация", "filePath": "https://ows.goszakup.gov.kz/download/9"}]')""")
+    conn.execute("INSERT INTO lot_specs (lot_id, file_url, text) VALUES (5001, 'https://ows.goszakup.gov.kz/download/9', 'Бумага офисная А4, 80 г/м2')")
+    conn.commit()
+    monkeypatch.setattr(web.details, "fetch_one", lambda *a: (_ for _ in ()).throw(AssertionError("portal")))
+    _login(client)
+    page = client.get("/lots/5001").text
+    assert "Бумага офисная А4, 80 г/м2" in page and 'data-loaded="1"' in page

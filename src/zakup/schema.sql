@@ -299,3 +299,9 @@ WHERE id = (SELECT min(id) FROM users) AND NOT EXISTS (SELECT 1 FROM users WHERE
 ALTER TABLE announcements ADD COLUMN IF NOT EXISTS protocol_lots integer;
 -- Отключённый пользователь существует (подписки, отметки), но войти не может.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS disabled boolean NOT NULL DEFAULT false;
+
+-- Предзагрузка техспецификаций (2026-11-08): ссылка на PDF у лота, казахский текст,
+-- число неудачных попыток.
+ALTER TABLE lots ADD COLUMN IF NOT EXISTS spec_url text;
+ALTER TABLE lot_specs ADD COLUMN IF NOT EXISTS text_kk text;
+ALTER TABLE lot_specs ADD COLUMN IF NOT EXISTS attempts integer NOT NULL DEFAULT 0;

@@ -14,6 +14,7 @@ from psycopg.types.json import Jsonb
 
 from zakup import db
 from zakup.goszakup import Client, normalize, parse_date
+from zakup.spec import spec_file
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +83,7 @@ def parse_lot(lot: dict[str, Any]) -> dict[str, Any]:
         "extra_desc": "; ".join(dict.fromkeys(extra)) or None,
         "supply_date": "; ".join(dict.fromkeys(supply)) or None,
         "enstru": sorted(set(enstru)),
+        "spec_url": spec_file(lot),
     }
 
 
@@ -133,7 +135,7 @@ def save(conn: psycopg.Connection, item: dict[str, Any]) -> None:
         conn.execute(
             """UPDATE lots SET prepayment = %(prepayment)s, kato = %(kato)s, price = %(price)s,
                    unit_name = %(unit_name)s, extra_desc = %(extra_desc)s,
-                   supply_date = %(supply_date)s, enstru = %(enstru)s
+                   supply_date = %(supply_date)s, enstru = %(enstru)s, spec_url = %(spec_url)s
                WHERE id = %(id)s""",
             lot,
         )

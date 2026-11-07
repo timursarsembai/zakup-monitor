@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import sys
+import time
 from datetime import date, datetime, time, timedelta
 
 from zakup import auth, bot, db, details, marks, matcher, notify, results, sync
@@ -30,6 +31,9 @@ def main() -> int:
     )
     more.add_argument("--limit", type=int, default=2000)
     sub.add_parser("bot", help="Telegram-бот: привязка чатов (работает постоянно)")
+    specs_cmd = sub.add_parser("specs", help="заранее разобрать техспецификации открытых лотов")
+    specs_cmd.add_argument("--limit", type=int, default=200)
+    specs_cmd.add_argument("--loop", action="store_true", help="работать постоянно")
     research_cmd = sub.add_parser("research", help="поиск товаров под лоты с ИИ (работает постоянно)")
     research_cmd.add_argument("--providers", default="claude_code",
                               help="через запятую: claude_code, anthropic, openai")
@@ -51,6 +55,8 @@ def main() -> int:
     if args.command == "bot":
         bot.run(os.environ["DATABASE_URL"])
         return 0
+    if args.command == "specs":
+        return _specs(args.limit, args.loop)
     if args.command == "research":
         from zakup import research
 
@@ -91,6 +97,20 @@ def main() -> int:
             return _sync(conn, client, args.max_pages)
     finally:
         client.close()
+
+
+def _specs(limit: int, loop: bool) -> int:
+    from zakup import spec
+
+    while True:
+        with db.connect(os.environ["DATABASE_URL"]) as conn:
+            done = spec.prefetch(conn, limit)
+        print(f"specs: {done}", flush=True)
+        if not loop:
+            return 0
+        # Пока есть очередь — сразу дальше, иначе раз в 5 минут.
+        if done < limit:
+            time.sleep(300)
 
 
 def _set_password(email: str) -> int:

@@ -5,6 +5,7 @@
 """
 
 import io
+import logging
 import os
 import time
 from contextlib import asynccontextmanager
@@ -15,10 +16,11 @@ from datetime import UTC, datetime, timedelta
 from urllib.parse import parse_qs, quote, urlencode, urlsplit
 
 import httpx
-from fastapi import Depends, FastAPI, Form, HTTPException, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+import psycopg
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
@@ -51,6 +53,8 @@ from zakup.filters import (
 )
 from zakup.goszakup import PORTAL_TZ, Client, GoszakupError, parse_date
 from zakup.matcher import PORTAL_ANNOUNCEMENT_URL
+
+logger = logging.getLogger(__name__)
 
 PAGE_SIZE = 50
 SESSION_COOKIE = "zakup_session"
@@ -430,18 +434,18 @@ def _goszakup() -> Client:
 
 
 @app.get("/a/{announcement_id}")
-def announcement(request: Request, user: User, announcement_id: int):
-    context = _announcement_context(request, user, announcement_id)
+def announcement(request: Request, user: User, announcement_id: int, background: BackgroundTasks):
+    context = _announcement_context(request, user, announcement_id, background)
     return templates.TemplateResponse(request, "announcement.html", context)
 
 
 @app.get("/lots/{lot_id}")
-def lot_page(request: Request, user: User, lot_id: int):
+def lot_page(request: Request, user: User, lot_id: int, background: BackgroundTasks):
     with pool.connection() as conn:
         row = conn.execute("SELECT trd_buy_id FROM lots WHERE id = %s", (lot_id,)).fetchone()
     if row is None or row[0] is None:
         raise HTTPException(404, "Такого лота нет в базе")
-    context = _announcement_context(request, user, row[0])
+    context = _announcement_context(request, user, row[0], background)
     lot = next((lot for lot in context["lots"] if lot["id"] == lot_id), None)
     if lot is None:
         raise HTTPException(404, "Лот удалён из объявления")
@@ -489,47 +493,62 @@ def research_fragment(request: Request, _: User, lot_id: int):
     )
 
 
-def _announcement_context(request: Request, user: int, announcement_id: int) -> dict:
+_refreshing: set[int] = set()
+
+
+def _refresh_in_background(announcement_id: int, with_detail: bool, with_results: bool) -> None:
+    """Перечитывает объявление с портала после ответа страницы: пользователь не ждёт
+    портал, а следующий заход увидит свежие данные. Одно объявление — один раз."""
+    if announcement_id in _refreshing:
+        return
+    _refreshing.add(announcement_id)
+    try:
+        with pool.connection() as conn:
+            if with_detail:
+                details.fetch_one(conn, _goszakup(), announcement_id)
+            if with_results:
+                results.refresh(conn, _goszakup(), announcement_id)
+    except (GoszakupError, httpx.HTTPError, psycopg.Error) as error:
+        logger.warning("background refresh of %s failed: %s", announcement_id, error)
+    finally:
+        _refreshing.discard(announcement_id)
+
+
+def _announcement_context(request: Request, user: int, announcement_id: int,
+                          background: BackgroundTasks) -> dict:
     with pool.connection() as conn:
         row = conn.execute(
-            "SELECT detail, details_fetched_at, end_date FROM announcements WHERE id = %s",
+            """SELECT detail, details_fetched_at, end_date, results, results_fetched_at
+               FROM announcements WHERE id = %s""",
             (announcement_id,),
         ).fetchone()
         if row is None:
             raise HTTPException(404, "Такого объявления нет в базе")
-        detail, fetched_at, end_date = row
+        detail, fetched_at, end_date, outcome, results_at = row
         now = datetime.now(UTC)
         stale = fetched_at is None or now - fetched_at > (
             DETAIL_TTL if end_date and end_date > now else timedelta(days=1)
         )
+        ended = bool(end_date and end_date < now)
         refresh_error = None
-        if detail is None or stale:
+        if detail is None:
+            # Подробностей ещё нет совсем (сборщик не дошёл) — тут без портала никак.
             try:
                 details.fetch_one(conn, _goszakup(), announcement_id)
-                detail, fetched_at = conn.execute(
-                    "SELECT detail, details_fetched_at FROM announcements WHERE id = %s",
-                    (announcement_id,),
-                ).fetchone()
+                if ended:
+                    results.refresh(conn, _goszakup(), announcement_id)
             except GoszakupError:
                 conn.rollback()
-                refresh_error = "Портал сейчас не отвечает, показаны сохранённые данные."
-        if detail is None:
-            raise HTTPException(502, "Не удалось получить объявление с портала")
-        outcome, results_at = conn.execute(
-            "SELECT results, results_fetched_at FROM announcements WHERE id = %s",
-            (announcement_id,),
-        ).fetchone()
-        # Итоги, договоры и апелляции появляются после окончания приёма заявок.
-        if end_date and end_date < now and results.stale(results_at, now) and not refresh_error:
-            try:
-                results.refresh(conn, _goszakup(), announcement_id)
-                outcome, results_at = conn.execute(
-                    "SELECT results, results_fetched_at FROM announcements WHERE id = %s",
-                    (announcement_id,),
-                ).fetchone()
-            except GoszakupError:
-                conn.rollback()
-                refresh_error = "Портал сейчас не отвечает, итоги могут быть неполными."
+            detail, fetched_at, outcome, results_at = conn.execute(
+                """SELECT detail, details_fetched_at, results, results_fetched_at
+                   FROM announcements WHERE id = %s""",
+                (announcement_id,),
+            ).fetchone()
+            if detail is None:
+                raise HTTPException(502, "Портал сейчас не отвечает, попробуйте через минуту")
+        elif stale or (ended and results.stale(results_at, now)):
+            background.add_task(_refresh_in_background, announcement_id, stale,
+                                ended and results.stale(results_at, now))
         subscribed = {
             r[0]: r[1]
             for r in conn.execute(
@@ -556,6 +575,8 @@ def _announcement_context(request: Request, user: int, announcement_id: int) -> 
     lots = [lot for lot in detail.get("Lots") or [] if not lot.get("isDeleted")]
     info = {lot["id"]: details.parse_lot(lot) for lot in lots}
     with pool.connection() as conn:
+        specs = {r[0]: (r[1], r[2]) for r in conn.execute(
+            "SELECT lot_id, text, error FROM lot_specs WHERE lot_id = ANY(%s)", (list(info),))}
         lot_marks = marks.of_user(conn, user, list(info))
         lot_results = results.by_lot(conn, list(info))
         company_bin = conn.execute(
@@ -569,6 +590,7 @@ def _announcement_context(request: Request, user: int, announcement_id: int) -> 
         "info": info,
         "subscribed": subscribed,
         "marks": lot_marks,
+        "specs": specs,
         "results": lot_results,
         "contracts": (outcome or {}).get("contracts") or [],
         "contracts_by_lot": results.contracts_by_lot(outcome),
