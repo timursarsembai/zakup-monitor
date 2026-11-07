@@ -330,11 +330,15 @@ def run_job(conn: psycopg.Connection, job: dict[str, Any]) -> dict[str, Any]:
     if context is None:
         raise ResearchError("нет данных лота — откройте страницу объявления, чтобы их загрузить")
     prompt = build_prompt(context, job["region"], job["whole_kz"])
+    key = None
+    if job["provider"] != "claude_code":
+        key = secrets_box.user_key(conn, job["user_id"], job["provider"])
+        if not key:
+            raise ResearchError("в настройках не указан API-ключ")
+    # Поиск идёт минутами: не держим транзакцию открытой.
+    conn.commit()
     if job["provider"] == "claude_code":
         return clean(_claude_code(prompt, job["model"]))
-    key = secrets_box.user_key(conn, job["user_id"], job["provider"])
-    if not key:
-        raise ResearchError("в настройках не указан API-ключ")
     runner = _anthropic if job["provider"] == "anthropic" else _openai
     return clean(runner(prompt, job["model"], key))
 
