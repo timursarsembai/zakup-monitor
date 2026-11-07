@@ -20,23 +20,24 @@ logger = logging.getLogger(__name__)
 
 BATCH = 50
 FIELDS = """
-  id numberAnno nameRu totalSum countLots publishDate startDate endDate lastUpdateDate
+  id numberAnno nameRu nameKz totalSum countLots publishDate startDate endDate lastUpdateDate
   refBuyStatusId refTradeMethodsId kato disablePersonId refTypeTradeId refSubjectTypeId
   finYear itogiDatePublic
-  customerBin customerNameRu orgBin orgNameRu
-  RefBuyStatus { nameRu } RefTradeMethods { nameRu } RefTypeTrade { nameRu }
-  RefSubjectType { nameRu }
-  Organizer { bin nameRu Address { address katoCode } }
-  Files { id nameRu originalName filePath }
+  customerBin customerNameRu customerNameKz orgBin orgNameRu orgNameKz
+  RefBuyStatus { nameRu nameKz } RefTradeMethods { nameRu nameKz } RefTypeTrade { nameRu nameKz }
+  RefSubjectType { nameRu nameKz }
+  Organizer { bin nameRu nameKz Address { address katoCode } }
+  Files { id nameRu nameKz originalName filePath }
   GeneralFiles { nameRu filePathRu }
   Lots {
-    id lotNumber nameRu descriptionRu amount count trdBuyId trdBuyNumberAnno refLotStatusId
-    refTradeMethodsId customerBin customerNameRu plnPointKatoList lastUpdateDate isDeleted
-    RefLotsStatus { nameRu }
-    Files { id nameRu originalName filePath }
+    id lotNumber nameRu nameKz descriptionRu descriptionKz amount count trdBuyId trdBuyNumberAnno
+    refLotStatusId refTradeMethodsId customerBin customerNameRu customerNameKz plnPointKatoList
+    lastUpdateDate isDeleted
+    RefLotsStatus { nameRu nameKz }
+    Files { id nameRu nameKz originalName filePath }
     Plans {
-      price count amount sum1 sum2 sum3 prepayment supplyDateRu extraDescRu refEnstruCode
-      RefUnits { nameRu } PlansKato { refKatoCode fullDeliveryPlaceNameRu }
+      price count amount sum1 sum2 sum3 prepayment supplyDateRu extraDescRu extraDescKz
+      refEnstruCode RefUnits { nameRu nameKz } PlansKato { refKatoCode fullDeliveryPlaceNameRu fullDeliveryPlaceNameKz }
     }
   }
 """
@@ -58,6 +59,7 @@ def _years(value: Any) -> list[int]:
 def parse_lot(lot: dict[str, Any]) -> dict[str, Any]:
     kato = set(lot.get("plnPointKatoList") or [])
     prepayments, prices, units, extra, supply, enstru = [], [], [], [], [], []
+    units_kz, extra_kz = [], []
     for plan in lot.get("Plans") or []:
         if (value := _number(plan.get("prepayment"))) is not None:
             prepayments.append(value)
@@ -65,8 +67,12 @@ def parse_lot(lot: dict[str, Any]) -> dict[str, Any]:
             prices.append(value)
         if unit := (plan.get("RefUnits") or {}).get("nameRu"):
             units.append(unit)
+        if unit_kz := (plan.get("RefUnits") or {}).get("nameKz"):
+            units_kz.append(unit_kz)
         if plan.get("extraDescRu"):
             extra.append(plan["extraDescRu"].strip())
+        if plan.get("extraDescKz"):
+            extra_kz.append(plan["extraDescKz"].strip())
         if plan.get("refEnstruCode"):
             enstru.append(plan["refEnstruCode"])
         if plan.get("supplyDateRu"):
@@ -80,6 +86,8 @@ def parse_lot(lot: dict[str, Any]) -> dict[str, Any]:
         # Пунктов плана в лоте бывает несколько с одной ценой; разные — цену не показываем.
         "price": prices[0] if len(set(prices)) == 1 else None,
         "unit_name": units[0] if units else None,
+        "unit_name_kz": units_kz[0] if units_kz else None,
+        "extra_desc_kz": "; ".join(dict.fromkeys(extra_kz)) or None,
         "extra_desc": "; ".join(dict.fromkeys(extra)) or None,
         "supply_date": "; ".join(dict.fromkeys(supply)) or None,
         "enstru": sorted(set(enstru)),
@@ -135,7 +143,8 @@ def save(conn: psycopg.Connection, item: dict[str, Any]) -> None:
         conn.execute(
             """UPDATE lots SET prepayment = %(prepayment)s, kato = %(kato)s, price = %(price)s,
                    unit_name = %(unit_name)s, extra_desc = %(extra_desc)s,
-                   supply_date = %(supply_date)s, enstru = %(enstru)s, spec_url = %(spec_url)s
+                   supply_date = %(supply_date)s, enstru = %(enstru)s, spec_url = %(spec_url)s,
+                   unit_name_kz = %(unit_name_kz)s, extra_desc_kz = %(extra_desc_kz)s
                WHERE id = %(id)s""",
             lot,
         )
@@ -158,7 +167,7 @@ def refresh(conn: psycopg.Connection, client: Client, limit: int) -> int:
             """SELECT id FROM announcements
                WHERE end_date > now()
                  AND (details_fetched_at IS NULL OR detail IS NULL
-                      OR NOT detail ? 'finYear'
+                      OR NOT detail ? 'nameKz'
                       OR last_update_date > details_update_date
                       OR details_fetched_at < now() - interval '1 day')
                ORDER BY details_fetched_at NULLS FIRST, end_date
@@ -183,7 +192,7 @@ def refresh_finished(conn: psycopg.Connection, client: Client, limit: int) -> in
         for row in conn.execute(
             """SELECT id FROM announcements
                WHERE status_id = ANY(%s)
-                 AND (detail IS NULL OR NOT detail ? 'finYear'
+                 AND (detail IS NULL OR NOT detail ? 'nameKz'
                       OR (detail->>'refBuyStatusId')::int IS DISTINCT FROM status_id)
                  AND (details_fetched_at IS NULL OR details_fetched_at < now() - interval '1 hour')
                ORDER BY end_date DESC

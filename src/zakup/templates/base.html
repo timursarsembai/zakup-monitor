@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="ru">
+<html lang="{{ lang() }}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{% block title %}Закупки{% endblock %} · Zakup</title>
+<title>{% block title %}{{ _("Закупки") }}{% endblock %} · Zakup</title>
 <link rel="icon" type="image/png" href="/static/favicon.png">
 <script>
   // Тема: по умолчанию тёмная, выбор запоминается в браузере. До отрисовки, чтобы не мигало.
@@ -43,6 +43,7 @@
   .main-nav a.on { color: var(--fg); font-weight: 600; }
   .main-nav svg, .icon-button svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
   .icon-button { display: inline-flex; align-items: center; justify-content: center; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; color: inherit; }
+  .lang-switch { font-size: 13px; font-weight: 600; min-width: 40px; }
   .icon-button.on { border-color: var(--accent); color: var(--accent); }
   .theme-toggle, .a11y-toggle { padding: 4px 9px; font-size: 16px; line-height: 1; }
   .theme-toggle { display: inline-flex; align-items: center; justify-content: center; min-width: 34px; min-height: 28px; }
@@ -87,32 +88,35 @@
 <body>
 {% block header %}
 <header>
-  <a href="/" class="brand" aria-label="Zakup — на главную"><img src="/static/logo-mark.png" alt="" width="30" height="30"><span>Zakup</span></a>
+  <a href="/" class="brand" aria-label="{{ _("Zakup — на главную") }}"><img src="/static/logo-mark.png" alt="" width="30" height="30"><span>Zakup</span></a>
   {% set path = request.url.path %}
-  <nav class="main-nav" aria-label="Разделы">
-    <a href="/announcements" class="{{ 'on' if path in ('/lots', '/announcements') or path.startswith('/lots/') or path.startswith('/a/') }}"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span>Закупки</span></a>
-    <a href="/my" class="{{ 'on' if path == '/my' }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-6-4-6 4z"/></svg><span>Мои лоты</span></a>
-    <a href="/subscriptions" class="{{ 'on' if path == '/subscriptions' }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg><span>Подписки</span></a>
-    <a href="/matches" class="{{ 'on' if path == '/matches' }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg><span>Совпадения</span></a>
+  <nav class="main-nav" aria-label="{{ _("Разделы") }}">
+    <a href="/announcements" class="{{ 'on' if path in ('/lots', '/announcements') or path.startswith('/lots/') or path.startswith('/a/') }}"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span>{{ _("Закупки") }}</span></a>
+    <a href="/my" class="{{ 'on' if path == '/my' }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-6-4-6 4z"/></svg><span>{{ _("Мои лоты") }}</span></a>
+    <a href="/research" class="{{ 'on' if path == '/research' }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg><span>{{ _("Подбор") }}</span></a>
+    <a href="/subscriptions" class="{{ 'on' if path == '/subscriptions' }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg><span>{{ _("Подписки") }}</span></a>
+    <a href="/matches" class="{{ 'on' if path == '/matches' }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg><span>{{ _("Совпадения") }}</span></a>
   </nav>
   <div class="logout">
     <span class="muted who">{{ request.state.email }}</span>
     <span class="a11y">
-      <button type="button" class="a11y-toggle" data-a11y-toggle title="Режим для слабовидящих" aria-label="Режим для слабовидящих" aria-expanded="false">Aa</button>
+      <button type="button" class="a11y-toggle" data-a11y-toggle title="{{ _("Режим для слабовидящих") }}" aria-label="{{ _("Режим для слабовидящих") }}" aria-expanded="false">Aa</button>
       <div class="a11y-panel" data-a11y-panel hidden>
-        <b>Для слабовидящих</b>
-        <div class="a11y-row">Размер
-          <button type="button" data-zoom="-0.1" aria-label="Мельче">−</button>
+        <b>{{ _("Для слабовидящих") }}</b>
+        <div class="a11y-row">{{ _("Размер") }}
+          <button type="button" data-zoom="-0.1" aria-label="{{ _("Мельче") }}">−</button>
           <output data-zoom-value>100%</output>
-          <button type="button" data-zoom="0.1" aria-label="Крупнее">+</button>
+          <button type="button" data-zoom="0.1" aria-label="{{ _("Крупнее") }}">+</button>
         </div>
-        <label class="a11y-row"><input type="checkbox" data-contrast> Высокий контраст</label>
-        <button type="button" data-a11y-reset>Как было</button>
+        <label class="a11y-row"><input type="checkbox" data-contrast> {{ _("Высокий контраст") }}</label>
+        <button type="button" data-a11y-reset>{{ _("Как было") }}</button>
       </div>
     </span>
-    <button type="button" class="theme-toggle" data-theme-toggle title="Сменить тему" aria-label="Сменить тему"></button>
-    <a href="/settings" class="icon-button {{ 'on' if path == '/settings' }}" title="Настройки" aria-label="Настройки"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></a>
-    <form method="post" action="/logout"><button>Выйти</button></form>
+    {% set other = "ru" if lang() == "kk" else "kk" %}
+    <a class="icon-button lang-switch" href="/lang/{{ other }}" hreflang="{{ other }}" title="{{ 'Русский' if other == 'ru' else 'Қазақша' }}">{{ languages[other] }}</a>
+    <button type="button" class="theme-toggle" data-theme-toggle title="{{ _("Сменить тему") }}" aria-label="{{ _("Сменить тему") }}"></button>
+    <a href="/settings" class="icon-button {{ 'on' if path == '/settings' }}" title="{{ _("Настройки") }}" aria-label="{{ _("Настройки") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></a>
+    <form method="post" action="/logout"><button>{{ _("Выйти") }}</button></form>
   </div>
 </header>
 {% endblock %}
@@ -157,7 +161,7 @@
   })();
   // Темы по кругу: светлая → бежевая → синяя → тёмная → светлая.
   // Значок кнопки — кружок цвета текущей темы.
-  const THEMES = [["light", "#ffffff", "Светлая"], ["beige", "#f2ecbc", "Бежевая"], ["navy", "#142738", "Синяя"], ["dark", "#151517", "Тёмная"]];
+  const THEMES = [["light", "#ffffff", {{ _("Светлая")|tojson }}], ["beige", "#f2ecbc", {{ _("Бежевая")|tojson }}], ["navy", "#142738", {{ _("Синяя")|tojson }}], ["dark", "#151517", {{ _("Тёмная")|tojson }}]];
   for (const button of document.querySelectorAll("[data-theme-toggle]")) {
     const index = () => Math.max(0, THEMES.findIndex(([name]) => name === document.documentElement.dataset.theme));
     const show = () => {
@@ -165,7 +169,7 @@
       const [, , nextLabel] = THEMES[(index() + 1) % THEMES.length];
       button.innerHTML = '<span class="swatch"></span>';
       button.firstChild.style.background = color;
-      button.title = `Тема: ${label}. Нажмите — ${nextLabel.toLowerCase()}`;
+      button.title = `${ {{ _("Тема")|tojson }} }: ${label}. ${ {{ _("Нажмите")|tojson }} } — ${nextLabel.toLowerCase()}`;
     };
     button.addEventListener("click", () => {
       const next = THEMES[(index() + 1) % THEMES.length][0];

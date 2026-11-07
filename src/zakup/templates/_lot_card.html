@@ -48,38 +48,38 @@
   <div class="lot" id="lot-{{ lot.id }}">
     <div class="lot-head">
       <div>
-        {% if link %}<a class="name" href="/lots/{{ lot.id }}">{{ lot.nameRu }}</a>{% else %}<div class="name">{{ lot.nameRu }}</div>{% endif %}
-        {% if lot.descriptionRu %}<div class="muted">{{ lot.descriptionRu }}</div>{% endif %}
+        {% if link %}<a class="name" href="/lots/{{ lot.id }}">{{ loc(lot) }}</a>{% else %}<div class="name">{{ loc(lot) }}</div>{% endif %}
+        {% if loc(lot, "descriptionRu") %}<div class="muted">{{ loc(lot, "descriptionRu") }}</div>{% endif %}
         <div style="margin-top:6px; display:flex; gap:6px; flex-wrap:wrap">
-          {% if i.prepayment %}<span class="badge {% if i.prepayment >= 30 %}hot{% endif %}">аванс {{ '%g'|format(i.prepayment) }}%</span>{% endif %}
-          {% if lot.id in subscribed %}<span class="badge sub">подходит: {{ subscribed[lot.id] }}</span>{% endif %}
+          {% if i.prepayment %}<span class="badge {% if i.prepayment >= 30 %}hot{% endif %}">{{ _("аванс") }} {{ '%g'|format(i.prepayment) }}%</span>{% endif %}
+          {% if lot.id in subscribed %}<span class="badge sub">{{ _("подходит:") }} {{ subscribed[lot.id] }}</span>{% endif %}
         </div>
       </div>
       <div class="lot-sum">
         <b>{{ lot.amount | money }} ₸</b>
-        <div class="muted">{% if i.price is not none %}{{ i.price | money }} ₸ × {% endif %}{{ '%g'|format(lot.count or 0) }} {{ (i.unit_name or "")|lower }}</div>
+        <div class="muted">{% if i.price is not none %}{{ i.price | money }} ₸ × {% endif %}{{ '%g'|format(lot.count or 0) }} {{ (pick(i.unit_name, i.unit_name_kz) or "")|lower }}</div>
         <div style="margin-top:8px">{{ mark_control(lot.id, marks.get(lot.id), here) }}</div>
       </div>
     </div>
     <dl class="facts">
-      <dt>Номер лота</dt><dd>{{ lot.lotNumber }}</dd>
-      {% if i.extra_desc %}<dt>Доп. характеристика</dt><dd>{{ i.extra_desc }}</dd>{% endif %}
-      <dt>Заказчик</dt><dd>{{ lot.customerNameRu or "—" }}</dd>
-      {% set places = [] %}{% for p in lot.Plans or [] %}{% for k in p.PlansKato or [] %}{% if k.fullDeliveryPlaceNameRu and k.fullDeliveryPlaceNameRu|trim not in places %}{% set _ = places.append(k.fullDeliveryPlaceNameRu|trim) %}{% endif %}{% endfor %}{% endfor %}
-      {% if places %}<dt>Место поставки</dt><dd>{{ places|join("; ") }}</dd>{% endif %}
-      {% if i.supply_date %}<dt>Срок поставки</dt><dd>{{ i.supply_date }}</dd>{% endif %}
-      {% if plan and ((plan.sum2 or 0) > 0 or (plan.sum3 or 0) > 0) %}<dt>По годам</dt><dd>{{ plan.sum1 | money }} / {{ plan.sum2 | money }} / {{ plan.sum3 | money }} ₸</dd>{% endif %}
-      <dt>Статус лота</dt><dd>{{ (lot.RefLotsStatus or {}).nameRu or "—" }}</dd>
+      <dt>{{ _("Номер лота") }}</dt><dd>{{ lot.lotNumber }}</dd>
+      {% if i.extra_desc %}<dt>{{ _("Доп. характеристика") }}</dt><dd>{{ pick(i.extra_desc, i.extra_desc_kz) }}</dd>{% endif %}
+      <dt>{{ _("Заказчик") }}</dt><dd>{{ loc(lot, "customerNameRu") or "—" }}</dd>
+      {% set places = [] %}{% for p in lot.Plans or [] %}{% for k in p.PlansKato or [] %}{% set place = loc(k, "fullDeliveryPlaceNameRu") %}{% if place and place|trim not in places %}{% set __ = places.append(place|trim) %}{% endif %}{% endfor %}{% endfor %}
+      {% if places %}<dt>{{ _("Место поставки") }}</dt><dd>{{ places|join("; ") }}</dd>{% endif %}
+      {% if i.supply_date %}<dt>{{ _("Срок поставки") }}</dt><dd>{{ i.supply_date }}</dd>{% endif %}
+      {% if plan and ((plan.sum2 or 0) > 0 or (plan.sum3 or 0) > 0) %}<dt>{{ _("По годам") }}</dt><dd>{{ plan.sum1 | money }} / {{ plan.sum2 | money }} / {{ plan.sum3 | money }} ₸</dd>{% endif %}
+      <dt>{{ _("Статус лота") }}</dt><dd>{{ loc(lot.RefLotsStatus) or "—" }}</dd>
     </dl>
     {% set r = results.get(lot.id) %}
-    {% if r %}<p style="margin:10px 0 0">{% if r.outcome == "winner" %}🏁 Победитель: <b>{{ r.winner_name }}</b>{% if r.winner_total is not none %} — {{ r.winner_total | money }} ₸{% endif %}{% if company_bin and r.winner_bin == company_bin %} <span class="badge hot">это вы</span>{% endif %}{% else %}🏁 Не состоялась{% if r.reason %} в связи с {{ r.reason }}{% endif %}{% endif %} <span class="muted">· предложений: {{ r.offers|length }}</span></p>{% endif %}
+    {% if r %}<p style="margin:10px 0 0">{% if r.outcome == "winner" %}{{ _("🏁 Победитель:") }} <b>{{ r.winner_name }}</b>{% if r.winner_total is not none %} — {{ r.winner_total | money }} ₸{% endif %}{% if company_bin and r.winner_bin == company_bin %} <span class="badge hot">{{ _("это вы") }}</span>{% endif %}{% else %}{{ _("🏁 Не состоялась") }}{% if r.reason %} {{ _("в связи с") }} {{ r.reason }}{% endif %}{% endif %} <span class="muted">{{ _("· предложений:") }} {{ r.offers|length }}</span></p>{% endif %}
     {% if marks.get(lot.id) %}{{ note_form(lot.id, marks.get(lot.id), here) }}{% endif %}
     {% if spec_file(lot) %}
     {% set cached = specs.get(lot.id) %}
     {# Текст уже в базе — показываем сразу; нет — догружаем с портала из браузера. #}
     <details class="spec" data-src="/a/{{ a.id }}/lots/{{ lot.id }}/spec"{% if cached and cached[0] %} data-loaded="1"{% endif %}>
-      <summary>Техническая спецификация</summary>
-      <div class="spec-body">{% if cached and cached[0] %}<div class="spec-text">{{ cached[0] }}</div><p><a href="{{ spec_file(lot) | safe_url }}" target="_blank" rel="noopener">Скачать PDF спецификации</a></p>{% else %}<p class="muted">Загружаю…</p>{% endif %}</div>
+      <summary>{{ _("Техническая спецификация") }}</summary>
+      <div class="spec-body">{% if cached and cached[0] %}<div class="spec-text">{{ pick(cached[0], cached[2]) }}</div><p><a href="{{ spec_file(lot) | safe_url }}" target="_blank" rel="noopener">{{ _("Скачать PDF спецификации") }}</a></p>{% else %}<p class="muted">{{ _("Загружаю…") }}</p>{% endif %}</div>
     </details>
     {% endif %}
   </div>
@@ -89,26 +89,26 @@
   <div class="lot">
     <div class="lot-head">
       <div>
-        <a class="name" href="/lots/{{ lot.id }}">{{ lot.nameRu }}</a>
-        <div class="muted">Лот {{ lot.lotNumber }} · {{ lot.amount | money }} ₸</div>
+        <a class="name" href="/lots/{{ lot.id }}">{{ loc(lot) }}</a>
+        <div class="muted">{{ _("Лот") }} {{ lot.lotNumber }} · {{ lot.amount | money }} ₸</div>
       </div>
       <div class="lot-sum">
-        {% if r.outcome == "winner" %}<span class="badge hot">Победитель определён</span>{% else %}<span class="badge">Не состоялась</span>{% endif %}
+        {% if r.outcome == "winner" %}<span class="badge hot">{{ _("Победитель определён") }}</span>{% else %}<span class="badge">{{ _("Не состоялась") }}</span>{% endif %}
       </div>
     </div>
     {% if r.outcome == "winner" %}
-    <p style="margin:10px 0 0"><b>{{ r.winner_name }}</b> <span class="muted">БИН {{ r.winner_bin }}</span>{% if r.winner_total is not none %} — <b>{{ r.winner_total | money }} ₸</b>{% if lot.amount %} <span class="muted">(−{{ '%.1f'|format((1 - (r.winner_total|float) / lot.amount) * 100) }}% от плана)</span>{% endif %}{% endif %}</p>
-    {% if r.second_name %}<p class="muted" style="margin:4px 0 0">Второе место: {{ r.second_name }}, БИН {{ r.second_bin }}</p>{% endif %}
+    <p style="margin:10px 0 0"><b>{{ r.winner_name }}</b> <span class="muted">{{ _("БИН") }} {{ r.winner_bin }}</span>{% if r.winner_total is not none %} — <b>{{ r.winner_total | money }} ₸</b>{% if lot.amount %} <span class="muted">(−{{ '%.1f'|format((1 - (r.winner_total|float) / lot.amount) * 100) }}{{ _("% от плана)") }}</span>{% endif %}{% endif %}</p>
+    {% if r.second_name %}<p class="muted" style="margin:4px 0 0">{{ _("Второе место:") }} {{ r.second_name }}{{ _(", БИН") }} {{ r.second_bin }}</p>{% endif %}
     {% else %}
-    <p style="margin:10px 0 0">Закупка не состоялась{% if r.reason %} в связи с {{ r.reason }}{% endif %}.</p>
+    <p style="margin:10px 0 0">{{ _("Закупка не состоялась") }}{% if r.reason %} {{ _("в связи с") }} {{ r.reason }}{% endif %}.</p>
     {% endif %}
     {% if r.offers %}
     <div class="table-wrap" style="margin-top:10px"><table>
-      <tr><th>№</th><th>Поставщик</th><th>БИН/ИИН</th><th>Цена за ед., ₸</th><th>Сумма, ₸</th><th>Подана</th></tr>
+      <tr><th>№</th><th>{{ _("Поставщик") }}</th><th>{{ _("БИН/ИИН") }}</th><th>{{ _("Цена за ед., ₸") }}</th><th>{{ _("Сумма, ₸") }}</th><th>{{ _("Подана") }}</th></tr>
       {% for o in r.offers %}
       <tr{% if o.bin == r.winner_bin %} style="font-weight:600"{% endif %}>
         <td>{{ loop.index }}</td>
-        <td>{{ o.name }}{% if company_bin and o.bin == company_bin %} <span class="badge sub">вы</span>{% endif %}</td>
+        <td>{{ o.name }}{% if company_bin and o.bin == company_bin %} <span class="badge sub">{{ _("вы") }}</span>{% endif %}</td>
         <td>{{ o.bin }}</td>
         <td class="num">{{ o.price | money if o.price else "" }}</td>
         <td class="num">{{ o.total | money if o.total else "" }}</td>
@@ -118,7 +118,7 @@
     </table></div>
     {% endif %}
     {% for c in contracts_by_lot.get(lot.id, []) %}
-    <p class="muted" style="margin:8px 0 0">Договор № {{ c.contractNumberSys }} с {{ (c.Supplier or {}).nameRu or c.supplierBiin }} на {{ c.contractSum | money }} ₸ — {{ (c.RefContractStatus or {}).nameRu or "" }}</p>
+    <p class="muted" style="margin:8px 0 0">{{ _("Договор №") }} {{ c.contractNumberSys }} {{ _("с") }} {{ (c.Supplier or {}).nameRu or c.supplierBiin }} {{ _("на") }} {{ c.contractSum | money }} ₸ — {{ (c.RefContractStatus or {}).nameRu or "" }}</p>
     {% endfor %}
   </div>
 {% endmacro %}
@@ -127,13 +127,13 @@
   // При ошибке — кнопка «Обновить»: она просит сервер не брать ошибку из кэша.
   const loadSpec = async (spec, refresh) => {
     const body = spec.querySelector(".spec-body");
-    body.innerHTML = '<p class="muted">Загружаю…</p>';
+    body.innerHTML = '<p class="muted">' + {{ _("Загружаю…")|tojson }} + '</p>';
     try {
       const response = await fetch(spec.dataset.src + (refresh ? "?refresh=1" : ""));
       body.innerHTML = response.ok ? await response.text()
-        : '<p class="muted">Не удалось загрузить. <button type="button" data-spec-retry>Обновить</button></p>';
+        : '<p class="muted">' + {{ _("Не удалось загрузить.")|tojson }} + ' <button type="button" data-spec-retry>' + {{ _("Обновить")|tojson }} + '</button></p>';
     } catch {
-      body.innerHTML = '<p class="muted">Нет связи с сайтом. <button type="button" data-spec-retry>Обновить</button></p>';
+      body.innerHTML = '<p class="muted">' + {{ _("Нет связи с сайтом.")|tojson }} + ' <button type="button" data-spec-retry>' + {{ _("Обновить")|tojson }} + '</button></p>';
     }
   };
   document.addEventListener("click", (event) => {

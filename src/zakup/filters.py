@@ -14,6 +14,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 from zakup.goszakup import PORTAL_TZ
+from zakup.i18n import gettext
 
 # Справочник статусов портала (ref_buy_status / ref_lots_status), только те, что
 # встречаются на практике. Коды у объявлений и лотов общие, кроме итогов.
@@ -422,53 +423,55 @@ class Filters:
         return orders.get(self.sort, orders["advance"])
 
     def describe(self) -> str:
+        """Условия фильтра словами — на языке интерфейса."""
+        _ = gettext
         parts = []
         if self.q:
             parts.append(f"«{self.q}»")
         if self.exclude:
-            parts.append(f"без слов «{self.exclude}»")
+            parts.append(_("без слов «{words}»", words=self.exclude))
         if self.number:
-            parts.append(f"объявление № {self.number}")
+            parts.append(_("объявление № {number}", number=self.number))
         if self.lot_number:
-            parts.append(f"лот № {self.lot_number}")
+            parts.append(_("лот № {number}", number=self.lot_number))
         if self.enstru:
             parts.append(f"ЕНС ТРУ {self.enstru}")
         if self.stages:
-            parts.append(", ".join(STAGES[s] for s in self.stages if s in STAGES))
+            parts.append(", ".join(_(STAGES[s]) for s in self.stages if s in STAGES))
         if self.statuses:
-            parts.append(", ".join(STATUS_NAMES[s] for s in self.statuses if s in STATUS_NAMES))
+            parts.append(", ".join(_(STATUS_NAMES[s]) for s in self.statuses if s in STATUS_NAMES))
         if self.disable_person == "only":
-            parts.append("среди организаций инвалидов")
+            parts.append(_("среди организаций инвалидов"))
         elif self.disable_person == "exclude":
-            parts.append("без закупок среди организаций инвалидов")
+            parts.append(_("без закупок среди организаций инвалидов"))
         if self.methods:
-            parts.append(", ".join(METHODS[m][0] for m in self.methods if m in METHODS))
+            parts.append(", ".join(_(METHODS[m][0]) for m in self.methods if m in METHODS))
         if self.subjects:
-            parts.append(", ".join(SUBJECTS[s] for s in self.subjects if s in SUBJECTS).lower())
+            parts.append(", ".join(_(SUBJECTS[s]) for s in self.subjects if s in SUBJECTS).lower())
         if self.years:
-            parts.append("финансовый год " + ", ".join(map(str, self.years)))
+            parts.append(_("финансовый год {years}", years=", ".join(map(str, self.years))))
         if self.customer:
-            parts.append(f"заказчик «{self.customer}»")
+            parts.append(_("заказчик «{name}»", name=self.customer))
         if self.regions:
-            parts.append(", ".join(REGIONS[r] for r in self.regions if r in REGIONS))
+            parts.append(", ".join(_(REGIONS[r]) for r in self.regions if r in REGIONS))
         if self.min_sum is not None:
-            parts.append(f"от {self.min_sum:,.0f} ₸".replace(",", " "))
+            parts.append(_("от {sum} ₸", sum=f"{self.min_sum:,.0f}".replace(",", " ")))
         if self.max_sum is not None:
-            parts.append(f"до {self.max_sum:,.0f} ₸".replace(",", " "))
+            parts.append(_("до {sum} ₸", sum=f"{self.max_sum:,.0f}".replace(",", " ")))
         if self.deadline == DEADLINE_RULE:
-            parts.append("окончание через 2 рабочих дня")
+            parts.append(_("окончание через 2 рабочих дня"))
         elif self.deadline:
-            parts.append(f"окончание по {self.deadline}")
+            parts.append(_("окончание по {date}", date=self.deadline))
         for label, start, end in (("окончание", "" if self.end_from == TODAY else self.end_from, ""),
                                   ("начало приёма", self.start_from, self.start_to),
                                   ("опубликовано", self.published_from, self.published_to),
                                   ("протокол итогов", self.itogi_from, self.itogi_to)):
             if start or end:
-                parts.append(f"{label} {start or '…'} — {end or '…'}")
+                parts.append(f"{_(label)} {start or '…'} — {end or '…'}")
         if self.advance_only:
-            parts.append("с авансом")
+            parts.append(_("с авансом"))
         if (self.advance_min, self.advance_max) != (0, 100):
-            parts.append(f"аванс {self.advance_min}–{self.advance_max}%")
+            parts.append(_("аванс {low}–{high}%", low=self.advance_min, high=self.advance_max))
         return "; ".join(parts)
 
 

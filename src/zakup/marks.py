@@ -126,15 +126,15 @@ def remind(conn: psycopg.Connection, now: datetime | None = None, pause: float =
         if hours is None:
             continue
         lines = [
-            f"⏰ <b>Осталось {_left(end, now)}</b> — приём до "
+            f"⏰ <b>Осталось / Қалды: {_left(end, now)}</b> · "
             f"{end.astimezone(PORTAL_TZ):%d.%m %H:%M}",
             f"{html.escape(name or '—')} · {_money(amount)}",
             html.escape(customer or ""),
-            f"Ваша отметка: {STATUSES[status]}",
+            f"Отметка / Белгі: {STATUSES[status]}",
         ]
         if note:
             lines.append(f"Заметка: {html.escape(note[:300])}")
-        lines.append(f'<a href="{lot_url(lot_id)}">Открыть лот</a>')
+        lines.append(f'<a href="{lot_url(lot_id)}">Открыть лот / Лотты ашу</a>')
         try:
             telegram.send_message(chat_id, "\n".join(line for line in lines if line))
         except telegram.TelegramError as error:
@@ -158,7 +158,8 @@ def remind(conn: psycopg.Connection, now: datetime | None = None, pause: float =
     return sent
 
 
-OUTCOME_TEXT = {"winner": "Итоги подведены", "failed": "Закупка не состоялась"}
+OUTCOME_TEXT = {"winner": "Итоги подведены / Қорытынды шығарылды",
+                "failed": "Закупка не состоялась / Сатып алу өтпеді"}
 
 
 def announce_results(conn: psycopg.Connection, pause: float = 1.1) -> int:
@@ -184,14 +185,14 @@ def announce_results(conn: psycopg.Connection, pause: float = 1.1) -> int:
         lines = [f"🏁 <b>{OUTCOME_TEXT.get(outcome, outcome)}</b>",
                  f"{html.escape(name or '—')} · {_money(amount)}"]
         if outcome == "winner":
-            lines.append(f"Победитель: {html.escape(winner_name or winner_bin or '—')}"
+            lines.append(f"Победитель / Жеңімпаз: {html.escape(winner_name or winner_bin or '—')}"
                          f"{' — ' + _money(winner_total) if winner_total is not None else ''}")
         elif reason:
-            lines.append(f"Причина: {html.escape(reason)}")
-        lines.append(f"Предложений: {len(offers or [])}")
+            lines.append(f"Причина / Себебі: {html.escape(reason)}")
+        lines.append(f"Предложений / Ұсыныстар: {len(offers or [])}")
         if new_status != status:
-            lines.append(f"Отметка изменена: {STATUSES[new_status]}")
-        lines.append(f'<a href="{lot_url(lot_id)}">Открыть лот</a>')
+            lines.append(f"Отметка изменена / Белгі өзгерді: {STATUSES[new_status]}")
+        lines.append(f'<a href="{lot_url(lot_id)}">Открыть лот / Лотты ашу</a>')
         if chat_id:
             try:
                 telegram.send_message(chat_id, "\n".join(lines))

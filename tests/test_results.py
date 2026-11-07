@@ -96,7 +96,7 @@ def test_refresh_saves_results_and_marks_get_outcome(conn, monkeypatch):
     monkeypatch.setattr(marks.telegram, "send_message", lambda chat, text: sent.append(text))
     assert marks.announce_results(conn, pause=0) == 2
     assert marks.of_user(conn, user, [70, 71]) == {70: ("lost", ""), 71: ("interested", "")}
-    assert any("Отметка изменена: Не выиграли" in text for text in sent)
+    assert any("Отметка изменена / Белгі өзгерді: Не выиграли" in text for text in sent)
     assert marks.announce_results(conn, pause=0) == 0
 
 

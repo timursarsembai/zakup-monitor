@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Совпадения{% endblock %}
+{% block title %}{{ _("Совпадения") }}{% endblock %}
 {% block style %}
   .subs { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 14px; align-items: center; }
   .subs label { display: inline-flex; gap: 6px; align-items: center; padding: 4px 12px; border: 1px solid var(--line); border-radius: 999px; cursor: pointer; font-size: 14px; }
@@ -10,16 +10,16 @@
 {% if subs %}
 <form class="subs" method="get" action="/matches">
   <input type="hidden" name="filtered" value="1">
-  <span class="muted">Подписки:</span>
+  <span class="muted">{{ _("Подписки:") }}</span>
   {% for s in subs %}
   <label><input type="checkbox" name="sub" value="{{ s[0] }}" {% if s[0] in chosen %}checked{% endif %} onchange="this.form.submit()"> {{ s[1] }} <span class="muted">{{ s[3] }}</span></label>
   {% endfor %}
-  <a href="/matches?filtered=1{% for s in subs %}&sub={{ s[0] }}{% endfor %}">выбрать все</a>
-  <noscript><button>Показать</button></noscript>
+  <a href="/matches?filtered=1{% for s in subs %}&sub={{ s[0] }}{% endfor %}">{{ _("выбрать все") }}</a>
+  <noscript><button>{{ _("Показать") }}</button></noscript>
 </form>
 {% endif %}
 <div class="table-wrap"><table>
-  <tr><th>Когда</th><th>Подписка</th><th>Лот</th><th>Заказчик</th><th>Сумма, ₸</th><th>Аванс</th><th>Приём до</th></tr>
+  <tr><th>{{ _("Когда") }}</th><th>{{ _("Подписка") }}</th><th>{{ _("Лот") }}</th><th>{{ _("Заказчик") }}</th><th>{{ _("Сумма, ₸") }}</th><th>{{ _("Аванс") }}</th><th>{{ _("Приём до") }}</th></tr>
   {% for r in rows %}
   <tr>
     <td class="muted">{{ (r[0]|local).strftime("%d.%m %H:%M") }}</td>
@@ -33,7 +33,7 @@
     <td>{{ (r[6]|local).strftime("%d.%m.%Y %H:%M") if r[6] else "" }}</td>
   </tr>
   {% else %}
-  <tr><td colspan="7" class="muted">{% if chosen %}Совпадений пока нет.{% else %}Отметьте подписки выше.{% endif %}</td></tr>
+  <tr><td colspan="7" class="muted">{% if chosen %}{{ _("Совпадений пока нет.") }}{% else %}{{ _("Отметьте подписки выше.") }}{% endif %}</td></tr>
   {% endfor %}
 </table></div>
 {% endblock %}

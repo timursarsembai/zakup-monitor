@@ -9,74 +9,74 @@
 {% block main %}
 {% if refresh_error %}<p class="notice">{{ refresh_error }}</p>{% endif %}
 <div class="chips">
-  <span class="chip status">{{ (a.RefBuyStatus or {}).nameRu or "" }}</span>
-  {% if a.RefTradeMethods %}<span class="chip">{{ a.RefTradeMethods.nameRu }}</span>{% endif %}
-  {% if a.RefSubjectType %}<span class="chip">{{ a.RefSubjectType.nameRu }}</span>{% endif %}
-  {% if a.disablePersonId == 1 %}<span class="chip">Среди организаций инвалидов</span>{% endif %}
+  <span class="chip status">{{ loc(a.RefBuyStatus) or "" }}</span>
+  {% if a.RefTradeMethods %}<span class="chip">{{ loc(a.RefTradeMethods) }}</span>{% endif %}
+  {% if a.RefSubjectType %}<span class="chip">{{ loc(a.RefSubjectType) }}</span>{% endif %}
+  {% if a.disablePersonId == 1 %}<span class="chip">{{ _("Среди организаций инвалидов") }}</span>{% endif %}
 </div>
-<div class="muted">Объявление № {{ a.numberAnno or a.id }}</div>
-<h1>{{ a.nameRu }}</h1>
-{{ share_buttons("/a/" ~ a.id, portal_url, a.nameRu) }}
+<div class="muted">{{ _("Объявление №") }} {{ a.numberAnno or a.id }}</div>
+<h1>{{ loc(a) }}</h1>
+{{ share_buttons("/a/" ~ a.id, portal_url, loc(a)) }}
 
 <div class="head">
   <dl class="facts">
-    <dt>Дата публикации</dt><dd>{{ a.publishDate | portal_date }}</dd>
-    <dt>Начало приема заявок</dt><dd>{{ a.startDate | portal_date }}</dd>
-    <dt>Окончание приема заявок</dt><dd><b>{{ (end|local).strftime("%d.%m.%Y %H:%M") if end else "—" }}</b></dd>
-    <dt>Способ закупки</dt><dd>{{ (a.RefTradeMethods or {}).nameRu or "—" }}</dd>
-    <dt>Тип закупки</dt><dd>{{ ((a.RefTypeTrade or {}).nameRu or "—")|trim }}</dd>
-    <dt>Вид предмета</dt><dd>{{ (a.RefSubjectType or {}).nameRu or "—" }}</dd>
-    <dt>Организатор</dt><dd>{% if a.Organizer %}{{ a.Organizer.bin }} {{ a.Organizer.nameRu }}{% else %}{{ a.orgBin }} {{ a.orgNameRu }}{% endif %}</dd>
+    <dt>{{ _("Дата публикации") }}</dt><dd>{{ a.publishDate | portal_date }}</dd>
+    <dt>{{ _("Начало приема заявок") }}</dt><dd>{{ a.startDate | portal_date }}</dd>
+    <dt>{{ _("Окончание приема заявок") }}</dt><dd><b>{{ (end|local).strftime("%d.%m.%Y %H:%M") if end else "—" }}</b></dd>
+    <dt>{{ _("Способ закупки") }}</dt><dd>{{ loc(a.RefTradeMethods) or "—" }}</dd>
+    <dt>{{ _("Тип закупки") }}</dt><dd>{{ (loc(a.RefTypeTrade) or "—")|trim }}</dd>
+    <dt>{{ _("Вид предмета") }}</dt><dd>{{ loc(a.RefSubjectType) or "—" }}</dd>
+    <dt>{{ _("Организатор") }}</dt><dd>{% if a.Organizer %}{{ a.Organizer.bin }} {{ loc(a.Organizer) }}{% else %}{{ a.orgBin }} {{ loc(a, "orgNameRu") }}{% endif %}</dd>
     {% set address = ((a.Organizer or {}).Address or [])|first %}
-    {% if address %}<dt>Адрес организатора</dt><dd>{{ address.address }}</dd>{% endif %}
+    {% if address %}<dt>{{ _("Адрес организатора") }}</dt><dd>{{ address.address }}</dd>{% endif %}
   </dl>
   <div class="aside">
-    <div class="muted">Сумма закупки</div>
+    <div class="muted">{{ _("Сумма закупки") }}</div>
     <div class="total">{{ a.totalSum | money }} ₸</div>
-    <div class="muted">Лотов: {{ lots|length }}</div>
+    <div class="muted">{{ _("Лотов:") }} {{ lots|length }}</div>
     {% if end %}
-    <div class="muted" style="margin-top:12px">До конца приема заявок</div>
+    <div class="muted" style="margin-top:12px">{{ _("До конца приема заявок") }}</div>
     <div class="countdown" data-end="{{ end.isoformat() }}">
-      <div><b data-part="d">–</b><span>дн</span></div>
-      <div><b data-part="h">–</b><span>ч</span></div>
-      <div><b data-part="m">–</b><span>мин</span></div>
-      <div><b data-part="s">–</b><span>сек</span></div>
+      <div><b data-part="d">–</b><span>{{ _("дн") }}</span></div>
+      <div><b data-part="h">–</b><span>{{ _("ч") }}</span></div>
+      <div><b data-part="m">–</b><span>{{ _("мин") }}</span></div>
+      <div><b data-part="s">–</b><span>{{ _("сек") }}</span></div>
     </div>
     {% endif %}
   </div>
 </div>
 
 <nav class="tabs" role="tablist">
-  <button role="tab" data-tab="lots" aria-selected="true">Лоты ({{ lots|length }})</button>
-  <button role="tab" data-tab="docs" aria-selected="false">Документация ({{ documents|length }})</button>
-  <button role="tab" data-tab="protocols" aria-selected="false">Протоколы ({{ protocols|length }})</button>
-  <button role="tab" data-tab="winners" aria-selected="false">Победители ({{ results|length }})</button>
-  <button role="tab" data-tab="contracts" aria-selected="false">Договоры ({{ contracts|length }})</button>
-  <button role="tab" data-tab="appeals" aria-selected="false">Апелляции ({{ appeals|length }})</button>
-  <a href="{{ portal_url }}" target="_blank" rel="noopener">На портале ↗</a>
+  <button role="tab" data-tab="lots" aria-selected="true">{{ _("Лоты (") }}{{ lots|length }})</button>
+  <button role="tab" data-tab="docs" aria-selected="false">{{ _("Документация (") }}{{ documents|length }})</button>
+  <button role="tab" data-tab="protocols" aria-selected="false">{{ _("Протоколы (") }}{{ protocols|length }})</button>
+  <button role="tab" data-tab="winners" aria-selected="false">{{ _("Победители (") }}{{ results|length }})</button>
+  <button role="tab" data-tab="contracts" aria-selected="false">{{ _("Договоры (") }}{{ contracts|length }})</button>
+  <button role="tab" data-tab="appeals" aria-selected="false">{{ _("Апелляции (") }}{{ appeals|length }})</button>
+  <a href="{{ portal_url }}" target="_blank" rel="noopener">{{ _("На портале ↗") }}</a>
 </nav>
 
 <section data-panel="lots">
   {% for lot in lots %}
   {{ lot_card(lot) }}
   {% else %}
-  <p class="muted">Лотов нет.</p>
+  <p class="muted">{{ _("Лотов нет.") }}</p>
   {% endfor %}
 </section>
 
 <section data-panel="docs" hidden>
   <ul class="files">
     {% for f in documents %}
-    <li><a href="{{ f.filePath | safe_url }}" target="_blank" rel="noopener">{{ f.nameRu or f.originalName }}</a>{% if f.originalName %} <span class="muted">{{ f.originalName }}</span>{% endif %}</li>
-    {% else %}<li class="muted">Файлов нет.</li>{% endfor %}
+    <li><a href="{{ f.filePath | safe_url }}" target="_blank" rel="noopener">{{ loc(f) or f.originalName }}</a>{% if f.originalName %} <span class="muted">{{ f.originalName }}</span>{% endif %}</li>
+    {% else %}<li class="muted">{{ _("Файлов нет.") }}</li>{% endfor %}
   </ul>
 </section>
 
 <section data-panel="protocols" hidden>
   <ul class="files">
     {% for f in protocols %}
-    <li><a href="{{ f.filePath | safe_url }}" target="_blank" rel="noopener">{{ f.nameRu or f.originalName }}</a></li>
-    {% else %}<li class="muted">Протоколов пока нет: они появляются после окончания приема заявок.</li>{% endfor %}
+    <li><a href="{{ f.filePath | safe_url }}" target="_blank" rel="noopener">{{ loc(f) or f.originalName }}</a></li>
+    {% else %}<li class="muted">{{ _("Протоколов пока нет: они появляются после окончания приема заявок.") }}</li>{% endfor %}
   </ul>
 </section>
 
@@ -85,41 +85,41 @@
   {% for lot in lots if lot.id in results %}
   {{ lot_winners(lot, results[lot.id]) }}
   {% else %}
-  <p class="muted">{% if not ended %}Победители появятся после окончания приема заявок и публикации протокола итогов.{% elif protocols %}Итоги из протокола разобрать не удалось — откройте его на вкладке «Протоколы».{% else %}Протокол итогов ещё не опубликован. Страница проверит его снова при следующем открытии.{% endif %}</p>
+  <p class="muted">{% if not ended %}{{ _("Победители появятся после окончания приема заявок и публикации протокола итогов.") }}{% elif protocols %}{{ _("Итоги из протокола разобрать не удалось — откройте его на вкладке «Протоколы».") }}{% else %}{{ _("Протокол итогов ещё не опубликован. Страница проверит его снова при следующем открытии.") }}{% endif %}</p>
   {% endfor %}
-  {% if results and not company_bin %}<p class="muted">Укажите БИН вашей организации в <a href="/settings">настройках</a> — тогда ваши предложения будут отмечены, а итог по отмеченным лотам поставится сам.</p>{% endif %}
+  {% if results and not company_bin %}<p class="muted">{{ _("Укажите БИН вашей организации в") }} <a href="/settings">{{ _("настройках") }}</a> {{ _("— тогда ваши предложения будут отмечены, а итог по отмеченным лотам поставится сам.") }}</p>{% endif %}
 </section>
 
 <section data-panel="contracts" hidden>
   {% if contracts %}
   <div class="table-wrap"><table>
-    <tr><th>Договор</th><th>Поставщик</th><th>Лоты</th><th>Сумма, ₸</th><th>Подписан</th><th>Статус</th></tr>
+    <tr><th>{{ _("Договор") }}</th><th>{{ _("Поставщик") }}</th><th>{{ _("Лоты") }}</th><th>{{ _("Сумма, ₸") }}</th><th>{{ _("Подписан") }}</th><th>{{ _("Статус") }}</th></tr>
     {% for c in contracts %}
     <tr>
-      <td>{{ c.contractNumberSys }}{% if c.File %}{% for f in c.File if f.filePath %}<div><a href="{{ f.filePath | safe_url }}" target="_blank" rel="noopener">{{ f.nameRu or "файл" }}</a></div>{% endfor %}{% endif %}</td>
-      <td>{{ (c.Supplier or {}).nameRu or "" }}<div class="muted">{{ c.supplierBiin }}</div></td>
+      <td>{{ c.contractNumberSys }}{% if c.File %}{% for f in c.File if f.filePath %}<div><a href="{{ f.filePath | safe_url }}" target="_blank" rel="noopener">{{ loc(f) or _("файл") }}</a></div>{% endfor %}{% endif %}</td>
+      <td>{{ loc(c.Supplier) or "" }}<div class="muted">{{ c.supplierBiin }}</div></td>
       <td class="muted">{% for u in c.ContractUnits or [] %}{{ lot_numbers.get(u.lotId) or u.lotId }}{% if not loop.last %}, {% endif %}{% endfor %}</td>
       <td class="num">{{ c.contractSum | money }}</td>
       <td>{{ c.signDate | portal_date("%d.%m.%Y") }}</td>
-      <td>{{ (c.RefContractStatus or {}).nameRu or "" }}</td>
+      <td>{{ loc(c.RefContractStatus) or "" }}</td>
     </tr>
     {% endfor %}
   </table></div>
   {% else %}
-  <p class="muted">{% if ended %}Договоров пока нет: их подписывают в течение нескольких дней после итогов.{% else %}Договоры появятся после итогов.{% endif %}</p>
+  <p class="muted">{% if ended %}{{ _("Договоров пока нет: их подписывают в течение нескольких дней после итогов.") }}{% else %}{{ _("Договоры появятся после итогов.") }}{% endif %}</p>
   {% endif %}
 </section>
 
 <section data-panel="appeals" hidden>
   <ul class="files">
     {% for ap in appeals %}
-    <li>Обращение № {{ ap.numberAppeal or ap.id }}{% if ap.dateApply %} от {{ ap.dateApply | portal_date("%d.%m.%Y") }}{% endif %}{% if ap.decisionDate %}, решение {{ ap.decisionDate | portal_date("%d.%m.%Y") }}{% endif %}
-      {% for f in ap.Files or [] if f.filePath %}<a href="{{ f.filePath | safe_url }}" target="_blank" rel="noopener">файл {{ loop.index }}</a> {% endfor %}</li>
-    {% else %}<li class="muted">Апелляций нет.</li>{% endfor %}
+    <li>{{ _("Обращение №") }} {{ ap.numberAppeal or ap.id }}{% if ap.dateApply %} {{ _("от") }} {{ ap.dateApply | portal_date("%d.%m.%Y") }}{% endif %}{% if ap.decisionDate %}{{ _(", решение") }} {{ ap.decisionDate | portal_date("%d.%m.%Y") }}{% endif %}
+      {% for f in ap.Files or [] if f.filePath %}<a href="{{ f.filePath | safe_url }}" target="_blank" rel="noopener">{{ _("файл") }} {{ loop.index }}</a> {% endfor %}</li>
+    {% else %}<li class="muted">{{ _("Апелляций нет.") }}</li>{% endfor %}
   </ul>
 </section>
 
-<p class="muted" style="margin-top:24px">Данные с портала обновлены {{ (fetched_at|local).strftime("%d.%m.%Y %H:%M") if fetched_at else "—" }}{% if results_at %}, итоги и договоры — {{ (results_at|local).strftime("%d.%m.%Y %H:%M") }}{% endif %}.</p>
+<p class="muted" style="margin-top:24px">{{ _("Данные с портала обновлены") }} {{ (fetched_at|local).strftime("%d.%m.%Y %H:%M") if fetched_at else "—" }}{% if results_at %}{{ _(", итоги и договоры —") }} {{ (results_at|local).strftime("%d.%m.%Y %H:%M") }}{% endif %}.</p>
 
 <script>
   const showTab = (name) => {

@@ -2,10 +2,10 @@
 {% macro mark_control(lot_id, mark, next) %}
 <form class="mark-form" method="post" action="/lots/{{ lot_id }}/mark">
   <input type="hidden" name="next" value="{{ next }}">
-  <select name="status" class="mark-select{% if mark and mark[0] %} marked mark-{{ mark[0] }}{% endif %}" onchange="this.form.submit()" aria-label="Отметка">
-    <option value="">{{ "Снять отметку" if mark and mark[0] else "Отметить…" }}</option>
+  <select name="status" class="mark-select{% if mark and mark[0] %} marked mark-{{ mark[0] }}{% endif %}" onchange="this.form.submit()" aria-label="{{ _("Отметка") }}">
+    <option value="">{{ _("Снять отметку") if mark and mark[0] else _("Отметить…") }}</option>
     {% for key, name in mark_statuses.items() %}
-    <option value="{{ key }}" {% if mark and mark[0] == key %}selected{% endif %}>{{ name }}</option>
+    <option value="{{ key }}" {% if mark and mark[0] == key %}selected{% endif %}>{{ _(name) }}</option>
     {% endfor %}
   </select>
   <noscript><button>OK</button></noscript>
@@ -15,8 +15,8 @@
 {% macro note_form(lot_id, mark, next) %}
 <form class="note-form" method="post" action="/lots/{{ lot_id }}/mark">
   <input type="hidden" name="next" value="{{ next }}">
-  <textarea name="note" rows="2" maxlength="2000" placeholder="Заметка: цена поставщика, контакты, что подготовить…">{{ mark[1] if mark else "" }}</textarea>
-  <button>Сохранить заметку</button>
+  <textarea name="note" rows="2" maxlength="2000" placeholder="{{ _("Заметка: цена поставщика, контакты, что подготовить…") }}">{{ mark[1] if mark else "" }}</textarea>
+  <button>{{ _("Сохранить заметку") }}</button>
 </form>
 {% endmacro %}
 

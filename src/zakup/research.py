@@ -81,6 +81,7 @@ RESULT_SCHEMA = {
                     "price_unit": {"type": "string"},
                     "unit_price": {"type": ["number", "null"]},
                     "url": {"type": "string"},
+                    "phone": {"type": ["string", "null"]},
                     "image": {"type": ["string", "null"]},
                     "fit": {"type": "string", "enum": ["полностью", "частично", "аналог"]},
                     "note": {"type": "string"},
@@ -122,7 +123,10 @@ PROMPT = """Ты помогаешь поставщику, который уча�
    - price — цена на странице в тенге (если в другой валюте — переведи по курсу и
      напиши об этом в note); price_unit — за что эта цена (шт, упаковка 10 шт, м и т.д.);
    - unit_price — цена за ту же единицу, что в лоте ({unit}), в тенге;
-   - url — прямая ссылка на страницу товара;
+   - url — прямая ссылка на страницу товара (обязательно — чтобы перепроверить);
+   - phone — телефон продавца, если он указан на странице товара, в карточке
+     магазина или в контактах этого сайта (несколько — через запятую); e-mail
+     не нужен; не нашёл — null, не выдумывай;
    - image — прямая ссылка на фото товара с этой страницы (обычно og:image), или null;
    - fit — «полностью», если подходит по спецификации, «частично» — если отличается
      в мелочах, «аналог» — похожий товар; note — коротко, чем отличается.
@@ -365,6 +369,7 @@ def clean(result: dict[str, Any]) -> dict[str, Any]:
             "price_unit": str(item.get("price_unit") or "")[:60],
             "unit_price": _number(item.get("unit_price")),
             "url": url[:1000],
+            "phone": _phone(item.get("phone")),
             "image": image[:1000] if image.startswith(("https://", "http://")) else None,
             "fit": str(item.get("fit") or "")[:20],
             "note": str(item.get("note") or "")[:400],
@@ -375,6 +380,15 @@ def clean(result: dict[str, Any]) -> dict[str, Any]:
         "summary": str(result.get("summary") or "")[:2000],
         "items": items[:30],
     }
+
+
+def _phone(value: Any) -> str | None:
+    """Только похожее на телефоны: цифры, +, скобки, дефисы, пробелы, запятые."""
+    text = str(value or "").strip()
+    if not text or not any(c.isdigit() for c in text):
+        return None
+    cleaned = "".join(c for c in text if c.isdigit() or c in "+()-, ")
+    return " ".join(cleaned.split())[:120] or None
 
 
 def _number(value: Any) -> float | None:

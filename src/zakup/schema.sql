@@ -305,3 +305,7 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS disabled boolean NOT NULL DEFAULT fal
 ALTER TABLE lots ADD COLUMN IF NOT EXISTS spec_url text;
 ALTER TABLE lot_specs ADD COLUMN IF NOT EXISTS text_kk text;
 ALTER TABLE lot_specs ADD COLUMN IF NOT EXISTS attempts integer NOT NULL DEFAULT 0;
+
+-- Казахская версия (2026-11-08): единица измерения и доп. характеристика лота.
+ALTER TABLE lots ADD COLUMN IF NOT EXISTS unit_name_kz text;
+ALTER TABLE lots ADD COLUMN IF NOT EXISTS extra_desc_kz text;

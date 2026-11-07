@@ -128,6 +128,10 @@ class PendingLot(NamedTuple):
     end_date: datetime | None
     customer: str | None
     announcement_kato: list[str] | None
+    lot_name_kz: str | None = None
+    announcement_name_kz: str | None = None
+    price: Decimal | None = None
+    disable_person: bool | None = None
 
 
 def pending(conn: psycopg.Connection, limit: int = 2000) -> list[PendingLot]:
@@ -139,7 +143,8 @@ def pending(conn: psycopg.Connection, limit: int = 2000) -> list[PendingLot]:
                   coalesce(l.extra_desc, l.description_ru), l.amount, l.count, l.unit_name,
                   l.prepayment, l.kato, l.trd_buy_id, coalesce(a.number_anno, l.number_anno),
                   a.name_ru, a.end_date,
-                  coalesce(a.customer_name_ru, l.customer_name_ru, a.org_name_ru), a.kato
+                  coalesce(a.customer_name_ru, l.customer_name_ru, a.org_name_ru), a.kato,
+                  l.name_kz, a.name_kz, l.price, a.disable_person
            FROM matches m
            JOIN subscriptions s ON s.id = m.subscription_id
            JOIN users u ON u.id = s.user_id
@@ -170,35 +175,46 @@ def _cut(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
 
 
+def _both(russian: str | None, kazakh: str | None, limit: int) -> str:
+    """«Русское / Қазақша» — если казахское есть и отличается, иначе одно русское."""
+    text = html.escape(_cut(russian or "—", limit))
+    if kazakh and kazakh.strip() and kazakh.strip() != (russian or "").strip():
+        text += f" / {html.escape(_cut(kazakh.strip(), limit))}"
+    return text
+
+
 def format_lot(lot: PendingLot) -> str:
-    title = html.escape(_cut(lot.lot_name or "Без названия", 150))
-    if lot.lot_description and lot.lot_description != lot.lot_name:
-        title += f" — {html.escape(lot.lot_description[:120])}"
-    parts = [title]
-    if lot.count is not None and lot.unit_name:
-        parts.append(f"{_quantity(lot.count)} {html.escape(lot.unit_name.lower())}")
-    if lot.amount is not None:
-        parts.append(_money(lot.amount))
+    """Лот одной-двумя строками: название на двух языках, цена × количество = сумма, аванс."""
+    lines = [f"• <b>{_both(lot.lot_name, lot.lot_name_kz, 120)}</b>"]
+    money = []
+    if lot.price is not None and lot.count is not None:
+        money.append(f"{_money(lot.price)} × {_quantity(lot.count)} = {_money(lot.amount)}"
+                     if lot.amount is not None else f"{_money(lot.price)} × {_quantity(lot.count)}")
+    elif lot.amount is not None:
+        money.append(_money(lot.amount))
     if lot.prepayment:
-        parts.append(f"<b>аванс {float(lot.prepayment):g}%</b>")
-    if region := _regions(lot.lot_kato or lot.announcement_kato):
-        parts.append(region)
-    return "• " + " · ".join(parts)
+        money.append(f"<b>аванс {float(lot.prepayment):g}%</b>")
+    if money:
+        lines.append("   " + " · ".join(money))
+    return "\n".join(lines)
 
 
 def format_block(lots: list[PendingLot]) -> str:
-    """Блок одного объявления: шапка и подошедшие лоты."""
+    """Блок одного объявления на двух языках: название, срок, признак, лоты, ссылка."""
     first = lots[0]
-    lines = [f"<b>{html.escape(_cut(first.announcement_name or first.lot_name or 'Объявление', 200))}</b>"]
+    lines = [f"<b>{html.escape(_cut(first.announcement_name or first.lot_name or 'Объявление', 160))}</b>"]
+    if first.announcement_name_kz and first.announcement_name_kz != first.announcement_name:
+        lines.append(f"<i>{html.escape(_cut(first.announcement_name_kz, 160))}</i>")
     head = [f"№ {html.escape(first.number_anno or str(first.announcement_id or ''))}"]
     if first.end_date:
-        head.append(f"приём до {first.end_date.astimezone(PORTAL_TZ):%d.%m %H:%M}")
+        head.append(f"⏰ {first.end_date.astimezone(PORTAL_TZ):%d.%m %H:%M}")
     lines.append(" · ".join(head))
-    if first.customer:
-        lines.append(html.escape(_cut(first.customer, 150)))
+    if first.disable_person:
+        lines.append("♿ Среди организаций инвалидов / Мүгедектер ұйымдары арасында")
     lines += [format_lot(lot) for lot in lots[:LOTS_PER_BLOCK]]
     if len(lots) > LOTS_PER_BLOCK:
-        lines.append(f"…и ещё {len(lots) - LOTS_PER_BLOCK} лотов")
+        rest = len(lots) - LOTS_PER_BLOCK
+        lines.append(f"…и ещё {rest} лот. / тағы {rest} лот")
     if first.announcement_id:
         lines.append(announcement_url(first.announcement_id))
     return "\n".join(lines)

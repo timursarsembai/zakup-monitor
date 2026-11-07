@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Настройки{% endblock %}
+{% block title %}{{ _("Настройки") }}{% endblock %}
 {% block style %}
   .tabs { display: flex; gap: 4px; flex-wrap: wrap; border-bottom: 1px solid var(--line); margin: 8px 0 16px; }
   .tabs a { padding: 8px 14px; border-bottom: 2px solid transparent; color: var(--muted); }
@@ -41,48 +41,48 @@
 {% if error %}<p class="flash bad">{{ error }}</p>{% endif %}
 
 <nav class="tabs" role="tablist">
-  <a href="#notify" role="tab" data-tab="notify">Уведомления</a>
-  <a href="#account" role="tab" data-tab="account">Аккаунт</a>
+  <a href="#notify" role="tab" data-tab="notify">{{ _("Уведомления") }}</a>
+  <a href="#account" role="tab" data-tab="account">{{ _("Аккаунт") }}</a>
   {% if is_admin %}
-  <a href="#ai" role="tab" data-tab="ai">Искусственный интеллект</a>
-  <a href="#company" role="tab" data-tab="company">Организация</a>
-  <a href="#users" role="tab" data-tab="users">Пользователи</a>
+  <a href="#ai" role="tab" data-tab="ai">{{ _("Искусственный интеллект") }}</a>
+  <a href="#company" role="tab" data-tab="company">{{ _("Организация") }}</a>
+  <a href="#users" role="tab" data-tab="users">{{ _("Пользователи") }}</a>
   {% endif %}
 </nav>
 
 <div data-tab-panel="notify">
 <section class="panel">
-  <h2>Уведомления в Telegram</h2>
-  <p class="muted">Новые лоты по вашим подпискам приходят сводкой раз в 10 минут.</p>
+  <h2>{{ _("Уведомления в Telegram") }}</h2>
+  <p class="muted">{{ _("Новые лоты по вашим подпискам приходят сводкой раз в 10 минут.") }}</p>
   {% if not configured %}
-    <p>Бот пока не настроен на сервере.</p>
+    <p>{{ _("Бот пока не настроен на сервере.") }}</p>
   {% elif connected %}
-    <div class="status"><span class="dot on"></span>Подключено к @{{ bot_username }}</div>
+    <div class="status"><span class="dot on"></span>{{ _("Подключено к @") }}{{ bot_username }}</div>
     <div class="actions">
-      <form method="post" action="/settings/telegram/test"><button>Отправить проверку</button></form>
-      <form method="post" action="/settings/telegram/unlink"><button>Отключить</button></form>
+      <form method="post" action="/settings/telegram/test"><button>{{ _("Отправить проверку") }}</button></form>
+      <form method="post" action="/settings/telegram/unlink"><button>{{ _("Отключить") }}</button></form>
     </div>
-    {% if sent == "ok" %}<p class="note">Проверочное сообщение отправлено.</p>
-    {% elif sent == "fail" %}<p class="note">Не удалось отправить. Возможно, бот заблокирован — подключите заново.</p>{% endif %}
+    {% if sent == "ok" %}<p class="note">{{ _("Проверочное сообщение отправлено.") }}</p>
+    {% elif sent == "fail" %}<p class="note">{{ _("Не удалось отправить. Возможно, бот заблокирован — подключите заново.") }}</p>{% endif %}
   {% else %}
-    <div class="status"><span class="dot"></span>Не подключено</div>
+    <div class="status"><span class="dot"></span>{{ _("Не подключено") }}</div>
     <div class="actions">
-      <form method="post" action="/settings/telegram/link"><button class="primary">Подключить Telegram</button></form>
+      <form method="post" action="/settings/telegram/link"><button class="primary">{{ _("Подключить Telegram") }}</button></form>
     </div>
-    <p class="note muted">Откроется бот @{{ bot_username }} — нажмите в нём «Start». Ссылка одноразовая и действует 30 минут. Потом обновите эту страницу.</p>
+    <p class="note muted">{{ _("Откроется бот @") }}{{ bot_username }} {{ _("— нажмите в нём «Start». Ссылка одноразовая и действует 30 минут. Потом обновите эту страницу.") }}</p>
   {% endif %}
 </section>
 {% if is_admin %}
 <section class="panel">
-  <h2>Telegram-группы</h2>
-  <p class="muted">Результаты подписок можно присылать в общую группу, например с партнёрами: в подписке выберите «в группу». Если лот подошёл под несколько подписок, в группу он придёт один раз — с названием подписки и логином.</p>
+  <h2>{{ _("Telegram-группы") }}</h2>
+  <p class="muted">{{ _("Результаты подписок можно присылать в общую группу, например с партнёрами: в подписке выберите «в группу». Если лот подошёл под несколько подписок, в группу он придёт один раз — с названием подписки и логином.") }} {{ _("Подключённые группы доступны всем пользователям: каждый сам решает, какие подписки слать в группу, а какие — себе в личку.") }}</p>
   {% for chat_id, title in groups %}
   <div class="status"><span class="dot on"></span>{{ title }}
-    <form method="post" action="/settings/groups/remove" style="display:inline"><input type="hidden" name="chat_id" value="{{ chat_id }}"><button>Отключить</button></form></div>
+    <form method="post" action="/settings/groups/remove" style="display:inline"><input type="hidden" name="chat_id" value="{{ chat_id }}"><button>{{ _("Отключить") }}</button></form></div>
   {% endfor %}
   {% if configured %}
-  <div class="actions"><form method="post" action="/settings/telegram/group"><button class="primary">Подключить группу</button></form></div>
-  <p class="note muted">Откроется Telegram: выберите группу — бот @{{ bot_username }} добавится в неё и подтвердит подключение. Ссылка одноразовая, действует 30 минут. Потом обновите эту страницу.</p>
+  <div class="actions"><form method="post" action="/settings/telegram/group"><button class="primary">{{ _("Подключить группу") }}</button></form></div>
+  <p class="note muted">{{ _("Откроется Telegram: выберите группу — бот @") }}{{ bot_username }} {{ _("добавится в неё и подтвердит подключение. Ссылка одноразовая, действует 30 минут. Потом обновите эту страницу.") }}</p>
   {% endif %}
 </section>
 {% endif %}
@@ -90,89 +90,89 @@
 
 <div data-tab-panel="account" hidden>
 <section class="panel">
-  <h2>Мой пароль</h2>
+  <h2>{{ _("Мой пароль") }}</h2>
   <form method="post" action="/settings/password">
-    <label class="field"><span>Текущий пароль</span><input type="password" name="current" autocomplete="current-password" required></label>
-    <label class="field"><span>Новый пароль, от {{ min_password }} символов</span><input type="password" name="password" autocomplete="new-password" minlength="{{ min_password }}" required></label>
-    <label class="field"><span>Новый пароль ещё раз</span><input type="password" name="repeat" autocomplete="new-password" minlength="{{ min_password }}" required></label>
-    <button class="primary">Сменить пароль</button>
+    <label class="field"><span>{{ _("Текущий пароль") }}</span><input type="password" name="current" autocomplete="current-password" required></label>
+    <label class="field"><span>{{ _("Новый пароль, от") }} {{ min_password }} {{ _("символов") }}</span><input type="password" name="password" autocomplete="new-password" minlength="{{ min_password }}" required></label>
+    <label class="field"><span>{{ _("Новый пароль ещё раз") }}</span><input type="password" name="repeat" autocomplete="new-password" minlength="{{ min_password }}" required></label>
+    <button class="primary">{{ _("Сменить пароль") }}</button>
   </form>
-  <p class="note muted">После смены пароля нужно войти заново — на всех устройствах.</p>
+  <p class="note muted">{{ _("После смены пароля нужно войти заново — на всех устройствах.") }}</p>
 </section>
 </div>
 
 {% if is_admin %}
 <div data-tab-panel="ai" hidden>
 <section class="panel">
-  <h2>Кто ищет товары под лоты</h2>
-  <p class="muted">Настройка общая для всех пользователей. Выбранный способ — единственный: если включён API, Claude Code на сервере не используется.</p>
+  <h2>{{ _("Кто ищет товары под лоты") }}</h2>
+  <p class="muted">{{ _("Настройка общая для всех пользователей. Выбранный способ — единственный: если включён API, Claude Code на сервере не используется.") }}</p>
   <form method="post" action="/settings/ai" data-ai-form>
     <div class="providers">
       {% for key, name in providers.items() %}
       <label class="provider"><input type="radio" name="provider" value="{{ key }}" {% if ai_provider == key %}checked{% endif %}>
-        <span><b>{{ name }}</b>
-        <span class="muted">{% if key == "claude_code" %}Без ключей: работает по подписке владельца на этом сервере.{% elif key in ai_keys %}Ключ сохранён.{% else %}Нужен API-ключ.{% endif %}</span></span></label>
+        <span><b>{{ _(name) }}</b>
+        <span class="muted">{% if key == "claude_code" %}{{ _("Без ключей: работает по подписке владельца на этом сервере.") }}{% elif key in ai_keys %}{{ _("Ключ сохранён.") }}{% else %}{{ _("Нужен API-ключ.") }}{% endif %}</span></span></label>
       {% endfor %}
     </div>
     {% for key in ("anthropic", "openai") %}
     <div data-provider-fields="{{ key }}" {% if ai_provider != key %}hidden{% endif %}>
-      <label class="field"><span>API-ключ {{ "Anthropic" if key == "anthropic" else "OpenAI" }}{% if key in ai_keys %} — сохранён; введите новый, чтобы заменить{% endif %}</span>
+      <label class="field"><span>{{ _("API-ключ") }} {{ "Anthropic" if key == "anthropic" else "OpenAI" }}{% if key in ai_keys %} {{ _("— сохранён; введите новый, чтобы заменить") }}{% endif %}</span>
         <input name="api_key" type="password" autocomplete="off" placeholder="{{ 'sk-ant-…' if key == 'anthropic' else 'sk-…' }}" {% if ai_provider != key %}disabled{% endif %}></label>
-      <label class="field"><span>Модель</span>
+      <label class="field"><span>{{ _("Модель") }}</span>
         <select name="model" data-models="{{ key }}" {% if ai_provider != key %}disabled{% endif %}>
           {% for model_id, label in models[key] %}<option value="{{ model_id }}" {% if ai_provider == key and ai_model == model_id %}selected{% endif %}>{{ label }}</option>{% endfor %}
         </select></label>
       {% if key in ai_keys %}<p class="muted" data-models-status="{{ key }}"></p>{% endif %}
     </div>
     {% endfor %}
-    <button class="primary">Сохранить</button>
+    <button class="primary">{{ _("Сохранить") }}</button>
   </form>
-  {% if saved == "ai" %}<p class="note">Сохранено.</p>{% endif %}
-  <p class="note muted">Ключ хранится зашифрованным и на страницу не выводится.</p>
+  {% if saved == "ai" %}<p class="note">{{ _("Сохранено.") }}</p>{% endif %}
+  <p class="note muted">{{ _("Ключ хранится зашифрованным и на страницу не выводится.") }}</p>
 </section>
 </div>
 
 <div data-tab-panel="company" hidden>
 <section class="panel">
-  <h2>Ваша организация</h2>
-  <p class="muted">БИН или ИИН, под которым вы подаёте ценовые предложения. По нему в итогах отмечаются ваши предложения, а отмеченные лоты сами получают «Выиграли» или «Не выиграли».</p>
+  <h2>{{ _("Ваша организация") }}</h2>
+  <p class="muted">{{ _("БИН или ИИН, под которым вы подаёте ценовые предложения. По нему в итогах отмечаются ваши предложения, а отмеченные лоты сами получают «Выиграли» или «Не выиграли».") }}</p>
   <form class="actions" method="post" action="/settings/company">
-    <input name="company_bin" value="{{ company_bin or '' }}" placeholder="12 цифр" inputmode="numeric" maxlength="12" pattern="\d{12}" aria-label="БИН или ИИН">
-    <button class="primary">Сохранить</button>
+    <input name="company_bin" value="{{ company_bin or '' }}" placeholder="{{ _("12 цифр") }}" inputmode="numeric" maxlength="12" pattern="\d{12}" aria-label="{{ _("БИН или ИИН") }}">
+    <button class="primary">{{ _("Сохранить") }}</button>
   </form>
-  {% if saved == "bin" %}<p class="note">Сохранено.</p>{% endif %}
+  {% if saved == "bin" %}<p class="note">{{ _("Сохранено.") }}</p>{% endif %}
 </section>
 </div>
 
 <div data-tab-panel="users" hidden>
 <section class="panel wide">
-  <h2>Пользователи</h2>
-  <p class="muted">Администратор заводит пользователей и сбрасывает им пароли. Новый пароль показывается один раз — передайте его человеку.</p>
+  <h2>{{ _("Пользователи") }}</h2>
+  <p class="muted">{{ _("Администратор заводит пользователей и сбрасывает им пароли. Новый пароль показывается один раз — передайте его человеку.") }}</p>
   <div class="table-wrap"><table>
-    <tr><th>Логин</th><th>Роль</th><th>Telegram</th><th>Последний вход</th><th></th></tr>
+    <tr><th>{{ _("Логин") }}</th><th>{{ _("Роль") }}</th><th>Telegram</th><th>{{ _("Последний вход") }}</th><th></th></tr>
     {% for u in users %}
     <tr class="{{ 'off' if u[5] }}">
-      <td>{{ u[1] }}{% if u[0] == me %} <span class="muted">(вы)</span>{% endif %}{% if u[5] %} <span class="muted">· отключён</span>{% endif %}</td>
-      <td>{% if u[0] == me %}{{ "администратор" if u[2] == "admin" else "пользователь" }}{% else %}
+      <td>{{ u[1] }}{% if u[0] == me %} <span class="muted">{{ _("(вы)") }}</span>{% endif %}{% if u[5] %} <span class="muted">{{ _("· отключён") }}</span>{% endif %}</td>
+      <td>{% if u[0] == me %}{{ _("администратор") if u[2] == "admin" else _("пользователь") }}{% else %}
         <form method="post" action="/settings/users/{{ u[0] }}/role">
-          <select name="role" onchange="this.form.submit()" aria-label="Роль {{ u[1] }}">
-            <option value="user" {% if u[2] != "admin" %}selected{% endif %}>пользователь</option>
-            <option value="admin" {% if u[2] == "admin" %}selected{% endif %}>администратор</option>
+          <select name="role" onchange="this.form.submit()" aria-label="{{ _("Роль") }} {{ u[1] }}">
+            <option value="user" {% if u[2] != "admin" %}selected{% endif %}>{{ _("пользователь") }}</option>
+            <option value="admin" {% if u[2] == "admin" %}selected{% endif %}>{{ _("администратор") }}</option>
           </select><noscript><button>OK</button></noscript>
         </form>{% endif %}</td>
-      <td>{{ "подключён" if u[3] else "—" }}</td>
+      <td>{{ _("подключён") if u[3] else "—" }}</td>
       <td class="muted">{{ (u[4]|local).strftime("%d.%m.%Y %H:%M") if u[4] else "—" }}</td>
       <td>{% if u[0] != me %}<div class="row-actions">
-        <form method="post" action="/settings/users/{{ u[0] }}/reset" data-confirm="Сбросить пароль {{ u[1] }}? Старый перестанет работать."><button>Сбросить пароль</button></form>
-        <form method="post" action="/settings/users/{{ u[0] }}/disable" data-confirm="{{ ('Включить аккаунт ' ~ u[1] ~ '?') if u[5] else ('Отключить ' ~ u[1] ~ '? Войти будет нельзя, данные останутся.') }}"><button>{{ "Включить" if u[5] else "Отключить" }}</button></form>
-        <form method="post" action="/settings/users/{{ u[0] }}/delete" data-confirm="Удалить {{ u[1] }} совсем? Подписки и отметки тоже удалятся. Это не отменить."><button class="danger">Удалить</button></form>
+        <form method="post" action="/settings/users/{{ u[0] }}/reset" data-confirm="{{ _("Сбросить пароль {login}? Старый перестанет работать.", login=u[1]) }}"><button>{{ _("Сбросить пароль") }}</button></form>
+        <form method="post" action="/settings/users/{{ u[0] }}/disable" data-confirm="{{ _("Включить аккаунт {login}?", login=u[1]) if u[5] else _("Отключить {login}? Войти будет нельзя, данные останутся.", login=u[1]) }}"><button>{{ "Включить" if u[5] else "Отключить" }}</button></form>
+        <form method="post" action="/settings/users/{{ u[0] }}/delete" data-confirm="{{ _("Удалить {login} совсем? Подписки и отметки тоже удалятся. Это не отменить.", login=u[1]) }}"><button class="danger">{{ _("Удалить") }}</button></form>
       </div>{% endif %}</td>
     </tr>
     {% endfor %}
   </table></div>
   <form class="actions" method="post" action="/settings/users" style="margin-top:12px">
-    <input name="login" placeholder="логин нового пользователя" required autocapitalize="none" spellcheck="false" aria-label="Логин">
-    <button class="primary">Добавить</button>
+    <input name="login" placeholder="{{ _("логин нового пользователя") }}" required autocapitalize="none" spellcheck="false" aria-label="{{ _("Логин") }}">
+    <button class="primary">{{ _("Добавить") }}</button>
   </form>
 </section>
 </div>
@@ -212,7 +212,7 @@
         if (!models || !models.length) return;
         const current = select.value;
         select.replaceChildren(...models.map(([id, label]) => new Option(label, id, false, id === current)));
-        status.textContent = `Список моделей загружен у провайдера: ${models.length}.`;
+        status.textContent = `${ {{ _("Список моделей загружен у провайдера:")|tojson }} } ${models.length}.`;
       }).catch(() => {});
     }
   }

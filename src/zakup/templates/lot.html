@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% from "_lot_card.html" import lot_styles, lot_card, lot_winners, lot_scripts with context %}
 {% from "_share.html" import share_buttons, share_styles, share_script with context %}
-{% block title %}Лот {{ lot.lotNumber or lot.id }}{% endblock %}
+{% block title %}{{ _("Лот") }} {{ lot.lotNumber or lot.id }}{% endblock %}
 {% block style %}
 {{ lot_styles() }}
 {{ share_styles() }}
@@ -26,67 +26,67 @@
 {% endblock %}
 {% block main %}
 {% if refresh_error %}<p class="notice">{{ refresh_error }}</p>{% endif %}
-<p class="crumbs muted"><a href="/lots">Лоты</a> → лот {{ lot.lotNumber }}</p>
+<p class="crumbs muted"><a href="/lots">{{ _("Лоты") }}</a> {{ _("→ лот") }} {{ lot.lotNumber }}</p>
 
 <div class="parent">
   <div>
-    <div class="muted">Объявление № {{ a.numberAnno or a.id }} · {{ (a.RefTradeMethods or {}).nameRu or "" }} · {{ (a.RefBuyStatus or {}).nameRu or "" }}</div>
-    <a class="title" href="/a/{{ a.id }}">{{ a.nameRu }}</a>
-    <div class="muted">{% if a.Organizer %}{{ a.Organizer.nameRu }}{% else %}{{ a.orgNameRu }}{% endif %}</div>
+    <div class="muted">{{ _("Объявление №") }} {{ a.numberAnno or a.id }} · {{ loc(a.RefTradeMethods) or "" }} · {{ loc(a.RefBuyStatus) or "" }}</div>
+    <a class="title" href="/a/{{ a.id }}">{{ loc(a) }}</a>
+    <div class="muted">{% if a.Organizer %}{{ loc(a.Organizer) }}{% else %}{{ loc(a, "orgNameRu") }}{% endif %}</div>
   </div>
   <div class="side">
-    <div>до {{ (end|local).strftime("%d.%m.%Y %H:%M") if end else "—" }}</div>
+    <div>{{ _("до") }} {{ (end|local).strftime("%d.%m.%Y %H:%M") if end else "—" }}</div>
     <div class="muted">{{ time_left(end) }}</div>
-    <div style="margin-top:6px"><a href="/a/{{ a.id }}">Открыть объявление →</a></div>
+    <div style="margin-top:6px"><a href="/a/{{ a.id }}">{{ _("Открыть объявление →") }}</a></div>
   </div>
 </div>
 
-{{ share_buttons("/lots/" ~ lot.id, portal_url ~ "?tab=lots", lot.nameRu ~ " — лот " ~ (lot.lotNumber or lot.id)) }}
+{{ share_buttons("/lots/" ~ lot.id, portal_url ~ "?tab=lots", loc(lot) ~ " — " ~ _("лот") ~ " " ~ (lot.lotNumber or lot.id)) }}
 {{ lot_card(lot, link=false) }}
 
 <section class="research-box" id="research">
-  <h2 style="margin-top:0">Поиск товаров с ИИ</h2>
+  <h2 style="margin-top:0">{{ _("Поиск товаров с ИИ") }}</h2>
   {% if lot_info %}
   <form class="research-form" method="post" action="/lots/{{ lot.id }}/research">
-    <input name="region" value="{{ job.region if job else region }}" aria-label="Где искать в первую очередь" placeholder="Регион поставки">
-    <label class="muted"><input type="checkbox" name="whole_kz" value="1" {% if not job or job.whole_kz %}checked{% endif %}> и по всему Казахстану</label>
-    <button class="primary" {% if job and job.status in ("queued", "running") %}disabled{% endif %}>{{ "Найти заново" if job else "Найти товары" }}</button>
+    <input name="region" value="{{ job.region if job else region }}" aria-label="{{ _("Где искать в первую очередь") }}" placeholder="{{ _("Регион поставки") }}">
+    <label class="muted"><input type="checkbox" name="whole_kz" value="1" {% if not job or job.whole_kz %}checked{% endif %}> {{ _("и по всему Казахстану") }}</label>
+    <button class="primary" {% if job and job.status in ("queued", "running") %}disabled{% endif %}>{{ _("Найти заново") if job else _("Найти товары") }}</button>
   </form>
-  <p class="muted">Claude прочитает техспецификацию, найдёт в интернете подходящие товары — сначала в регионе поставки, потом по Казахстану — и посчитает маржу от цены в лоте. Сейчас ищет: {{ provider_name }}{% if request.state.role == "admin" %} (<a href="/settings#ai">настройки</a>){% endif %}.</p>
+  <p class="muted">{{ _("Claude прочитает техспецификацию, найдёт в интернете подходящие товары — сначала в регионе поставки, потом по Казахстану — и посчитает маржу от цены в лоте. Сейчас ищет:") }} {{ provider_name }}{% if request.state.role == "admin" %} (<a href="/settings#ai">{{ _("настройки") }}</a>){% endif %}.</p>
   {% else %}
-  <p class="muted">Нет данных лота для поиска.</p>
+  <p class="muted">{{ _("Нет данных лота для поиска.") }}</p>
   {% endif %}
   <div data-research data-src="/lots/{{ lot.id }}/research">{% include "research_fragment.html" %}</div>
 </section>
 
 {% if lot.id in results %}
-<h2>Итоги</h2>
+<h2>{{ _("Итоги") }}</h2>
 {{ lot_winners(lot, results[lot.id]) }}
 {% elif end and end < now %}
-<p class="muted">Итоги по лоту ещё не опубликованы.</p>
+<p class="muted">{{ _("Итоги по лоту ещё не опубликованы.") }}</p>
 {% endif %}
 
 {% if others %}
-<h2>Другие лоты этого объявления ({{ others|length }})</h2>
+<h2>{{ _("Другие лоты этого объявления (") }}{{ others|length }})</h2>
 <div class="table-wrap"><table>
-  <tr><th>Лот</th><th>Наименование</th><th>Кол-во</th><th>Цена за ед., ₸</th><th>Сумма, ₸</th><th>Аванс</th><th>Статус</th></tr>
+  <tr><th>{{ _("Лот") }}</th><th>{{ _("Наименование") }}</th><th>{{ _("Кол-во") }}</th><th>{{ _("Цена за ед., ₸") }}</th><th>{{ _("Сумма, ₸") }}</th><th>{{ _("Аванс") }}</th><th>{{ _("Статус") }}</th></tr>
   {% for o in others %}
   {% set oi = info[o.id] %}
   <tr>
     <td class="muted">{{ o.lotNumber }}</td>
-    <td><a href="/lots/{{ o.id }}">{{ o.nameRu }}</a>{% if oi.extra_desc %}<div class="muted">{{ oi.extra_desc[:140] }}</div>{% endif %}
+    <td><a href="/lots/{{ o.id }}">{{ loc(o) }}</a>{% if oi.extra_desc %}<div class="muted">{{ pick(oi.extra_desc, oi.extra_desc_kz)[:140] }}</div>{% endif %}
       {% if marks.get(o.id) and marks.get(o.id)[0] %}<div><span class="badge sub">{{ mark_statuses.get(marks.get(o.id)[0]) }}</span></div>{% endif %}</td>
-    <td class="num">{{ '%g'|format(o.count or 0) }} {{ (oi.unit_name or "")|lower }}</td>
+    <td class="num">{{ '%g'|format(o.count or 0) }} {{ (pick(oi.unit_name, oi.unit_name_kz) or "")|lower }}</td>
     <td class="num">{{ oi.price | money }}</td>
     <td class="num">{{ o.amount | money }}</td>
     <td>{% if oi.prepayment %}<span class="badge {% if oi.prepayment >= 30 %}hot{% endif %}">{{ '%g'|format(oi.prepayment) }}%</span>{% endif %}</td>
-    <td class="muted">{{ (o.RefLotsStatus or {}).nameRu or "" }}</td>
+    <td class="muted">{{ loc(o.RefLotsStatus) or "" }}</td>
   </tr>
   {% endfor %}
 </table></div>
 {% endif %}
 
-<p class="muted" style="margin-top:24px">Данные с портала обновлены {{ (fetched_at|local).strftime("%d.%m.%Y %H:%M") if fetched_at else "—" }}. <a href="{{ portal_url }}" target="_blank" rel="noopener">Объявление на портале ↗</a></p>
+<p class="muted" style="margin-top:24px">{{ _("Данные с портала обновлены") }} {{ (fetched_at|local).strftime("%d.%m.%Y %H:%M") if fetched_at else "—" }}. <a href="{{ portal_url }}" target="_blank" rel="noopener">{{ _("Объявление на портале ↗") }}</a></p>
 <script>
 {{ lot_scripts() }}
 {{ share_script() }}
@@ -99,7 +99,7 @@
       const response = await fetch(research.dataset.src);
       // Сессия истекла — fetch молча пришёл на страницу входа: не вставляем её сюда.
       if (response.redirected) {
-        research.innerHTML = '<p class="muted">Сессия истекла — <a href="/login">войдите заново</a>.</p>';
+        research.innerHTML = '<p class="muted">' + {{ _("Сессия истекла —")|tojson }} + ' <a href="/login">' + {{ _("войдите заново")|tojson }} + '</a>.</p>';
         return;
       }
       if (response.ok) research.innerHTML = await response.text();

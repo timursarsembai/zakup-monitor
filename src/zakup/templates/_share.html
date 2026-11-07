@@ -1,9 +1,9 @@
 {# Кнопки «Поделиться»: ссылка на наш сайт и на источник — портал госзакупок. #}
 {% macro share_buttons(path, portal_url, title) %}
 <div class="share">
-  <button type="button" data-share="{{ site_url }}{{ path }}" data-share-title="{{ title }}">↗ Поделиться</button>
-  <button type="button" data-share="{{ portal_url }}" data-share-title="{{ title }}">↗ Ссылка на портал</button>
-  <span class="muted" data-share-done hidden>Ссылка скопирована</span>
+  <button type="button" data-share="{{ site_url }}{{ path }}" data-share-title="{{ title }}">{{ _("↗ Поделиться") }}</button>
+  <button type="button" data-share="{{ portal_url }}" data-share-title="{{ title }}">{{ _("↗ Ссылка на портал") }}</button>
+  <span class="muted" data-share-done hidden>{{ _("Ссылка скопирована") }}</span>
 </div>
 {% endmacro %}
 
@@ -19,7 +19,7 @@
       if (navigator.share) {
         try { await navigator.share({ title, url }); return; } catch (e) { if (e.name === "AbortError") return; }
       }
-      try { await navigator.clipboard.writeText(url); } catch (e) { prompt("Скопируйте ссылку:", url); return; }
+      try { await navigator.clipboard.writeText(url); } catch (e) { prompt({{ _("Скопируйте ссылку:")|tojson }}, url); return; }
       const done = button.parentElement.querySelector("[data-share-done]");
       done.hidden = false; setTimeout(() => { done.hidden = true; }, 2500);
     });

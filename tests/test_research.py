@@ -68,3 +68,12 @@ def test_prefetch_stores_both_languages(conn, monkeypatch):
     assert spec.prefetch(conn, 10) == 1
     assert conn.execute("SELECT text, text_kk FROM lot_specs").fetchone() == ("Стол дубовый", "Емен үстел")
     assert spec.prefetch(conn, 10) == 0
+
+
+def test_clean_keeps_only_phone_like_values():
+    result = research.clean({"items": [
+        {"name": "A", "url": "https://a.kz", "phone": "+7 (727) 123-45-67, 8 701 000 0000"},
+        {"name": "B", "url": "https://b.kz", "phone": "звоните менеджеру"},
+    ]})
+    assert result["items"][0]["phone"] == "+7 (727) 123-45-67, 8 701 000 0000"
+    assert result["items"][1]["phone"] is None

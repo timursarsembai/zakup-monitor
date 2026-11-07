@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Вход{% endblock %}
+{% block title %}{{ _("Вход") }}{% endblock %}
 {% block header %}{% endblock %}
 {% block style %}
   body { min-height: 100vh; display: grid; place-items: center; }
@@ -7,6 +7,7 @@
   .brand { display: flex; align-items: center; gap: 10px; font-size: 26px; font-weight: 800; letter-spacing: -0.02em; margin: 0 0 4px; }
   .brand img { width: 40px; height: 40px; }
   .lead { color: var(--muted); margin: 0 0 24px; }
+  .langs { display: block; margin-top: 6px; font-size: 14px; }
   .card { border: 1px solid var(--line); border-radius: 12px; padding: 24px; }
   .field { display: grid; gap: 6px; margin-bottom: 16px; }
   .field label { font-size: 13px; color: var(--muted); }
@@ -24,19 +25,20 @@
 {% block main_class %} class="auth"{% endblock %}
 {% block main %}
 <p class="brand"><img src="/static/logo-mark.png" alt="">Zakup</p>
-<p class="lead">Мониторинг госзакупок Казахстана</p>
+<p class="lead">{{ _("Мониторинг госзакупок Казахстана") }}
+  <span class="langs">{% for code, label in languages.items() %}{% if code == lang() %}<b>{{ label }}</b>{% else %}<a href="/lang/{{ code }}">{{ label }}</a>{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}</span></p>
 <form class="card" method="post" action="/login">
   {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
   <input type="hidden" name="next" value="{{ next }}">
   <div class="field">
-    <label for="email">E-mail или логин</label>
+    <label for="email">{{ _("E-mail или логин") }}</label>
     <input id="email" name="email" type="text" autocapitalize="none" spellcheck="false" value="{{ email }}" autocomplete="username" required {% if not email %}autofocus{% endif %}>
   </div>
   <div class="field">
-    <label for="password">Пароль</label>
+    <label for="password">{{ _("Пароль") }}</label>
     <input id="password" name="password" type="password" autocomplete="current-password" required {% if email %}autofocus{% endif %}>
   </div>
-  <button class="submit">Войти</button>
+  <button class="submit">{{ _("Войти") }}</button>
 </form>
-<p class="foot">Доступ по приглашению</p>
+<p class="foot">{{ _("Доступ по приглашению") }}</p>
 {% endblock %}

@@ -62,10 +62,16 @@ def _pending(**overrides):
 
 
 def test_block_lists_lots_and_links_to_our_site():
-    text = matcher.format_block([_pending(), _pending(lot_id=6, prepayment=None, lot_kato=[])])
-    assert "&lt;дуб&gt;" in text
-    assert "4 штука · 689 655.16 ₸ · <b>аванс 30%</b> · Алматинская область" in text
-    assert "приём до 09.11 09:00" in text
+    text = matcher.format_block([
+        _pending(lot_name="Стол <дуб>", lot_name_kz="Үстел", price=Decimal("172413.79"),
+                 announcement_name_kz="Үстел сатып алу", disable_person=True),
+        _pending(lot_id=6, prepayment=None, lot_kato=[]),
+    ])
+    # Коротко и на двух языках: названия, цена × количество = сумма, аванс, признак, ссылка.
+    assert "<b>Стол &lt;дуб&gt; / Үстел</b>" in text and "<i>Үстел сатып алу</i>" in text
+    assert "172 413.79 ₸ × 4 = 689 655.16 ₸ · <b>аванс 30%</b>" in text
+    assert "♿ Среди организаций инвалидов / Мүгедектер ұйымдары арасында" in text
+    assert "⏰ 09.11 09:00" in text
     assert text.endswith("https://zakup.sarsembai.com/a/77")
     assert "goszakup.gov.kz" not in text
     assert text.count("• ") == 2
@@ -99,7 +105,7 @@ def test_deliver_respects_message_limit_and_names_subscription(conn, outbox, mon
     assert matcher.deliver(conn, pause=0) == 7
     assert len(sent) > 1
     assert all(text.startswith("🔔 <b>Картриджи</b>") for _, text in sent)
-    assert sum(text.count("• Картриджи партия") for _, text in sent) == 7
+    assert sum(text.count("• <b>Картриджи партия") for _, text in sent) == 7
     assert matcher.pending(conn) == []
 
 

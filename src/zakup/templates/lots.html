@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% from "_filters.html" import filter_form, filter_styles, pager, sort_bar with context %}
 {% from "_marks.html" import mark_control, mark_styles %}
-{% block title %}Лоты{% endblock %}
+{% block title %}{{ _("Лоты") }}{% endblock %}
 {% block style %}
 {{ mark_styles() }}
 {{ filter_styles() }}
@@ -9,34 +9,34 @@
 {% block main %}
 {{ filter_form() }}
 
-{% set found %}Найдено лотов: <b>{{ total }}</b>{% if deadline_date %} · окончание {{ "" if f.deadline == rule else "по " }}{{ deadline_date.strftime("%d.%m.%Y") }}{% endif %}{% endset %}
+{% set found %}{{ _("Найдено лотов:") }} <b>{{ total }}</b>{% if deadline_date %} {{ _("· окончание") }} {{ "" if f.deadline == rule else _("по") ~ " " }}{{ deadline_date.strftime("%d.%m.%Y") }}{% endif %}{% endset %}
 {{ sort_bar(found) }}
-<p class="muted">Открытых объявлений в базе: {{ stats[0] }}{% if stats[1] %}, ещё {{ stats[1] }} ждут загрузки подробностей — пока не попадают в фильтр{% endif %}{% if stats[2] %}. Обновлено {{ (stats[2]|local).strftime("%d.%m %H:%M") }}{% endif %}.
-{% if hidden_count %}{% if hidden %}Показаны и скрытые — <a href="?{{ query }}">скрыть «Не подходит» ({{ hidden_count }})</a>{% else %}Скрыто с отметкой «Не подходит»: {{ hidden_count }} — <a href="?{{ query }}&hidden=1">показать</a>{% endif %}.{% endif %}</p>
+<p class="muted">{{ _("Открытых объявлений в базе:") }} {{ stats[0] }}{% if stats[1] %}{{ _(", ещё") }} {{ stats[1] }} {{ _("ждут загрузки подробностей — пока не попадают в фильтр") }}{% endif %}{% if stats[2] %}{{ _(". Обновлено") }} {{ (stats[2]|local).strftime("%d.%m %H:%M") }}{% endif %}.
+{% if hidden_count %}{% if hidden %}{{ _("Показаны и скрытые —") }} <a href="?{{ query }}">{{ _("скрыть «Не подходит» (") }}{{ hidden_count }})</a>{% else %}{{ _("Скрыто с отметкой «Не подходит»:") }} {{ hidden_count }} — <a href="?{{ query }}&hidden=1">{{ _("показать") }}</a>{% endif %}.{% endif %}</p>
 
 <div class="table-wrap"><table class="results">
-  <tr><th>№ лота</th><th>Объявление</th><th>Наименование и описание лота</th><th>Кол-во</th><th>Цена за ед., ₸</th><th>Сумма, ₸</th><th>Аванс</th><th>Способ</th><th>Статус</th><th>Отметка</th></tr>
+  <tr><th>{{ _("№ лота") }}</th><th>{{ _("Объявление") }}</th><th>{{ _("Наименование и описание лота") }}</th><th>{{ _("Кол-во") }}</th><th>{{ _("Цена за ед., ₸") }}</th><th>{{ _("Сумма, ₸") }}</th><th>{{ _("Аванс") }}</th><th>{{ _("Способ") }}</th><th>{{ _("Статус") }}</th><th>{{ _("Отметка") }}</th></tr>
   {% for r in rows %}
   <tr id="lot-{{ r[0] }}">
     <td class="muted">{{ r[1] or r[0] }}</td>
-    <td style="min-width:200px"><a href="{{ announcement_url(r[2]) }}">№ {{ r[3] or r[2] }}</a> {{ r[4] or "" }}
+    <td style="min-width:200px"><a href="{{ announcement_url(r[2]) }}">№ {{ r[3] or r[2] }}</a> {{ pick(r[4], r[23]) or "" }}
       <div class="muted">{{ r[5] or "" }}</div>
-      {% if r[15] %}<div class="muted">до {{ (r[15]|local).strftime("%d.%m %H:%M") }} · {{ time_left(r[15]) }}</div>{% endif %}</td>
-    <td style="min-width:220px"><a class="title" href="/lots/{{ r[0] }}">{{ r[6] or "—" }}</a>
-      {% if r[7] and r[7] != r[6] %}<div class="muted">{{ r[7][:180] }}</div>{% endif %}
+      {% if r[15] %}<div class="muted">{{ _("до") }} {{ (r[15]|local).strftime("%d.%m %H:%M") }} · {{ time_left(r[15]) }}</div>{% endif %}</td>
+    <td style="min-width:220px"><a class="title" href="/lots/{{ r[0] }}">{{ pick(r[6], r[22]) or "—" }}</a>
+      {% set desc = pick(r[7], r[24]) %}{% if desc and desc != pick(r[6], r[22]) %}<div class="muted">{{ desc[:180] }}</div>{% endif %}
       <div class="muted">{{ region_names(r[16]) | join(", ") }}</div>
-      {% if r[17] == "winner" %}<div>🏁 {{ r[18] }}{% if r[19] is not none %} — <b>{{ r[19] | money }} ₸</b>{% if r[11] %} <span class="muted">(−{{ '%.1f'|format((1 - (r[19]|float) / (r[11]|float)) * 100) }}%)</span>{% endif %}{% endif %} <span class="muted">· предложений: {{ r[20] }}</span></div>
-      {% elif r[17] == "failed" %}<div class="muted">🏁 Не состоялась{% if r[21] %}: {{ r[21] }}{% endif %}</div>{% endif %}</td>
-    <td class="num">{% if r[8] is not none %}{{ '%g'|format(r[8]) }}{% endif %} {{ (r[9] or "")|lower }}</td>
+      {% if r[17] == "winner" %}<div>🏁 {{ r[18] }}{% if r[19] is not none %} — <b>{{ r[19] | money }} ₸</b>{% if r[11] %} <span class="muted">(−{{ '%.1f'|format((1 - (r[19]|float) / (r[11]|float)) * 100) }}%)</span>{% endif %}{% endif %} <span class="muted">{{ _("· предложений:") }} {{ r[20] }}</span></div>
+      {% elif r[17] == "failed" %}<div class="muted">{{ _("🏁 Не состоялась") }}{% if r[21] %}: {{ r[21] }}{% endif %}</div>{% endif %}</td>
+    <td class="num">{% if r[8] is not none %}{{ '%g'|format(r[8]) }}{% endif %} {{ (pick(r[9], r[25]) or "")|lower }}</td>
     <td class="num">{{ r[10] | money }}</td>
     <td class="num"><b>{{ r[11] | money }}</b></td>
-    <td>{% if r[12] %}<span class="badge {% if r[12] >= 30 %}hot{% endif %}">{{ '%g'|format(r[12]) }}%</span>{% else %}<span class="muted">нет</span>{% endif %}</td>
-    <td class="muted">{{ method_names.get(r[13], "") }}</td>
-    <td class="muted">{{ status_names.get(r[14], r[14] or "") }}</td>
+    <td>{% if r[12] %}<span class="badge {% if r[12] >= 30 %}hot{% endif %}">{{ '%g'|format(r[12]) }}%</span>{% else %}<span class="muted">{{ _("нет") }}</span>{% endif %}</td>
+    <td class="muted">{{ _(method_names.get(r[13], "")) }}</td>
+    <td class="muted">{{ _(status_names.get(r[14], r[14] or "")) }}</td>
     <td>{{ mark_control(r[0], marks.get(r[0]), here) }}</td>
   </tr>
   {% else %}
-  <tr><td colspan="10" class="muted">Под фильтр ничего не подходит.</td></tr>
+  <tr><td colspan="10" class="muted">{{ _("Под фильтр ничего не подходит.") }}</td></tr>
   {% endfor %}
 </table></div>
 {{ pager() }}

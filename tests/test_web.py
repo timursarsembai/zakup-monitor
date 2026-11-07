@@ -428,3 +428,55 @@ def test_dashboard_is_home(client, conn):
                  "Регионы", "Способы закупки"):
         assert text in page.text, text
     assert client.get("/?applied=1", follow_redirects=False).headers["location"] == "/announcements?applied=1"
+
+
+def test_kazakh_interface_and_data(client, conn):
+    db.upsert_announcement(conn, {"id": 700, "name_ru": "Столы", "end_date": "2099-01-01 09:00:00"})
+    details.save(conn, {"id": 700, "nameRu": "Приобретение столов", "nameKz": "Үстелдер сатып алу",
+                        "endDate": "2099-01-01 09:00:00",
+                        "RefBuyStatus": {"nameRu": "Опубликовано", "nameKz": "Жарияланды"},
+                        "Lots": [{"id": 7001, "trdBuyId": 700, "nameRu": "Стол", "nameKz": "Үстел",
+                                  "amount": 1, "count": 1,
+                                  "Plans": [{"price": 1, "RefUnits": {"nameRu": "Штука", "nameKz": "Дана"}}]}]})
+    conn.commit()
+    _login(client)
+    assert "Хабарландыру" not in client.get("/a/700").text
+    switched = client.get("/lang/kk", headers={"referer": "https://testserver/a/700"}, follow_redirects=False)
+    assert switched.headers["location"] == "/a/700" and "zakup_lang=kk" in switched.headers["set-cookie"]
+    page = client.get("/a/700").text
+    assert "Үстелдер сатып алу" in page and "Үстел" in page and "Жарияланды" in page
+    assert "Лоттар (" in page and 'lang="kk"' in page and "дана" in page
+    search = client.get("/lots").text
+    assert "Лоттарды іздеу" in search and "Мәртебе" in search
+    client.get("/lang/ru")
+    assert "Поиск лотов" in client.get("/lots").text
+
+
+def test_users_can_send_own_subscriptions_to_shared_group(client, conn):
+    conn.execute("INSERT INTO telegram_groups (chat_id, title) VALUES ('-100', 'ZAKUP GROUP')")
+    auth.set_password(conn, "amir", "amir-password-1")
+    conn.commit()
+    client.post("/login", data={"email": "amir", "password": "amir-password-1"}, headers=ORIGIN)
+    data = {"applied": "1", "deadline_mode": "rule", "scope": "lots", "chat_id": "-100", "name": "В группу"}
+    assert client.post("/subscriptions/filter", data=data, headers=ORIGIN).status_code == 200
+    data.update(chat_id="", name="Лично мне")
+    client.post("/subscriptions/filter", data=data, headers=ORIGIN)
+    rows = conn.execute("SELECT name, chat_id FROM subscriptions ORDER BY id").fetchall()
+    assert rows == [("В группу", "-100"), ("Лично мне", None)]
+    assert "ZAKUP GROUP" in client.get("/subscriptions").text
+
+
+def test_research_list_page(client, conn):
+    from tests.test_research import _lot
+
+    _lot(conn)
+    conn.execute("""INSERT INTO lot_research (lot_id, user_id, provider, region, status, finished_at, result)
+        SELECT 90, id, 'claude_code', 'г.Актобе', 'done', now(),
+        '{"summary": "s", "items": [{"name": "Стол", "url": "https://m.kz/1", "in_region": true,
+          "unit_price": 80000, "fit": "полностью"}]}' FROM users LIMIT 1""")
+    conn.commit()
+    client.post("/login", data={"email": "owner@mail.kz", "password": "long-enough-password"},
+                headers=ORIGIN)
+    page = client.get("/research").text
+    assert "Подбор товаров" in page and "/lots/90#research" in page and "маржа до 20.0%" in page
+    assert "/lots/90" not in client.get("/research?q=кровать").text

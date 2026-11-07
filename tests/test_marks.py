@@ -33,10 +33,10 @@ def test_reminds_once_per_threshold(conn, monkeypatch):
     assert marks.remind(conn, NOW, pause=0) == 0  # до окончания больше суток
     later = NOW + timedelta(hours=7)
     assert marks.remind(conn, later, pause=0) == 1
-    assert sent[0][0] == "42" and "Осталось 23 ч" in sent[0][1] and "/lots/70" in sent[0][1]
+    assert sent[0][0] == "42" and "Осталось / Қалды: 23 ч" in sent[0][1] and "/lots/70" in sent[0][1]
     assert marks.remind(conn, later + timedelta(minutes=10), pause=0) == 0
     assert marks.remind(conn, NOW + timedelta(hours=28), pause=0) == 1
-    assert "Осталось 2 ч" in sent[1][1]
+    assert "Осталось / Қалды: 2 ч" in sent[1][1]
 
 
 def test_no_reminder_for_fresh_or_submitted_marks(conn, monkeypatch):

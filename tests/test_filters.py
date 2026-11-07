@@ -64,7 +64,8 @@ def test_details_parse_lot_fields():
     assert fields["kato"] == ["191010000", "751110000", "751410000"]
     assert lots[0] == {"id": 1, "prepayment": 30.0, "kato": ["751110000", "751410000"],
                        "price": 10.5, "unit_name": "Штука", "extra_desc": "дуб",
-                       "supply_date": "16 дней", "enstru": [], "spec_url": None}
+                       "supply_date": "16 дней", "enstru": [], "spec_url": None,
+                       "unit_name_kz": None, "extra_desc_kz": None}
     assert lots[1]["price"] is None and lots[1]["kato"] == []
     assert len(lots) == 2
 

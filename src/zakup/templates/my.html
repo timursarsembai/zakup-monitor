@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "_marks.html" import mark_control, note_form, mark_styles %}
-{% block title %}Мои лоты{% endblock %}
+{% block title %}{{ _("Мои лоты") }}{% endblock %}
 {% block style %}
 {{ mark_styles() }}
   h2 { font-size: 17px; margin: 24px 0 8px; }
@@ -25,15 +25,15 @@
   {% for status in counts %}
   <label><input type="checkbox" name="status" value="{{ status }}" {% if status in chosen %}checked{% endif %} onchange="this.form.submit()"> {{ mark_statuses[status] }} <span class="muted">{{ counts[status] }}</span></label>
   {% endfor %}
-  {% if chosen %}<a href="/my">все</a>{% endif %}
-  <noscript><button>Показать</button></noscript>
+  {% if chosen %}<a href="/my">{{ _("все") }}</a>{% endif %}
+  <noscript><button>{{ _("Показать") }}</button></noscript>
 </form>
 {% set total = sections.values()|map("length")|sum %}
 {% if not total and chosen %}
-<p class="muted">С выбранными отметками лотов нет.</p>
+<p class="muted">{{ _("С выбранными отметками лотов нет.") }}</p>
 {% elif not total %}
-<p>Отмеченных лотов пока нет.</p>
-<p class="muted">В поиске и на странице объявления у каждого лота есть список «Отметить…»: «Интересно», «Готовлю заявку», «Заявка подана», итог или «Не подходит». Отмеченные лоты собираются здесь. По лотам «Интересно» и «Готовлю заявку» бот напомнит в Telegram за сутки и за 3 часа до окончания приёма.</p>
+<p>{{ _("Отмеченных лотов пока нет.") }}</p>
+<p class="muted">{{ _("В поиске и на странице объявления у каждого лота есть список «Отметить…»: «Интересно», «Готовлю заявку», «Заявка подана», итог или «Не подходит». Отмеченные лоты собираются здесь. По лотам «Интересно» и «Готовлю заявку» бот напомнит в Telegram за сутки и за 3 часа до окончания приёма.") }}</p>
 {% endif %}
 {% for status, rows in sections.items() if rows %}
 {% set block %}
@@ -46,15 +46,15 @@
       <div>
         <a class="title" href="/lots/{{ r[3] }}">{{ r[5] or "—" }}</a>
         {% if r[6] and r[6] != r[5] %}<div class="muted">{{ r[6][:200] }}</div>{% endif %}
-        <div class="muted">{{ r[9] or "" }} · <a href="{{ announcement_url(r[4]) }}">объявление № {{ r[11] or r[4] }}</a>{% if r[12] %} · лот {{ r[12] }}{% endif %}</div>
-        <div class="muted">На портале: {{ r[13] or r[14] or "—" }}</div>
-        {% if r[15] == "winner" %}<div>🏁 Победитель: <b>{{ r[16] }}</b>{% if r[17] is not none %} — {{ r[17] | money }} ₸{% endif %}{% if r[19] %} <span class="badge hot">это вы</span>{% endif %}</div>
-        {% elif r[15] == "failed" %}<div>🏁 Не состоялась{% if r[18] %} в связи с {{ r[18] }}{% endif %}</div>{% endif %}
+        <div class="muted">{{ r[9] or "" }} · <a href="{{ announcement_url(r[4]) }}">{{ _("объявление №") }} {{ r[11] or r[4] }}</a>{% if r[12] %} {{ _("· лот") }} {{ r[12] }}{% endif %}</div>
+        <div class="muted">{{ _("На портале:") }} {{ r[13] or r[14] or "—" }}</div>
+        {% if r[15] == "winner" %}<div>{{ _("🏁 Победитель:") }} <b>{{ r[16] }}</b>{% if r[17] is not none %} — {{ r[17] | money }} ₸{% endif %}{% if r[19] %} <span class="badge hot">{{ _("это вы") }}</span>{% endif %}</div>
+        {% elif r[15] == "failed" %}<div>{{ _("🏁 Не состоялась") }}{% if r[18] %} {{ _("в связи с") }} {{ r[18] }}{% endif %}</div>{% endif %}
       </div>
       <div class="side">
         <b>{{ r[7] | money }} ₸</b>
-        {% if r[8] %}<div><span class="badge {% if r[8] >= 30 %}hot{% endif %}">аванс {{ '%g'|format(r[8]) }}%</span></div>{% endif %}
-        <div class="{{ 'urgent' if urgent else 'muted' }}">{% if r[10] %}до {{ (r[10]|local).strftime("%d.%m %H:%M") }}{% if open %} · {{ time_left(r[10]) }}{% else %} · приём окончен{% endif %}{% endif %}</div>
+        {% if r[8] %}<div><span class="badge {% if r[8] >= 30 %}hot{% endif %}">{{ _("аванс") }} {{ '%g'|format(r[8]) }}%</span></div>{% endif %}
+        <div class="{{ 'urgent' if urgent else 'muted' }}">{% if r[10] %}{{ _("до") }} {{ (r[10]|local).strftime("%d.%m %H:%M") }}{% if open %} · {{ time_left(r[10]) }}{% else %} {{ _("· приём окончен") }}{% endif %}{% endif %}</div>
         <div style="margin-top:6px">{{ mark_control(r[3], mark, here) }}</div>
       </div>
     </div>

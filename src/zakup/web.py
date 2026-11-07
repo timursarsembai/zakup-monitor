@@ -30,6 +30,7 @@ from zakup import (
     bot,
     dashboard,
     details,
+    i18n,
     marks,
     matcher,
     research,
@@ -74,7 +75,7 @@ def _money(value) -> str:
 templates.env.filters["money"] = _money
 templates.env.filters["local"] = lambda v: v.astimezone(PORTAL_TZ) if v else v
 templates.env.globals["region_names"] = lambda kato: sorted(
-    {REGIONS[k[:2]] for k in kato or [] if k[:2] in REGIONS}
+    {i18n.gettext(REGIONS[k[:2]]) for k in kato or [] if k[:2] in REGIONS}
 )
 
 
@@ -83,15 +84,23 @@ def _time_left(end: datetime | None) -> str:
         return ""
     seconds = int((end - datetime.now(UTC)).total_seconds())
     if seconds <= 0:
-        return "приём окончен"
+        return i18n.gettext("приём окончен")
     days, rest = divmod(seconds, 86400)
     hours, rest = divmod(rest, 3600)
-    return f"через {days} д {hours} ч" if days else f"через {hours} ч {rest // 60} мин"
+    if days:
+        return i18n.gettext("через {d} д {h} ч", d=days, h=hours)
+    return i18n.gettext("через {h} ч {m} мин", h=hours, m=rest // 60)
 
 
 templates.env.globals["time_left"] = _time_left
 templates.env.globals["mark_statuses"] = marks.STATUSES
 templates.env.globals["site_url"] = SITE_URL
+templates.env.globals["_"] = i18n.gettext
+templates.env.filters["tr"] = i18n.gettext
+templates.env.globals["lang"] = i18n.language
+templates.env.globals["loc"] = i18n.loc
+templates.env.globals["pick"] = i18n.pick
+templates.env.globals["languages"] = i18n.LANGUAGES
 
 
 def _portal_date(value, fmt: str = "%d.%m.%Y %H:%M") -> str:
@@ -116,6 +125,27 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 app.mount("/static", StaticFiles(directory=str(files("zakup").joinpath("static"))), name="static")
+
+
+@app.middleware("http")
+async def language(request: Request, call_next):
+    i18n.set_language(request.cookies.get(i18n.COOKIE))
+    return await call_next(request)
+
+
+@app.get("/lang/{code}")
+def switch_language(request: Request, code: str):
+    """Переключатель Рус/Қаз: запоминает выбор и возвращает на ту же страницу."""
+    if code not in i18n.LANGUAGES:
+        raise HTTPException(404, "нет такого языка")
+    back = request.headers.get("referer") or "/"
+    parts = urlsplit(back)
+    target = _safe_next(parts.path + (f"?{parts.query}" if parts.query else ""))
+    if parts.netloc and parts.netloc != request.headers.get("host"):
+        target = "/"
+    response = RedirectResponse(target, status_code=303)
+    response.set_cookie(i18n.COOKIE, code, max_age=365 * 86400, secure=True, samesite="lax")
+    return response
 
 
 @app.middleware("http")
@@ -196,17 +226,19 @@ def login(
     ip = request.client.host if request.client else None
     email_norm = auth.normalize_email(email)
     with pool.connection() as conn:
-        if auth.too_many_failures(conn, email_norm, ip):
-            error, token = "Слишком много неудачных попыток. Попробуйте через 15 минут.", None
+        locked = auth.too_many_failures(conn, email_norm, ip)
+        if locked:
+            token = None
+            error = i18n.gettext("Слишком много неудачных попыток. Попробуйте через 15 минут.")
         else:
             token = auth.login(conn, email_norm, password, ip, request.headers.get("user-agent"))
-            error = None if token else "Неверный логин или пароль."
+            error = None if token else i18n.gettext("Неверный логин или пароль.")
     if token is None:
         return templates.TemplateResponse(
             request,
             "login.html",
             {"next": _safe_next(next), "email": email, "error": error},
-            status_code=429 if error.startswith("Слишком") else 401,
+            status_code=429 if locked else 401,
         )
     response = RedirectResponse(_safe_next(next), status_code=303)
     response.set_cookie(
@@ -260,12 +292,15 @@ def home(request: Request, user: User, background: BackgroundTasks):
 
 
 def _user_groups(conn, user: int) -> list[tuple[str, str]]:
-    """Подключённые пользователем Telegram-группы: [(chat_id, название)]."""
+    """Telegram-группы, куда пользователь может слать подписки: [(chat_id, название)].
+
+    Группы подключает администратор, а выбирать их в подписках может каждый:
+    это общие рабочие группы команды. Какие подписки слать в группу, а какие
+    себе в личку, каждый решает сам.
+    """
+    del user  # группы общие для всех пользователей
     return conn.execute(
-        """SELECT g.chat_id, coalesce(g.title, 'Группа') FROM user_groups ug
-           JOIN telegram_groups g ON g.chat_id = ug.chat_id
-           WHERE ug.user_id = %s ORDER BY g.title""",
-        (user,),
+        "SELECT chat_id, coalesce(title, 'Группа') FROM telegram_groups ORDER BY title"
     ).fetchall()
 
 
@@ -331,7 +366,9 @@ def lots_search(request: Request, user: User, page: int = 1, hidden: int = 0,
                        l.unit_name, l.price, l.amount, l.prepayment, a.trade_method_id,
                        l.status_id, a.end_date, coalesce(nullif(l.kato, '{{}}'), a.kato),
                        r.outcome, r.winner_name, r.winner_total,
-                       jsonb_array_length(r.offers), r.reason
+                       jsonb_array_length(r.offers), r.reason,
+                       l.name_kz, a.name_kz,
+                       l.extra_desc_kz, l.unit_name_kz
                 FROM lots l JOIN announcements a ON true
                 LEFT JOIN lot_results r ON r.lot_id = l.id
                 WHERE {where} ORDER BY {current.order_by("lots")}
@@ -380,7 +417,9 @@ def announcements_search(request: Request, user: User, page: int = 1, per_page: 
                        a.detail->'RefTradeMethods'->>'nameRu',
                        -- Авансы лотов без повторов: 30 и 100, а не 30, 30, 100.
                        (SELECT array_agg(DISTINCT coalesce(p.prepayment, 0) ORDER BY coalesce(p.prepayment, 0))
-                        FROM lots p WHERE p.trd_buy_id = a.id)
+                        FROM lots p WHERE p.trd_buy_id = a.id),
+                       a.name_kz, a.detail->'RefTradeMethods'->>'nameKz',
+                       a.detail->'RefBuyStatus'->>'nameKz', a.detail->'Organizer'->>'nameKz'
                 FROM announcements a WHERE {where} ORDER BY {current.order_by("announcements")}
                 LIMIT {per_page} OFFSET {(page - 1) * per_page}""",
             params,
@@ -605,8 +644,9 @@ def _announcement_context(request: Request, user: int, announcement_id: int,
     lots = [lot for lot in detail.get("Lots") or [] if not lot.get("isDeleted")]
     info = {lot["id"]: details.parse_lot(lot) for lot in lots}
     with pool.connection() as conn:
-        specs = {r[0]: (r[1], r[2]) for r in conn.execute(
-            "SELECT lot_id, text, error FROM lot_specs WHERE lot_id = ANY(%s)", (list(info),))}
+        specs = {r[0]: (r[1], r[2], r[3]) for r in conn.execute(
+            "SELECT lot_id, text, error, text_kk FROM lot_specs WHERE lot_id = ANY(%s)",
+            (list(info),))}
         lot_marks = marks.of_user(conn, user, list(info))
         lot_results = results.by_lot(conn, list(info))
         company_bin = conn.execute(
@@ -661,6 +701,11 @@ def lot_spec(request: Request, _: User, announcement_id: int, lot_id: int, refre
                     "DELETE FROM lot_specs WHERE lot_id = %s AND text IS NULL", (lot_id,)
                 )
             text, error = spec.get(conn, lot_id, url)
+            if i18n.language() == "kk":
+                kazakh = conn.execute(
+                    "SELECT text_kk FROM lot_specs WHERE lot_id = %s", (lot_id,)
+                ).fetchone()
+                text = (kazakh and kazakh[0]) or text
     return templates.TemplateResponse(
         request, "spec_fragment.html", {"text": text, "error": error, "url": url}
     )
@@ -685,6 +730,49 @@ def mark_lot(
             marks.set_mark(conn, user, lot_id, status)
     target = _safe_next(next)
     return RedirectResponse(f"{target}#lot-{lot_id}" if "#" not in target else target, status_code=303)
+
+
+@app.get("/research")
+def research_list(request: Request, _: User, q: str = ""):
+    """Сохранённые подборки товаров: последний готовый поиск по каждому лоту."""
+    with pool.connection() as conn:
+        rows = conn.execute(
+            """SELECT DISTINCT ON (r.lot_id) r.lot_id, r.finished_at, r.region, r.result,
+                      l.name_ru, l.name_kz, l.lot_number, l.amount, l.count,
+                      coalesce(l.price, l.amount / nullif(l.count, 0)), l.prepayment,
+                      a.id, a.number_anno, a.end_date
+               FROM lot_research r JOIN lots l ON l.id = r.lot_id
+               JOIN announcements a ON a.id = l.trd_buy_id
+               WHERE r.status = 'done'
+                 AND (%(q)s = '' OR l.name_ru ILIKE %(like)s OR l.name_kz ILIKE %(like)s
+                      OR a.number_anno ILIKE %(like)s)
+               ORDER BY r.lot_id, r.id DESC""",
+            {"q": q.strip(), "like": f"%{q.strip()}%"},
+        ).fetchall()
+        active = conn.execute(
+            "SELECT count(*) FROM lot_research WHERE status IN ('queued', 'running')"
+        ).fetchone()[0]
+    items = []
+    for row in rows:
+        found = (row[3] or {}).get("items") or []
+        price = float(row[9]) if row[9] else None
+        margins = [(price - i["unit_price"]) / price * 100 for i in found
+                   if price and i.get("unit_price") and i.get("fit") == "полностью"]
+        cheapest = min((i["unit_price"] for i in found if i.get("unit_price")), default=None)
+        items.append({
+            "lot_id": row[0], "finished_at": row[1], "region": row[2], "name": row[4],
+            "name_kz": row[5], "lot_number": row[6], "amount": row[7], "price": price,
+            "prepayment": row[10], "announcement_id": row[11], "number": row[12],
+            "end_date": row[13], "found": len(found),
+            "in_region": sum(1 for i in found if i.get("in_region")),
+            "full_fit": sum(1 for i in found if i.get("fit") == "полностью"),
+            "best_margin": max(margins) if margins else None, "cheapest": cheapest,
+        })
+    items.sort(key=lambda i: i["finished_at"], reverse=True)
+    return templates.TemplateResponse(
+        request, "research_list.html",
+        {"items": items, "q": q, "active": active, "now": datetime.now(UTC)},
+    )
 
 
 @app.get("/my")
