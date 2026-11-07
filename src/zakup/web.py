@@ -9,14 +9,18 @@ from contextlib import asynccontextmanager
 from decimal import Decimal, InvalidOperation
 from importlib.resources import files
 from typing import Annotated
-from urllib.parse import quote, urlsplit
+from datetime import UTC, datetime
+from urllib.parse import parse_qs, quote, urlencode, urlsplit
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
+from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
 from zakup import auth, bot, telegram
+from zakup.filters import DEADLINE_RULE, ORDER_BY, REGIONS, STATUSES, Filters, deadline_by_rule
+from zakup.goszakup import PORTAL_TZ
 from zakup.matcher import PORTAL_ANNOUNCEMENT_URL
 
 PAGE_SIZE = 50
@@ -26,6 +30,24 @@ pool = ConnectionPool(os.environ.get("DATABASE_URL", ""), min_size=1, max_size=5
 templates = Jinja2Templates(directory=str(files("zakup").joinpath("templates")))
 templates.env.globals["announcement_url"] = PORTAL_ANNOUNCEMENT_URL.format
 templates.env.filters["money"] = lambda v: "" if v is None else f"{v:,.2f}".replace(",", " ")
+templates.env.filters["local"] = lambda v: v.astimezone(PORTAL_TZ) if v else v
+templates.env.globals["region_names"] = lambda kato: sorted(
+    {REGIONS[k[:2]] for k in kato or [] if k[:2] in REGIONS}
+)
+
+
+def _time_left(end: datetime | None) -> str:
+    if end is None:
+        return ""
+    seconds = int((end - datetime.now(UTC)).total_seconds())
+    if seconds <= 0:
+        return "приём окончен"
+    days, rest = divmod(seconds, 86400)
+    hours, rest = divmod(rest, 3600)
+    return f"через {days} д {hours} ч" if days else f"через {hours} ч {rest // 60} мин"
+
+
+templates.env.globals["time_left"] = _time_left
 
 
 @asynccontextmanager
@@ -142,39 +164,31 @@ def healthz() -> dict:
 
 
 @app.get("/")
-def search(
-    request: Request,
-    _: User,
-    q: str = "",
-    min_amount: str = "",
-    max_amount: str = "",
-    open_only: bool = False,
-    page: int = 1,
-):
+def search(request: Request, _: User, page: int = 1):
+    form = parse_qs(request.url.query)
+    current = Filters.from_form(form)
     page = max(page, 1)
-    where, params = [], {}
-    if q.strip():
-        where.append("l.tsv @@ websearch_to_tsquery('russian', %(q)s)")
-        params["q"] = q
-    if (low := _amount(min_amount)) is not None:
-        where.append("l.amount >= %(min)s")
-        params["min"] = low
-    if (high := _amount(max_amount)) is not None:
-        where.append("l.amount <= %(max)s")
-        params["max"] = high
-    if open_only:
-        where.append("a.end_date > now()")
-    sql = f"""SELECT l.id, l.trd_buy_id, l.number_anno, l.lot_number, l.name_ru, l.amount,
-                     l.customer_name_ru, a.end_date
-              FROM lots l LEFT JOIN announcements a ON a.id = l.trd_buy_id
-              {"WHERE " + " AND ".join(where) if where else ""}
-              ORDER BY l.id DESC LIMIT {PAGE_SIZE + 1} OFFSET {(page - 1) * PAGE_SIZE}"""
+    now = datetime.now(UTC)
+    where, params = current.where(now)
     with pool.connection() as conn:
-        rows = conn.execute(sql, params).fetchall()
+        rows = conn.execute(
+            f"""SELECT a.id, a.number_anno, a.name_ru, a.total_sum, a.end_date,
+                       a.prepayment_max, a.kato, coalesce(a.customer_name_ru, a.org_name_ru),
+                       a.status_id, a.count_lots
+                FROM announcements a WHERE {where}
+                ORDER BY {ORDER_BY}
+                LIMIT {PAGE_SIZE + 1} OFFSET {(page - 1) * PAGE_SIZE}""",
+            params,
+        ).fetchall()
+        total = conn.execute(f"SELECT count(*) FROM announcements a WHERE {where}", params).fetchone()[0]
         stats = conn.execute(
-            """SELECT (SELECT count(*) FROM announcements), (SELECT count(*) FROM lots),
+            """SELECT (SELECT count(*) FROM announcements WHERE end_date > now()),
+                      (SELECT count(*) FROM announcements
+                       WHERE end_date > now() AND details_fetched_at IS NULL),
                       (SELECT max(updated_at) FROM sync_state)"""
         ).fetchone()
+    query = {k: v for k, v in form.items() if k != "page"}
+    query["applied"] = ["1"]
     return templates.TemplateResponse(
         request,
         "search.html",
@@ -182,13 +196,33 @@ def search(
             "rows": rows[:PAGE_SIZE],
             "has_next": len(rows) > PAGE_SIZE,
             "page": page,
-            "q": q,
-            "min_amount": min_amount,
-            "max_amount": max_amount,
-            "open_only": open_only,
+            "f": current,
+            "total": total,
+            "deadline_date": current.deadline_date(now.astimezone(PORTAL_TZ).date()),
+            "rule_date": deadline_by_rule(now.astimezone(PORTAL_TZ).date()),
+            "statuses": STATUSES,
+            "regions": REGIONS,
+            "rule": DEADLINE_RULE,
+            "query": urlencode(query, doseq=True),
             "stats": stats,
+            "now": now,
         },
     )
+
+
+@app.post("/subscriptions/filter", dependencies=[Depends(same_origin)])
+async def create_filter_subscription(request: Request, user: User):
+    form = await request.form()
+    data = {key: form.getlist(key) for key in form.keys()}
+    current = Filters.from_form(data)
+    name = (form.get("name") or "").strip() or "Мой фильтр"
+    with pool.connection() as conn:
+        conn.execute(
+            """INSERT INTO subscriptions (user_id, name, query, kind, filters)
+               VALUES (%s, %s, '', 'announcements', %s)""",
+            (user, name[:100], Jsonb(current.to_json())),
+        )
+    return RedirectResponse("/subscriptions", status_code=303)
 
 
 @app.get("/subscriptions")
@@ -197,10 +231,16 @@ def subscriptions(request: Request, user: User):
         rows = conn.execute(
             """SELECT s.id, s.name, s.query, s.min_amount, s.max_amount, s.active,
                       (SELECT count(*) FROM matches m WHERE m.subscription_id = s.id)
+                      + (SELECT count(*) FROM announcement_matches m
+                         WHERE m.subscription_id = s.id),
+                      s.kind, s.filters
                FROM subscriptions s WHERE s.user_id = %s ORDER BY s.id""",
             (user,),
         ).fetchall()
-    return templates.TemplateResponse(request, "subscriptions.html", {"rows": rows})
+    described = {r[0]: Filters.from_json(r[8]).describe() for r in rows if r[7] == "announcements"}
+    return templates.TemplateResponse(
+        request, "subscriptions.html", {"rows": rows, "described": described}
+    )
 
 
 @app.post("/subscriptions", dependencies=[Depends(same_origin)])
@@ -245,15 +285,24 @@ def delete_subscription(user: User, sub_id: int):
 def matches(request: Request, user: User):
     with pool.connection() as conn:
         rows = conn.execute(
-            """SELECT m.matched_at, s.name, l.trd_buy_id, l.name_ru, l.amount,
-                      l.customer_name_ru, a.end_date
-               FROM matches m
-               JOIN subscriptions s ON s.id = m.subscription_id
-               JOIN lots l ON l.id = m.lot_id
-               LEFT JOIN announcements a ON a.id = l.trd_buy_id
-               WHERE s.user_id = %s
-               ORDER BY m.matched_at DESC, l.id DESC LIMIT 200""",
-            (user,),
+            """SELECT * FROM (
+                   SELECT m.matched_at, s.name, l.trd_buy_id, l.name_ru, l.amount,
+                          l.customer_name_ru, a.end_date, l.prepayment
+                   FROM matches m
+                   JOIN subscriptions s ON s.id = m.subscription_id
+                   JOIN lots l ON l.id = m.lot_id
+                   LEFT JOIN announcements a ON a.id = l.trd_buy_id
+                   WHERE s.user_id = %(user)s
+                   UNION ALL
+                   SELECT m.matched_at, s.name, a.id, a.name_ru, a.total_sum,
+                          coalesce(a.customer_name_ru, a.org_name_ru), a.end_date,
+                          a.prepayment_max
+                   FROM announcement_matches m
+                   JOIN subscriptions s ON s.id = m.subscription_id
+                   JOIN announcements a ON a.id = m.announcement_id
+                   WHERE s.user_id = %(user)s
+               ) found ORDER BY matched_at DESC, trd_buy_id DESC LIMIT 200""",
+            {"user": user},
         ).fetchall()
     return templates.TemplateResponse(request, "matches.html", {"rows": rows})
 

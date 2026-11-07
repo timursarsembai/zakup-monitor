@@ -66,14 +66,23 @@ class Client:
                 return None
             raise
 
+    def graphql(self, query: str) -> dict[str, Any]:
+        data = self._request("POST", "/v3/graphql", json={"query": query})
+        if data.get("errors"):
+            raise GoszakupError(f"graphql: {str(data['errors'])[:300]}")
+        return data.get("data") or {}
+
     def _get(self, path: str, params: dict[str, Any]) -> dict[str, Any]:
+        return self._request("GET", path, params=params)
+
+    def _request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
         for attempt in range(5):
             wait = self._delay - (time.monotonic() - self._last_request)
             if wait > 0:
                 time.sleep(wait)
             self._last_request = time.monotonic()
             try:
-                response = self._http.get(path, params=params)
+                response = self._http.request(method, path, **kwargs)
             except httpx.TransportError as error:
                 logger.warning("goszakup %s: %s, retry %d", path, type(error).__name__, attempt)
                 time.sleep(2**attempt * 5)

@@ -8,13 +8,13 @@
   <input name="max_amount" placeholder="до" size="10">
   <button>Добавить</button>
 </form>
-<p class="muted">Подписка проверяет только лоты, пришедшие после её создания. Синтаксис запроса: слова через пробел — все сразу, <code>or</code> — любое, <code>-слово</code> — исключить, кавычки — фраза.</p>
+<p class="muted">Подписку-фильтр объявлений проще всего сохранить с главной страницы кнопкой «Сохранить как подписку». Здесь — подписка на слова в новых лотах: она проверяет только лоты, пришедшие после её создания. Синтаксис запроса: слова через пробел — все сразу, <code>or</code> — любое, <code>-слово</code> — исключить, кавычки — фраза.</p>
 <div class="table-wrap"><table>
-  <tr><th>Название</th><th>Запрос</th><th>Сумма</th><th>Совпадений</th><th></th></tr>
+  <tr><th>Название</th><th>Условия</th><th>Сумма</th><th>Совпадений</th><th></th></tr>
   {% for r in rows %}
   <tr>
     <td>{{ r[1] }}{% if not r[5] %} <span class="muted">(выключена)</span>{% endif %}</td>
-    <td><code>{{ r[2] }}</code></td>
+    <td>{% if r[7] == "announcements" %}{{ described[r[0]] }}{% else %}<code>{{ r[2] }}</code>{% endif %}</td>
     <td class="num">{% if r[3] is not none %}от {{ r[3] | money }} {% endif %}{% if r[4] is not none %}до {{ r[4] | money }}{% endif %}</td>
     <td class="num">{{ r[6] }}</td>
     <td>

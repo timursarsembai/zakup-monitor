@@ -1,30 +1,97 @@
 {% extends "base.html" %}
-{% block title %}Поиск лотов{% endblock %}
+{% block title %}Объявления{% endblock %}
+{% block style %}
+  .filters-panel { border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin: 12px 0; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px 24px; }
+  fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+  legend { font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+  .check { display: flex; gap: 8px; align-items: flex-start; margin: 4px 0; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .row input { width: 130px; }
+  .wide { width: 100%; }
+  .panel-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 16px;
+                   padding-top: 14px; border-top: 1px solid var(--line); }
+  .primary { background: var(--accent); color: #fff; border-color: transparent; font-weight: 600; }
+  .spacer { flex: 1; }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 13px; white-space: nowrap;
+           border: 1px solid var(--line); }
+  .badge.hot { background: color-mix(in srgb, #1e9e5a 15%, transparent); border-color: transparent; color: #137a43; font-weight: 600; }
+  @media (prefers-color-scheme: dark) { .badge.hot { color: #6fdc9f; } }
+  .title { font-weight: 500; }
+  .summary { margin: 8px 0; }
+  select, input[type=date] { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; font: inherit; }
+{% endblock %}
 {% block main %}
-<form class="filters" method="get">
-  <input name="q" value="{{ q }}" placeholder="ноутбук -аренда" size="30">
-  <input name="min_amount" value="{{ min_amount }}" placeholder="сумма от" size="10">
-  <input name="max_amount" value="{{ max_amount }}" placeholder="до" size="10">
-  <label><input type="checkbox" name="open_only" value="true" {% if open_only %}checked{% endif %}> только открытые</label>
-  <button>Найти</button>
+<form method="get" action="/" class="filters-panel">
+  <input type="hidden" name="applied" value="1">
+  <div class="grid">
+    <fieldset>
+      <legend>Статус</legend>
+      {% for id, name in statuses.items() %}
+      <label class="check"><input type="checkbox" name="status" value="{{ id }}" {% if id in f.statuses %}checked{% endif %}> {{ name }}</label>
+      {% endfor %}
+    </fieldset>
+    <fieldset>
+      <legend>Место поставки</legend>
+      {% for code, name in regions.items() %}
+      <label class="check"><input type="checkbox" name="region" value="{{ code }}" {% if code in f.regions %}checked{% endif %}> {{ name }}</label>
+      {% endfor %}
+    </fieldset>
+    <fieldset>
+      <legend>Признаки и аванс</legend>
+      <label class="check"><input type="checkbox" name="disable_person" value="1" {% if f.disable_person %}checked{% endif %}> Закупка среди организаций инвалидов</label>
+      <label class="check"><input type="checkbox" name="advance_only" value="1" {% if f.advance_only %}checked{% endif %}> Только с авансом</label>
+      <p class="muted">С авансом всегда показываются первыми.</p>
+    </fieldset>
+    <fieldset>
+      <legend>Сумма закупки, ₸</legend>
+      <div class="row">
+        <input name="min_sum" value="{{ '%.0f'|format(f.min_sum) if f.min_sum is not none else '' }}" placeholder="от" inputmode="numeric">
+        <input name="max_sum" value="{{ '%.0f'|format(f.max_sum) if f.max_sum is not none else '' }}" placeholder="до" inputmode="numeric">
+      </div>
+      <legend style="margin-top:14px">Окончание приема заявок по</legend>
+      <select name="deadline_mode" class="wide">
+        <option value="rule" {% if f.deadline == rule %}selected{% endif %}>Через 2 дня, в выходные — по вторник ({{ rule_date.strftime("%d.%m") }})</option>
+        <option value="date" {% if f.deadline and f.deadline != rule %}selected{% endif %}>По дате</option>
+        <option value="" {% if not f.deadline %}selected{% endif %}>Без ограничения</option>
+      </select>
+      <input type="date" name="deadline_date" class="wide" style="margin-top:6px" value="{{ f.deadline if f.deadline and f.deadline != rule else '' }}">
+    </fieldset>
+    <fieldset>
+      <legend>Слова в лотах</legend>
+      <input name="q" value="{{ f.q }}" class="wide" placeholder="стол or стул -аренда">
+    </fieldset>
+  </div>
+  <div class="panel-actions">
+    <button class="primary">Найти</button>
+    <a href="/">Сбросить</a>
+    <span class="spacer"></span>
+    <input name="name" placeholder="Название подписки" size="18">
+    <button formmethod="post" formaction="/subscriptions/filter">Сохранить как подписку</button>
+  </div>
 </form>
-<p class="muted">В базе {{ stats[0] }} объявлений и {{ stats[1] }} лотов{% if stats[2] %}, последняя синхронизация {{ stats[2].strftime("%d.%m.%Y %H:%M") }}{% endif %}.</p>
+
+<p class="summary">Найдено: <b>{{ total }}</b>{% if deadline_date %} · окончание по {{ deadline_date.strftime("%d.%m.%Y") }} включительно{% endif %}</p>
+<p class="muted">Открытых объявлений в базе: {{ stats[0] }}{% if stats[1] %}, ещё {{ stats[1] }} ждут загрузки подробностей (признаки, место, аванс) — пока не попадают в фильтр{% endif %}{% if stats[2] %}. Обновлено {{ (stats[2]|local).strftime("%d.%m %H:%M") }}{% endif %}.</p>
+
 <div class="table-wrap"><table>
-  <tr><th>Объявление</th><th>Лот</th><th>Заказчик</th><th>Сумма, ₸</th><th>Приём до</th></tr>
+  <tr><th>Объявление</th><th>Сумма, ₸</th><th>Аванс</th><th>Окончание приема</th><th>Место поставки</th><th>Заказчик</th></tr>
   {% for r in rows %}
   <tr>
-    <td>{% if r[1] %}<a href="{{ announcement_url(r[1]) }}" target="_blank" rel="noopener">{{ r[2] or r[1] }}</a>{% endif %}</td>
-    <td>{{ r[4] or "—" }}<div class="muted">№ {{ r[3] or "—" }}</div></td>
-    <td>{{ r[6] or "" }}</td>
-    <td class="num">{{ r[5] | money }}</td>
-    <td>{{ r[7].strftime("%d.%m.%Y") if r[7] else "" }}</td>
+    <td><a class="title" href="{{ announcement_url(r[0]) }}" target="_blank" rel="noopener">{{ r[2] or "Без названия" }}</a>
+      <div class="muted">№ {{ r[1] or r[0] }}{% if r[9] %} · лотов: {{ r[9] }}{% endif %}</div></td>
+    <td class="num">{{ r[3] | money }}</td>
+    <td>{% if r[5] %}<span class="badge {% if r[5] >= 30 %}hot{% endif %}">{{ '%g'|format(r[5]) }}%</span>{% else %}<span class="muted">нет</span>{% endif %}</td>
+    <td>{{ (r[4]|local).strftime("%d.%m.%Y %H:%M") if r[4] else "" }}<div class="muted">{{ time_left(r[4]) }}</div></td>
+    <td>{{ region_names(r[6]) | join(", ") }}</td>
+    <td>{{ r[7] or "" }}</td>
   </tr>
   {% else %}
-  <tr><td colspan="5" class="muted">Ничего не нашлось.</td></tr>
+  <tr><td colspan="6" class="muted">Под фильтр ничего не подходит.</td></tr>
   {% endfor %}
 </table></div>
 <p>
-  {% if page > 1 %}<a href="?q={{ q|urlencode }}&min_amount={{ min_amount|urlencode }}&max_amount={{ max_amount|urlencode }}&open_only={{ open_only|lower }}&page={{ page - 1 }}">← назад</a>{% endif %}
-  {% if has_next %}<a href="?q={{ q|urlencode }}&min_amount={{ min_amount|urlencode }}&max_amount={{ max_amount|urlencode }}&open_only={{ open_only|lower }}&page={{ page + 1 }}">дальше →</a>{% endif %}
+  {% if page > 1 %}<a href="/?{{ query }}&page={{ page - 1 }}">← назад</a>{% endif %}
+  {% if has_next %}<a href="/?{{ query }}&page={{ page + 1 }}">дальше →</a>{% endif %}
 </p>
 {% endblock %}

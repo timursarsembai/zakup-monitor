@@ -23,6 +23,20 @@ CREATE TABLE IF NOT EXISTS announcements (
 );
 -- Когда последний раз читали карточку /v3/trd-buy/{id}: только в ней есть заказчик.
 ALTER TABLE announcements ADD COLUMN IF NOT EXISTS card_fetched_at timestamptz;
+-- Подробности из GraphQL (zakup.details): их нет в REST-списке.
+-- disable_person — признак «Закупка среди организаций инвалидов» (refTrdBuySigns=1).
+-- kato — места поставки: КАТО объявления, лотов и пунктов плана. Первые две
+-- цифры — регион: 75 — г. Алматы, 19 — Алматинская область.
+-- prepayment_max — наибольший аванс по пунктам плана, в процентах.
+ALTER TABLE announcements ADD COLUMN IF NOT EXISTS disable_person boolean;
+ALTER TABLE announcements ADD COLUMN IF NOT EXISTS kato text[];
+ALTER TABLE announcements ADD COLUMN IF NOT EXISTS prepayment_max numeric(6, 2);
+ALTER TABLE announcements ADD COLUMN IF NOT EXISTS type_trade_id integer;
+ALTER TABLE announcements ADD COLUMN IF NOT EXISTS subject_type_id integer;
+ALTER TABLE announcements ADD COLUMN IF NOT EXISTS details_fetched_at timestamptz;
+-- last_update_date, при котором читали подробности: изменилось — перечитать.
+ALTER TABLE announcements ADD COLUMN IF NOT EXISTS details_update_date timestamptz;
+CREATE INDEX IF NOT EXISTS announcements_status_end ON announcements (status_id, end_date);
 CREATE INDEX IF NOT EXISTS announcements_end_date ON announcements (end_date);
 CREATE INDEX IF NOT EXISTS announcements_customer_bin ON announcements (customer_bin);
 
@@ -53,6 +67,8 @@ CREATE TABLE IF NOT EXISTS lots (
 ALTER TABLE lots ADD COLUMN IF NOT EXISTS seen_seq bigint GENERATED ALWAYS AS IDENTITY;
 CREATE UNIQUE INDEX IF NOT EXISTS lots_seen_seq ON lots (seen_seq);
 CREATE INDEX IF NOT EXISTS lots_tsv ON lots USING gin (tsv);
+ALTER TABLE lots ADD COLUMN IF NOT EXISTS prepayment numeric(6, 2);
+ALTER TABLE lots ADD COLUMN IF NOT EXISTS kato text[];
 CREATE INDEX IF NOT EXISTS lots_trd_buy_id ON lots (trd_buy_id);
 CREATE INDEX IF NOT EXISTS lots_customer_bin ON lots (customer_bin);
 
@@ -124,6 +140,20 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     -- текущего максимума, чтобы не прислать всю историю разом.
     matched_up_to bigint NOT NULL DEFAULT 0,
     created_at    timestamptz NOT NULL DEFAULT now()
+);
+
+-- kind: 'lots' — поиск по словам среди новых лотов (query, min/max_amount);
+-- 'announcements' — сохранённый фильтр объявлений (filters, см. zakup.filters).
+ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS kind text NOT NULL DEFAULT 'lots';
+ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS filters jsonb;
+
+-- Объявления, уже отправленные по подписке-фильтру.
+CREATE TABLE IF NOT EXISTS announcement_matches (
+    subscription_id bigint NOT NULL REFERENCES subscriptions (id) ON DELETE CASCADE,
+    announcement_id bigint NOT NULL REFERENCES announcements (id) ON DELETE CASCADE,
+    matched_at      timestamptz NOT NULL DEFAULT now(),
+    notified_at     timestamptz,
+    PRIMARY KEY (subscription_id, announcement_id)
 );
 
 -- Какие лоты уже отправлены по подписке: повторно не шлём.

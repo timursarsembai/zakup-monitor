@@ -6,7 +6,7 @@ import os
 import sys
 from datetime import date, datetime, time, timedelta
 
-from zakup import auth, bot, db, matcher, notify, sync
+from zakup import auth, bot, db, details, matcher, notify, sync
 from zakup.goszakup import ENTITIES, PORTAL_TZ, Client
 
 # Сколько истории грузить, если start-from не запускали.
@@ -25,8 +25,8 @@ def main() -> int:
     again = sub.add_parser("rescan", help="перечитать последние дни: поздние публикации, статусы")
     again.add_argument("--days", type=int, default=30)
     again.add_argument("--max-pages", type=int, default=20)
-    refresh = sub.add_parser("refresh", help="дочитать карточки открытых объявлений (заказчик)")
-    refresh.add_argument("--limit", type=int, default=500)
+    more = sub.add_parser("details", help="дочитать подробности открытых объявлений (GraphQL)")
+    more.add_argument("--limit", type=int, default=2000)
     sub.add_parser("bot", help="Telegram-бот: привязка чатов (работает постоянно)")
     passwd = sub.add_parser("set-password", help="задать пароль (создаст пользователя, если нет)")
     passwd.add_argument("email")
@@ -75,8 +75,8 @@ def main() -> int:
                 return _start_from(conn, client, args.since)
             if args.command == "rescan":
                 return _rescan(conn, client, args.days, args.max_pages)
-            if args.command == "refresh":
-                return _refresh(conn, client, args.limit)
+            if args.command == "details":
+                return _details(conn, client, args.limit)
             return _sync(conn, client, args.max_pages)
     finally:
         client.close()
@@ -138,7 +138,7 @@ def _sync(conn, client: Client, max_pages: int) -> int:
     try:
         for entity in ENTITIES:
             print(sync.sync(conn, client, entity, max_pages))
-        print(f"matches: {matcher.run(conn)}, delivered: {matcher.deliver(conn)}")
+        _match_and_deliver(conn)
     except Exception as error:
         # Only the type: database errors can quote the connection string.
         notify.send(f"zakup: синхронизация упала с ошибкой {type(error).__name__}.")
@@ -164,7 +164,7 @@ def _rescan(conn, client: Client, days: int, max_pages: int) -> int:
         print(f"announcements rescanned: {saved}")
         if lot_floor is not None:
             print(f"lots rescanned: {sync.rescan(conn, client, 'lots', lot_floor, max_pages)}")
-        print(f"matches: {matcher.run(conn)}, delivered: {matcher.deliver(conn)}")
+        _match_and_deliver(conn)
     except Exception as error:
         # Only the type: database errors can quote the connection string.
         notify.send(f"zakup: повторный проход упал с ошибкой {type(error).__name__}.")
@@ -172,22 +172,22 @@ def _rescan(conn, client: Client, days: int, max_pages: int) -> int:
     return 0
 
 
-def _refresh(conn, client: Client, limit: int) -> int:
-    ids = [
-        row[0]
-        for row in conn.execute(
-            """SELECT id FROM announcements WHERE end_date > now()
-               ORDER BY card_fetched_at NULLS FIRST, id DESC LIMIT %s""",
-            (limit,),
-        )
-    ]
-    for item_id in ids:
-        if item := client.get("announcements", item_id):
-            db.upsert_announcement(conn, item)
-        conn.execute("UPDATE announcements SET card_fetched_at = now() WHERE id = %s", (item_id,))
-        conn.commit()
-    print(f"refreshed {len(ids)}")
+def _details(conn, client: Client, limit: int) -> int:
+    try:
+        print(f"details: {details.refresh(conn, client, limit)}")
+        _match_and_deliver(conn)
+    except Exception as error:
+        # Only the type: database errors can quote the connection string.
+        notify.send(f"zakup: подробности объявлений упали с ошибкой {type(error).__name__}.")
+        raise
     return 0
+
+
+def _match_and_deliver(conn) -> None:
+    lots = matcher.run(conn)
+    announcements = matcher.run_filters(conn)
+    print(f"matches: lots {lots}, announcements {announcements}, "
+          f"delivered: {matcher.deliver(conn)}")
 
 
 if __name__ == "__main__":
