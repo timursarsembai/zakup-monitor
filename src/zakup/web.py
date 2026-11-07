@@ -37,6 +37,7 @@ from zakup import (
     research,
     results,
     secrets_box,
+    sources,
     spec,
     telegram,
 )
@@ -762,7 +763,7 @@ def mark_lot(
 
 
 @app.get("/research")
-def research_list(request: Request, _: User, q: str = ""):
+def research_list(request: Request, user: User, q: str = "", sources_open: int = 0):
     """Сохранённые подборки товаров: последний готовый поиск по каждому лоту."""
     with pool.connection() as conn:
         rows = conn.execute(
@@ -781,6 +782,7 @@ def research_list(request: Request, _: User, q: str = ""):
         active = conn.execute(
             "SELECT count(*) FROM lot_research WHERE status IN ('queued', 'running')"
         ).fetchone()[0]
+        source_rows = sources.listing(conn)
     items = []
     for row in rows:
         found = (row[3] or {}).get("items") or []
@@ -800,8 +802,41 @@ def research_list(request: Request, _: User, q: str = ""):
     items.sort(key=lambda i: i["finished_at"], reverse=True)
     return templates.TemplateResponse(
         request, "research_list.html",
-        {"items": items, "q": q, "active": active, "now": datetime.now(UTC)},
+        {"items": items, "q": q, "active": active, "now": datetime.now(UTC),
+         "sources": source_rows, "sources_open": sources_open, "me": user,
+         "is_admin": request.state.role == "admin"},
     )
+
+
+@app.post("/sources", dependencies=[Depends(same_origin)])
+def add_source(
+    request: Request,
+    user: User,
+    url: Annotated[str, Form()],
+    name: Annotated[str, Form()] = "",
+    categories: Annotated[str, Form()] = "",
+    city: Annotated[str, Form()] = "",
+    note: Annotated[str, Form()] = "",
+):
+    with pool.connection() as conn:
+        domain = sources.add(conn, user, url, name, categories, city, note)
+    if domain is None:
+        raise HTTPException(422, i18n.gettext("Укажите адрес сайта, например zeta.kz"))
+    _audit(request, user, "source_add", domain)
+    return RedirectResponse("/research?sources_open=1#sources", status_code=303)
+
+
+@app.post("/sources/{source_id}/toggle", dependencies=[Depends(same_origin)])
+def toggle_source(request: Request, user: User, source_id: int):
+    with pool.connection() as conn:
+        row = conn.execute(
+            """UPDATE sources SET active = NOT active
+               WHERE id = %s AND (%s OR added_by = %s OR auto) RETURNING domain, active""",
+            (source_id, request.state.role == "admin", user),
+        ).fetchone()
+    if row:
+        _audit(request, user, "source_toggle", row[0], active=row[1])
+    return RedirectResponse("/research?sources_open=1#sources", status_code=303)
 
 
 LOG_PAGE_SIZES = (20, 50, 100)

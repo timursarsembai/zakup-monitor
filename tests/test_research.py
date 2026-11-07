@@ -77,3 +77,21 @@ def test_clean_keeps_only_phone_like_values():
     ]})
     assert result["items"][0]["phone"] == "+7 (727) 123-45-67, 8 701 000 0000"
     assert result["items"][1]["phone"] is None
+
+
+def test_sources_from_results_and_manual(conn):
+    from zakup import sources
+    user = _lot(conn)
+    assert sources.domain_of("https://www.Zeta.kz/catalog?x=1") == "zeta.kz"
+    assert sources.domain_of("Zeta.kz") == "zeta.kz" and sources.domain_of("zeta") is None
+    sources.add(conn, user, "Zeta.kz", "Zeta", "мебель, оргтехника", "Алматы")
+    sources.remember(conn, {"category": "мебель", "items": [
+        {"url": "https://www.mebel.kz/1", "seller": "Мебель.kz", "city": "Алматы"},
+        {"url": "https://zeta.kz/2", "seller": "Zeta"},
+    ]})
+    rows = {r[1]: r for r in sources.listing(conn)}
+    assert rows["zeta.kz"][6] is False and rows["zeta.kz"][8] == 1  # своя, нашлась раз
+    assert rows["mebel.kz"][6] is True and rows["mebel.kz"][3] == ["Мебель"]
+    prompt = sources.for_prompt(conn)
+    assert "zeta.kz — Мебель, Оргтехника, Алматы (добавлен вручную)" in prompt
+    assert sources.known_categories(conn) == ["Мебель", "Оргтехника"]

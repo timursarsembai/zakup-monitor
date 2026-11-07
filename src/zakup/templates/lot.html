@@ -15,7 +15,13 @@
   .research-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
   .research-form input[name=region] { flex: 1; min-width: 220px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); font: inherit; }
   .research-form .primary { background: var(--accent); color: var(--on-accent); border-color: transparent; font-weight: 600; }
-  table.research { min-width: 980px; }
+  table.research { min-width: 1280px; }
+  table.research td.fit { min-width: 170px; font-size: 13px; }
+  table.research ul { list-style: none; margin: 4px 0 0; padding: 0; }
+  table.research .ok-list li { color: var(--ok); }
+  table.research .bad-list li { color: var(--bad); }
+  table.research td.phones { white-space: nowrap; }
+  table.research a.call { display: block; margin-bottom: 4px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; }
   table.research td.product { min-width: 300px; max-width: 420px; }
   table.research td.photo { width: 76px; }
   table.research img { width: 72px; height: 72px; object-fit: contain; border-radius: 6px; background: #fff; }

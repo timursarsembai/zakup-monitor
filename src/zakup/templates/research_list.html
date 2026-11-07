@@ -13,9 +13,29 @@
   .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; border: 1px solid var(--line); }
   .badge.hot { background: color-mix(in srgb, #1e9e5a 15%, transparent); border-color: transparent; color: var(--ok); font-weight: 600; }
   @media (max-width: 640px) { .item { grid-template-columns: 1fr; } .side { text-align: left; } }
+  .headline { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .headline .count { opacity: .8; font-weight: 400; margin-left: 4px; }
+  .sheet { display: none; position: fixed; inset: 0; z-index: 50; background: var(--bg); overflow-y: auto; padding: 0 16px 24px; }
+  .sheet.open { display: block; }
+  body.sheet-open { overflow: hidden; }
+  .sheet-head { position: sticky; top: 0; background: var(--bg); display: flex; justify-content: space-between; align-items: center; padding: 14px 0; border-bottom: 1px solid var(--line); margin-bottom: 14px; z-index: 2; }
+  .sheet-head b { font-size: 20px; }
+  .sheet-head button { border: 0; font-size: 24px; min-width: 44px; min-height: 44px; }
+  .sheet-inner { max-width: 1100px; margin: 0 auto; }
+  .add-source { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-bottom: 16px; align-items: end; }
+  .add-source label span { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+  .add-source input { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); font: inherit; }
+  .src-group h3 { font-size: 15px; margin: 18px 0 6px; }
+  .src { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .src.off { opacity: .5; }
+  .src form { margin: 0; }
+  .tag { display: inline-block; padding: 0 8px; border-radius: 999px; font-size: 12px; border: 1px solid var(--line); margin-right: 4px; }
+  .tag.ai { border-color: color-mix(in srgb, var(--accent) 50%, var(--line)); }
+  @media (max-width: 760px) { .add-source input { font-size: 16px; min-height: 44px; } }
 {% endblock %}
 {% block main %}
-<h1>{{ _("Подбор товаров") }}</h1>
+<div class="headline"><h1>{{ _("Подбор товаров") }}</h1>
+  <button type="button" class="primary" data-sources-open>⚙ {{ _("Источники") }} <span class="count">{{ sources | selectattr(7) | list | length }}</span></button></div>
 <p class="muted">{{ _("Сохранённые результаты поиска товаров с ИИ по лотам. Повторный поиск не нужен: результат хранится, пока вы сами не нажмёте «Найти заново» на странице лота.") }}{% if active %} {{ _("Сейчас в работе:") }} {{ active }}.{% endif %}</p>
 <form class="search" method="get" action="/research">
   <input name="q" value="{{ q }}" placeholder="{{ _("Название лота или номер объявления") }}" aria-label="{{ _("Поиск по подборкам") }}">
@@ -39,4 +59,43 @@
 {% else %}
 <p class="muted">{% if q %}{{ _("Ничего не нашлось.") }}{% else %}{{ _("Подборок пока нет. Откройте лот и нажмите «Найти товары» — результат сохранится здесь.") }}{% endif %}</p>
 {% endfor %}
+
+<div class="sheet {{ 'open' if sources_open }}" id="sources" role="dialog" aria-modal="true" aria-label="{{ _("Источники") }}">
+  <div class="sheet-inner">
+    <div class="sheet-head"><b>{{ _("Источники для подбора") }}</b><button type="button" data-sources-close aria-label="{{ _("Закрыть") }}">✕</button></div>
+    <p class="muted">{{ _("Магазины и поставщики, которые ИИ проверяет в первую очередь. Сайты, где ИИ находил товары, добавляются сами (метка «ИИ»), свои источники добавьте ниже.") }}</p>
+    <form class="add-source" method="post" action="/sources">
+      <label><span>{{ _("Сайт") }}</span><input name="url" placeholder="zeta.kz" required autocapitalize="none" spellcheck="false"></label>
+      <label><span>{{ _("Название") }}</span><input name="name" placeholder="Zeta"></label>
+      <label><span>{{ _("Категории через запятую") }}</span><input name="categories" placeholder="{{ _("Мебель, Оргтехника") }}"></label>
+      <label><span>{{ _("Город") }}</span><input name="city" placeholder="{{ _("Алматы") }}"></label>
+      <label><span>{{ _("Заметка") }}</span><input name="note" placeholder="{{ _("доставка по Казахстану") }}"></label>
+      <button class="primary">{{ _("Добавить источник") }}</button>
+    </form>
+    {% set ns = namespace(groups={}) %}
+    {% for row in sources %}{% for c in (row[3] or [_("Без категории")]) %}{% set __ = ns.groups.setdefault(c, []).append(row) %}{% endfor %}{% endfor %}
+    {% for category, rows in ns.groups | dictsort %}
+    <div class="src-group">
+      <h3>{{ category }} <span class="muted">{{ rows | length }}</span></h3>
+      {% for id, domain, name, categories, city, note, auto, active, found, last_found, added_email, added_by in rows %}
+      <div class="src {{ '' if active else 'off' }}">
+        <div><a href="https://{{ domain }}" target="_blank" rel="noopener noreferrer">{{ name or domain }}</a> <span class="muted">{{ domain }}</span>
+          <div class="muted">{% if auto %}<span class="tag ai">{{ _("ИИ") }}</span>{% else %}<span class="tag">{{ added_email or _("вручную") }}</span>{% endif %}{% if city %}{{ city }} · {% endif %}{% if found %}{{ _("находили:") }} {{ found }}{% endif %}{% if note %} · {{ note }}{% endif %}</div></div>
+        {% if is_admin or auto or added_by == me %}<form method="post" action="/sources/{{ id }}/toggle"><button>{{ _("Выключить") if active else _("Включить") }}</button></form>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="muted">{{ _("Источников пока нет.") }}</p>
+    {% endfor %}
+  </div>
+</div>
+<script>
+  const sheet = document.getElementById("sources");
+  const toggle = (open) => { sheet.classList.toggle("open", open); document.body.classList.toggle("sheet-open", open); };
+  document.querySelector("[data-sources-open]").addEventListener("click", () => toggle(true));
+  document.querySelector("[data-sources-close]").addEventListener("click", () => toggle(false));
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") toggle(false); });
+  if (sheet.classList.contains("open")) document.body.classList.add("sheet-open");
+</script>
 {% endblock %}

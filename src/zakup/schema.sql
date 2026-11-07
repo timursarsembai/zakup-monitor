@@ -333,3 +333,21 @@ ALTER TABLE announcements ADD COLUMN IF NOT EXISTS tsv_kk tsvector GENERATED ALW
     to_tsvector('simple', coalesce(name_kz, ''))
 ) STORED;
 CREATE INDEX IF NOT EXISTS announcements_tsv_kk ON announcements USING gin (tsv_kk);
+
+-- Источники для подбора товаров (zakup.sources): магазины и поставщики. ИИ
+-- пополняет их сам по найденному, пользователи добавляют свои. При поиске
+-- ИИ сначала проверяет подходящие по категории.
+CREATE TABLE IF NOT EXISTS sources (
+    id          bigserial PRIMARY KEY,
+    domain      text NOT NULL UNIQUE,
+    name        text,
+    categories  text[] NOT NULL DEFAULT '{}',
+    city        text,
+    note        text,
+    added_by    bigint REFERENCES users (id) ON DELETE SET NULL,
+    auto        boolean NOT NULL DEFAULT false,   -- добавил ИИ, а не человек
+    active      boolean NOT NULL DEFAULT true,
+    found_count integer NOT NULL DEFAULT 0,
+    last_found  timestamptz,
+    created_at  timestamptz NOT NULL DEFAULT now()
+);

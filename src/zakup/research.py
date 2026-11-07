@@ -25,7 +25,7 @@ import httpx
 import psycopg
 from psycopg.types.json import Jsonb
 
-from zakup import details, secrets_box
+from zakup import details, secrets_box, sources
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +67,7 @@ RESULT_SCHEMA = {
     "type": "object",
     "properties": {
         "region_searched": {"type": "string"},
+        "category": {"type": "string"},
         "summary": {"type": "string"},
         "items": {
             "type": "array",
@@ -84,6 +85,8 @@ RESULT_SCHEMA = {
                     "phone": {"type": ["string", "null"]},
                     "image": {"type": ["string", "null"]},
                     "fit": {"type": "string", "enum": ["полностью", "частично", "аналог"]},
+                    "matches": {"type": "array", "items": {"type": "string"}},
+                    "mismatches": {"type": "array", "items": {"type": "string"}},
                     "note": {"type": "string"},
                 },
                 "required": ["name", "seller", "city", "in_region", "price", "unit_price",
@@ -129,8 +132,17 @@ PROMPT = """Ты помогаешь поставщику, который уча�
      не нужен; не нашёл — null, не выдумывай;
    - image — прямая ссылка на фото товара с этой страницы (обычно og:image), или null;
    - fit — «полностью», если подходит по спецификации, «частично» — если отличается
-     в мелочах, «аналог» — похожий товар; note — коротко, чем отличается.
-5. region_searched — какой регион искал; summary — 2–3 предложения: что за товар,
+     в мелочах, «аналог» — похожий товар;
+   - matches — параметры из техспецификации, которым товар соответствует
+     (коротко: «массив дерева», «101×60×48 см»); mismatches — параметры, которым
+     НЕ соответствует или которые на странице не указаны (с пометкой «не указано»);
+   - note — что ещё важно (наличие, срок, доставка).
+5. Известные нам источники — магазины и поставщики. Сначала проверь те, что подходят
+   к этому товару (по категории и городу), потом ищи шире:
+{sources}
+6. category — товарная категория лота одним-двумя словами, лучше из уже известных:
+   {categories}.
+7. region_searched — какой регион искал; summary — 2–3 предложения: что за товар,
    какой разброс цен, на что обратить внимание при заявке. Пиши для человека,
    без названий полей вроде in_region.
 Сначала предложения из региона поставки, потом из других регионов, внутри — по цене.
@@ -180,8 +192,11 @@ def default_region(context: dict[str, Any]) -> str:
     return ", ".join(parts[:2]) if parts else "Казахстан"
 
 
-def build_prompt(context: dict[str, Any], region: str, whole_kz: bool) -> str:
+def build_prompt(context: dict[str, Any], region: str, whole_kz: bool,
+                 sources_text: str = "", categories: list[str] | None = None) -> str:
     return PROMPT.format(
+        sources=sources_text or "   (пока нет — ищи сам)",
+        categories=", ".join(categories or []) or "например «Мебель», «Канцтовары», «Оргтехника»",
         **{key: value if value not in (None, "") else "—" for key, value in context.items()},
         region=region,
         whole_kz=("Затем по всему Казахстану: доставить можно в любой регион — такие "
@@ -372,14 +387,23 @@ def clean(result: dict[str, Any]) -> dict[str, Any]:
             "phone": _phone(item.get("phone")),
             "image": image[:1000] if image.startswith(("https://", "http://")) else None,
             "fit": str(item.get("fit") or "")[:20],
+            "matches": _strings(item.get("matches")),
+            "mismatches": _strings(item.get("mismatches")),
             "note": str(item.get("note") or "")[:400],
         })
     items.sort(key=lambda i: (not i["in_region"], i["unit_price"] is None, i["unit_price"] or 0))
     return {
         "region_searched": str(result.get("region_searched") or "")[:200],
+        "category": str(result.get("category") or "")[:60],
         "summary": str(result.get("summary") or "")[:2000],
         "items": items[:30],
     }
+
+
+def _strings(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(v).strip()[:120] for v in value if str(v).strip()][:10]
 
 
 def _phone(value: Any) -> str | None:
@@ -403,7 +427,8 @@ def run_job(conn: psycopg.Connection, job: dict[str, Any]) -> dict[str, Any]:
     context = lot_context(conn, job["lot_id"])
     if context is None:
         raise ResearchError("нет данных лота — откройте страницу объявления, чтобы их загрузить")
-    prompt = build_prompt(context, job["region"], job["whole_kz"])
+    prompt = build_prompt(context, job["region"], job["whole_kz"],
+                          sources.for_prompt(conn), sources.known_categories(conn))
     key = None
     if job["provider"] != "claude_code":
         admin = conn.execute("SELECT id FROM users WHERE role = 'admin' ORDER BY id LIMIT 1").fetchone()
@@ -453,6 +478,9 @@ def work(database_url: str, providers: list[str], once: bool = False) -> None:
                     conn.rollback()
                     logger.warning("research %s failed: %s", job["id"], exc)
                     result, error = None, str(exc)[:500]
+                if result:
+                    # Сайты, где нашлись товары, — в справочник источников.
+                    sources.remember(conn, result)
                 conn.execute(
                     """UPDATE lot_research SET status = %s, result = %s, error = %s,
                            finished_at = now() WHERE id = %s""",

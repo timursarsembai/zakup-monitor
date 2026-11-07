@@ -507,3 +507,14 @@ def test_action_log(client, conn):
     client.post("/logout", headers=ORIGIN)
     client.post("/login", data={"email": "amir", "password": "amir-password-1"}, headers=ORIGIN)
     assert client.get("/log").status_code == 403
+
+
+def test_sources_sheet_on_research_page(client, conn):
+    _login(client)
+    response = client.post("/sources", data={"url": "https://zeta.kz", "name": "Zeta",
+                                             "categories": "Мебель"},
+                           headers=ORIGIN, follow_redirects=False)
+    assert response.headers["location"] == "/research?sources_open=1#sources"
+    page = client.get("/research?sources_open=1").text
+    assert "Источники для подбора" in page and "zeta.kz" in page and 'class="sheet open"' in page
+    assert client.post("/sources", data={"url": "нет"}, headers=ORIGIN).status_code == 422

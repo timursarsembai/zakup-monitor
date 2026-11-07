@@ -17,27 +17,30 @@
   {% if group %}
   <h3>{{ title }} <span class="muted">{{ group|length }}</span></h3>
   <div class="table-wrap"><table class="research">
-    <tr><th></th><th>{{ _("Товар и продавец") }}</th><th>{{ _("Цена у продавца") }}</th><th>{{ _("За ед. у продавца, ₸") }}</th><th>{{ _("За ед. в лоте, ₸") }}</th><th>{{ _("Маржа за ед.") }}</th><th>{{ _("Маржа на лот, ₸") }}</th><th>{{ _("Соответствие") }}</th></tr>
+    <tr><th></th><th>{{ _("Товар и продавец") }}</th><th>{{ _("За ед. у продавца, ₸") }}</th><th>{{ _("За ед. в лоте, ₸") }}</th><th>{{ _("Кол-во по лоту") }}</th><th>{{ _("Маржа за ед.") }}</th><th>{{ _("Маржа на лот, ₸") }}</th><th>{{ _("Соответствует ТС") }}</th><th>{{ _("Не соответствует") }}</th><th>{{ _("Телефон") }}</th></tr>
     {% for item in group %}
     {% set margin = (lot_price - item.unit_price) if (lot_price and item.unit_price) else none %}
     <tr>
       <td class="photo">{% if item.image %}<a href="{{ item.url | safe_url }}" target="_blank" rel="noopener noreferrer"><img src="{{ item.image | safe_url }}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()"></a>{% endif %}</td>
       <td class="product"><a href="{{ item.url | safe_url }}" target="_blank" rel="noopener noreferrer">{{ item.name }}</a>
         <div class="muted">{{ item.seller }}{% if item.city %} · {{ item.city }}{% endif %}</div>
-        {% if item.phone %}<div>📞 {% for phone in item.phone.split(",") %}{% set digits = phone | replace(" ", "") | replace("-", "") | replace("(", "") | replace(")", "") %}<a href="tel:{{ digits }}">{{ phone | trim }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</div>{% endif %}
         <div class="muted url"><a href="{{ item.url | safe_url }}" target="_blank" rel="noopener noreferrer">{{ (item.url | replace("https://", "") | replace("http://", "")) | truncate(48) }}</a></div>
         {% if item.note %}<div class="muted">{{ item.note }}</div>{% endif %}</td>
-      <td class="num">{{ item.price | money }}{% if item.price_unit %}<div class="muted">{{ _("за") }} {{ item.price_unit }}</div>{% endif %}</td>
-      <td class="num"><b>{{ item.unit_price | money }}</b></td>
+      <td class="num"><b>{{ item.unit_price | money }}</b>{% if item.price and item.price != item.unit_price %}<div class="muted">{{ item.price | money }} {{ _("за") }} {{ item.price_unit }}</div>{% endif %}</td>
       <td class="num">{{ lot_price | money }}</td>
+      <td class="num">{% if count %}{{ '%g'|format(count) }} {{ (lot_info.unit or "") }}{% endif %}</td>
       <td class="num">{% if margin is not none %}<span class="{{ 'plus' if margin > 0 else 'minus' }}">{{ margin | money }} ₸<br>{{ '%.1f'|format(margin / lot_price * 100) }}%</span>{% endif %}</td>
       <td class="num">{% if margin is not none and count %}{{ (margin * count) | money }}{% endif %}</td>
-      <td>{{ item.fit }}</td>
+      <td class="fit"><b>{{ _(item.fit) if item.fit else "" }}</b>
+        {% if item.matches %}<ul class="ok-list">{% for m in item.matches %}<li>✓ {{ m }}</li>{% endfor %}</ul>{% endif %}</td>
+      <td class="fit">{% if item.mismatches %}<ul class="bad-list">{% for m in item.mismatches %}<li>✗ {{ m }}</li>{% endfor %}</ul>{% elif item.matches %}<span class="muted">—</span>{% endif %}</td>
+      <td class="phones">{% if item.phone %}{% for phone in item.phone.split(",") %}{% set digits = phone | replace(" ", "") | replace("-", "") | replace("(", "") | replace(")", "") %}<a class="call" href="tel:{{ digits }}">📞 {{ phone | trim }}</a>{% endfor %}{% else %}<span class="muted">{{ _("не указан") }}</span>{% endif %}</td>
     </tr>
     {% endfor %}
   </table></div>
   {% endif %}
   {% endfor %}
+  {% if r["items"] and not (r["items"] | selectattr("phone") | list) and not (r["items"] | selectattr("matches") | list) %}<p class="muted">{{ _("Телефоны и разбор по параметрам техспецификации появятся при новом поиске — нажмите «Найти заново».") }}</p>{% endif %}
   {% if not r["items"] %}<p class="muted">{{ _("Подходящих предложений не нашлось.") }}</p>{% endif %}
   <p class="muted">{{ _("Найдено") }} {{ (job.finished_at|local).strftime("%d.%m %H:%M") }}{% if is_admin %} · {{ job.email }}{% endif %} · {{ job.provider }}{% if job.model %} ({{ job.model }}){% endif %}{{ _(". Цены и наличие проверяйте у продавца: это предварительная оценка. Маржа — от цены за единицу в лоте (максимальной), до налогов и доставки.") }}</p>
 {% endif %}
