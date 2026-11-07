@@ -30,6 +30,10 @@ def main() -> int:
     )
     more.add_argument("--limit", type=int, default=2000)
     sub.add_parser("bot", help="Telegram-бот: привязка чатов (работает постоянно)")
+    research_cmd = sub.add_parser("research", help="поиск товаров под лоты с ИИ (работает постоянно)")
+    research_cmd.add_argument("--providers", default="claude_code",
+                              help="через запятую: claude_code, anthropic, openai")
+    research_cmd.add_argument("--once", action="store_true", help="одна задача и выход")
     passwd = sub.add_parser("set-password", help="задать пароль (создаст пользователя, если нет)")
     passwd.add_argument("email")
     user = sub.add_parser("add-user", help="завести пользователя")
@@ -46,6 +50,11 @@ def main() -> int:
         return 0
     if args.command == "bot":
         bot.run(os.environ["DATABASE_URL"])
+        return 0
+    if args.command == "research":
+        from zakup import research
+
+        research.work(os.environ["DATABASE_URL"], args.providers.split(","), once=args.once)
         return 0
     if args.command == "set-password":
         return _set_password(args.email)

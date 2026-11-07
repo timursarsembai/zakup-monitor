@@ -263,3 +263,27 @@ def test_my_lots_filter_by_mark(client, conn):
     assert "Шкаф" in both and "Тумба" in both
     only = client.get("/my?status=submitted").text
     assert "Тумба" in only and "Шкаф" not in only
+
+
+def test_lot_page_research_section_and_start(client, conn, monkeypatch):
+    from tests.test_research import _lot
+
+    _lot(conn)
+    _login(client)
+    page = client.get("/lots/90").text
+    assert "Поиск товаров с ИИ" in page and "Актюбинская область, г.Актобе" in page
+    response = client.post("/lots/90/research", data={"region": "г.Актобе", "whole_kz": "1"},
+                           headers=ORIGIN, follow_redirects=False)
+    assert response.status_code == 303
+    assert "В очереди" in client.get("/lots/90/research").text
+    conn.execute("""UPDATE lot_research SET status = 'done', finished_at = now(),
+        result = '{"summary": "s", "region_searched": "Актобе", "items": [{"name": "Стол дуб",
+        "seller": "Мебель", "city": "Актобе", "in_region": true, "price": 80000, "unit_price": 80000,
+        "url": "https://m.kz/1", "image": null, "fit": "полностью"}]}'""")
+    conn.commit()
+    fragment = client.get("/lots/90/research").text
+    assert "Стол дуб" in fragment and "20 000.00 ₸" in fragment and "20.0%" in fragment
+    assert "80 000.00" in fragment  # маржа на лот: 20 000 × 4
+    monkeypatch.setenv("ZAKUP_SECRET_KEY", "")
+    bad = client.post("/settings/ai", data={"provider": "openai"}, headers=ORIGIN)
+    assert bad.status_code == 422

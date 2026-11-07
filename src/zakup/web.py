@@ -19,7 +19,7 @@ from fastapi.templating import Jinja2Templates
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
-from zakup import SITE_URL, auth, bot, details, marks, results, spec, telegram
+from zakup import SITE_URL, auth, bot, details, marks, research, results, secrets_box, spec, telegram
 from zakup.filters import (
     DEADLINE_RULE,
     DISABLE_PERSON,
@@ -390,9 +390,39 @@ def lot_page(request: Request, user: User, lot_id: int):
     lot = next((lot for lot in context["lots"] if lot["id"] == lot_id), None)
     if lot is None:
         raise HTTPException(404, "Лот удалён из объявления")
+    with pool.connection() as conn:
+        job = research.latest(conn, lot_id)
+        lot_info = research.lot_context(conn, lot_id)
+        provider = conn.execute("SELECT ai_provider FROM users WHERE id = %s", (user,)).fetchone()[0]
     context.update(lot=lot, others=[other for other in context["lots"] if other["id"] != lot_id],
-                   here=request.url.path)
+                   here=request.url.path, job=job, lot_info=lot_info,
+                   region=research.default_region(lot_info) if lot_info else "",
+                   provider_name=research.PROVIDERS.get(provider, provider))
     return templates.TemplateResponse(request, "lot.html", context)
+
+
+@app.post("/lots/{lot_id}/research", dependencies=[Depends(same_origin)])
+def start_research(
+    user: User,
+    lot_id: int,
+    region: Annotated[str, Form()] = "",
+    whole_kz: Annotated[str, Form()] = "",
+):
+    with pool.connection() as conn:
+        if research.lot_context(conn, lot_id) is None:
+            raise HTTPException(404, "Нет данных лота: откройте страницу объявления")
+        research.enqueue(conn, user, lot_id, region.strip() or "Казахстан", whole_kz == "1")
+    return RedirectResponse(f"/lots/{lot_id}#research", status_code=303)
+
+
+@app.get("/lots/{lot_id}/research")
+def research_fragment(request: Request, _: User, lot_id: int):
+    with pool.connection() as conn:
+        job = research.latest(conn, lot_id)
+        lot_info = research.lot_context(conn, lot_id)
+    return templates.TemplateResponse(
+        request, "research_fragment.html", {"job": job, "lot_info": lot_info}
+    )
 
 
 def _announcement_context(request: Request, user: int, announcement_id: int) -> dict:
@@ -713,6 +743,8 @@ def settings(request: Request, user: User, sent: str = "", saved: str = ""):
             "SELECT telegram_chat_id, company_bin FROM users WHERE id = %s", (user,)
         ).fetchone()
         groups = _user_groups(conn, user)
+        ai = conn.execute("SELECT ai_provider, ai_model FROM users WHERE id = %s", (user,)).fetchone()
+        ai_keys = secrets_box.saved_providers(conn, user)
     return templates.TemplateResponse(
         request,
         "settings.html",
@@ -724,8 +756,37 @@ def settings(request: Request, user: User, sent: str = "", saved: str = ""):
             "saved": saved,
             "company_bin": company_bin,
             "groups": groups,
+            "ai_provider": ai[0],
+            "ai_model": ai[1] or "",
+            "ai_keys": ai_keys,
+            "providers": research.PROVIDERS,
+            "default_models": research.DEFAULT_MODELS,
         },
     )
+
+
+@app.post("/settings/ai", dependencies=[Depends(same_origin)])
+def save_ai(
+    user: User,
+    provider: Annotated[str, Form()],
+    model: Annotated[str, Form()] = "",
+    api_key: Annotated[str, Form()] = "",
+):
+    if provider not in research.PROVIDERS:
+        raise HTTPException(422, "неизвестный провайдер")
+    with pool.connection() as conn:
+        if api_key.strip() and provider != "claude_code":
+            try:
+                secrets_box.save_key(conn, user, provider, api_key)
+            except secrets_box.NoSecretKey:
+                raise HTTPException(503, "На сервере не настроено шифрование ключей") from None
+        if provider != "claude_code" and provider not in secrets_box.saved_providers(conn, user):
+            raise HTTPException(422, "Для этого провайдера нужен API-ключ")
+        conn.execute(
+            "UPDATE users SET ai_provider = %s, ai_model = %s WHERE id = %s",
+            (provider, model.strip()[:100] or None, user),
+        )
+    return RedirectResponse("/settings?saved=ai", status_code=303)
 
 
 @app.post("/settings/company", dependencies=[Depends(same_origin)])

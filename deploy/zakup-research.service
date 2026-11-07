@@ -1,0 +1,14 @@
+# Поиск товаров под лоты через Claude Code по подписке владельца.
+# Работает на хосте (не в Docker): там установлен и авторизован `claude`.
+# Установка — см. README, раздел «Поиск товаров с ИИ».
+[Unit]
+Description=zakup: поиск товаров под лоты (Claude Code)
+After=network-online.target
+
+[Service]
+ExecStart=%h/apps/zakup/scripts/research-host.sh
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

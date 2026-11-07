@@ -9,6 +9,18 @@
   .parent .side { text-align: right; white-space: nowrap; }
   h2 { font-size: 17px; margin: 24px 0 10px; }
   @media (max-width: 640px) { .parent { grid-template-columns: 1fr; } .parent .side { text-align: left; } }
+  .research-box { border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin-top: 16px; }
+  .research-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+  .research-form input[name=region] { flex: 1; min-width: 220px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); font: inherit; }
+  .research-form .primary { background: var(--accent); color: #fff; border-color: transparent; font-weight: 600; }
+  table.research td.photo { width: 76px; }
+  table.research img { width: 72px; height: 72px; object-fit: contain; border-radius: 6px; background: #fff; }
+  table.research .url { word-break: break-all; }
+  table.research .plus { color: var(--ok); font-weight: 600; }
+  table.research .minus { color: var(--bad); font-weight: 600; }
+  .research-box h3 { font-size: 15px; margin: 16px 0 6px; }
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin 1s linear infinite; vertical-align: -2px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
 {% endblock %}
 {% block main %}
 {% if refresh_error %}<p class="notice">{{ refresh_error }}</p>{% endif %}
@@ -28,6 +40,21 @@
 </div>
 
 {{ lot_card(lot, link=false) }}
+
+<section class="research-box" id="research">
+  <h2 style="margin-top:0">Поиск товаров с ИИ</h2>
+  {% if lot_info %}
+  <form class="research-form" method="post" action="/lots/{{ lot.id }}/research">
+    <input name="region" value="{{ job.region if job else region }}" aria-label="Где искать в первую очередь" placeholder="Регион поставки">
+    <label class="muted"><input type="checkbox" name="whole_kz" value="1" {% if not job or job.whole_kz %}checked{% endif %}> и по всему Казахстану</label>
+    <button class="primary" {% if job and job.status in ("queued", "running") %}disabled{% endif %}>{{ "Найти заново" if job else "Найти товары" }}</button>
+  </form>
+  <p class="muted">Claude прочитает техспецификацию, найдёт в интернете подходящие товары — сначала в регионе поставки, потом по Казахстану — и посчитает маржу от цены в лоте. Сейчас ищет: {{ provider_name }} (<a href="/settings#ai">настройки</a>).</p>
+  {% else %}
+  <p class="muted">Нет данных лота для поиска.</p>
+  {% endif %}
+  <div data-research data-src="/lots/{{ lot.id }}/research">{% include "research_fragment.html" %}</div>
+</section>
 
 {% if lot.id in results %}
 <h2>Итоги</h2>
@@ -59,5 +86,19 @@
 <p class="muted" style="margin-top:24px">Данные с портала обновлены {{ (fetched_at|local).strftime("%d.%m.%Y %H:%M") if fetched_at else "—" }}. <a href="{{ portal_url }}" target="_blank" rel="noopener">Объявление на портале ↗</a></p>
 <script>
 {{ lot_scripts() }}
+  // Пока поиск идёт — обновляем результат раз в 10 секунд.
+  const research = document.querySelector("[data-research]");
+  const poll = async () => {
+    const status = research.querySelector("[data-research-status]")?.dataset.researchStatus;
+    if (status !== "queued" && status !== "running") return;
+    try {
+      const response = await fetch(research.dataset.src);
+      if (response.ok) research.innerHTML = await response.text();
+    } catch {}
+    const now = research.querySelector("[data-research-status]")?.dataset.researchStatus;
+    if (now === "queued" || now === "running") setTimeout(poll, 10000);
+    else document.querySelector(".research-form .primary")?.removeAttribute("disabled");
+  };
+  setTimeout(poll, 10000);
 </script>
 {% endblock %}

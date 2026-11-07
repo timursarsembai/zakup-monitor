@@ -261,3 +261,31 @@ CREATE TABLE IF NOT EXISTS chat_lots (
     sent_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (chat_id, lot_id)
 );
+
+-- Поиск товаров под лот с помощью ИИ (zakup.research).
+ALTER TABLE users ADD COLUMN IF NOT EXISTS ai_provider text NOT NULL DEFAULT 'claude_code';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS ai_model text;
+CREATE TABLE IF NOT EXISTS user_ai_keys (
+    user_id    bigint NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    provider   text NOT NULL,
+    key_enc    bytea NOT NULL,
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (user_id, provider)
+);
+CREATE TABLE IF NOT EXISTS lot_research (
+    id          bigserial PRIMARY KEY,
+    lot_id      bigint NOT NULL REFERENCES lots (id) ON DELETE CASCADE,
+    user_id     bigint NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    provider    text NOT NULL,
+    model       text,
+    region      text NOT NULL,
+    whole_kz    boolean NOT NULL DEFAULT true,
+    status      text NOT NULL DEFAULT 'queued',  -- queued, running, done, error
+    result      jsonb,
+    error       text,
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    started_at  timestamptz,
+    finished_at timestamptz
+);
+CREATE INDEX IF NOT EXISTS lot_research_lot ON lot_research (lot_id, id DESC);
+CREATE INDEX IF NOT EXISTS lot_research_queue ON lot_research (status, provider, id);

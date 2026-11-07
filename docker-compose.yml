@@ -7,6 +7,7 @@ x-app-env: &app-env
   ZAKUP_TELEGRAM_BOT_TOKEN: ${ZAKUP_TELEGRAM_BOT_TOKEN:-}
   ZAKUP_TELEGRAM_BOT_USERNAME: ${ZAKUP_TELEGRAM_BOT_USERNAME:-}
   ZAKUP_TELEGRAM_CHAT_ID: ${ZAKUP_TELEGRAM_CHAT_ID:-}
+  ZAKUP_SECRET_KEY: ${ZAKUP_SECRET_KEY:-}
 
 x-logging: &logging
   driver: json-file
@@ -50,6 +51,21 @@ services:
       - sh
       - -c
       - zakup migrate; while true; do zakup sync; zakup rescan; zakup details; sleep 600; done
+    environment: *app-env
+    mem_limit: 256m
+    logging: *logging
+
+  # Поиск товаров под лоты через API OpenAI/Anthropic (ключи пользователей).
+  # Claude Code по подписке работает не здесь, а на хосте: deploy/zakup-research.service.
+  research:
+    image: zakup
+    container_name: zakup-research
+    restart: unless-stopped
+    init: true
+    depends_on:
+      worker:
+        condition: service_started
+    entrypoint: ["zakup", "research", "--providers", "anthropic,openai"]
     environment: *app-env
     mem_limit: 256m
     logging: *logging

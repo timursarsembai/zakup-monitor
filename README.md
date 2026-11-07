@@ -95,6 +95,33 @@ worker сводками (до ~3800 символов в сообщении, не
 `/lots/<id>`: тот же лот отдельно — с объявлением сверху, итогами и
 таблицей остальных лотов объявления.
 
+## Поиск товаров с ИИ
+
+На странице лота — «Найти товары»: ИИ читает техспецификацию, ищет в
+интернете подходящие товары (сначала в регионе поставки, потом по
+Казахстану) и возвращает таблицу: фото, товар, продавец, цена, цена за
+единицу, ссылка. Маржу (в тенге, в %, на весь лот) от цены в лоте считает
+сайт. Задачи — таблица `lot_research`, код — `zakup/research.py`.
+
+Кто ищет — выбирает пользователь в настройках:
+
+- **Claude Code по подписке владельца** (по умолчанию). Работает на хосте,
+  не в Docker, — там установлен и авторизован `claude`. `claude -p` с
+  инструментами WebSearch/WebFetch, без доступа к файлам и командам.
+  Установка службы:
+
+  ```
+  python3 -m venv --without-pip .venv-host
+  curl -fsSL https://bootstrap.pypa.io/get-pip.py | .venv-host/bin/python
+  .venv-host/bin/pip install -e .
+  ln -sf ~/apps/zakup/deploy/zakup-research.service ~/.config/systemd/user/
+  systemctl --user daemon-reload && systemctl --user enable --now zakup-research
+  ```
+
+  После изменения кода: `systemctl --user restart zakup-research`.
+- **Anthropic API / OpenAI API** с ключом пользователя — сервис `research` в
+  docker compose. Ключи хранятся зашифрованными (`ZAKUP_SECRET_KEY`, Fernet).
+
 ## Подписки на слова
 
 Запрос пишется в синтаксисе `websearch_to_tsquery`: `картридж тонер` — нужны

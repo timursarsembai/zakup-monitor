@@ -7,21 +7,42 @@
 <script>
   // Тема: по умолчанию тёмная, выбор запоминается в браузере. До отрисовки, чтобы не мигало.
   (function () {
-    var theme = "dark";
-    try { theme = localStorage.getItem("zakup-theme") || "dark"; } catch (e) {}
-    document.documentElement.dataset.theme = theme;
+    var theme = "dark", zoom = 1, contrast = "";
+    try {
+      theme = localStorage.getItem("zakup-theme") || "dark";
+      zoom = parseFloat(localStorage.getItem("zakup-zoom")) || 1;
+      contrast = localStorage.getItem("zakup-contrast") || "";
+    } catch (e) {}
+    var root = document.documentElement;
+    root.dataset.theme = theme;
+    // Режим для слабовидящих: масштаб всей страницы и высокий контраст.
+    if (zoom !== 1) root.style.zoom = zoom;
+    if (contrast) root.dataset.contrast = contrast;
   })();
 </script>
 <style>
   :root { --bg: #fff; --fg: #1d1d1f; --muted: #6b6b70; --line: #e4e4e7; --accent: #0b6bcb; --ok: #137a43; --bad: #c0392b; color-scheme: light; }
   :root[data-theme=dark] { --bg: #151517; --fg: #ececee; --muted: #9a9aa0; --line: #2c2c30; --accent: #5aa7ff; --ok: #6fdc9f; --bad: #ff7b6b; color-scheme: dark; }
+  :root[data-contrast=high] { --bg: #fff; --fg: #000; --muted: #1d1d1f; --line: #000; --accent: #0033cc; --ok: #005a1e; --bad: #a00000; }
+  :root[data-contrast=high][data-theme=dark] { --bg: #000; --fg: #fff; --muted: #f2f2f2; --line: #fff; --accent: #ffd400; --ok: #7dffb0; --bad: #ff8a80; }
+  :root[data-contrast=high] a { text-decoration: underline; }
+  :root[data-contrast=high] .primary { color: var(--bg) !important; }
+  :root[data-contrast=high] :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.45 system-ui, sans-serif; }
   header, main { max-width: 1600px; margin: 0 auto; padding: 12px 24px; }
   header { display: flex; gap: 18px; align-items: center; border-bottom: 1px solid var(--line); }
   header b { font-size: 17px; }
   header nav { display: flex; gap: 18px; }
-  .theme-toggle { padding: 4px 9px; font-size: 16px; line-height: 1; }
+  header nav a.on { color: var(--fg); font-weight: 600; }
+  .theme-toggle, .a11y-toggle { padding: 4px 9px; font-size: 16px; line-height: 1; }
+  .a11y { position: relative; }
+  .a11y-panel { position: absolute; right: 0; top: calc(100% + 6px); z-index: 60; width: 260px; padding: 14px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 24px rgb(0 0 0 / 20%); }
+  .a11y-panel[hidden] { display: none; }
+  .a11y-panel b { display: block; margin-bottom: 8px; }
+  .a11y-row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .a11y-row output { min-width: 48px; text-align: center; font-weight: 600; }
+  .a11y-row button { min-width: 40px; font-size: 18px; }
   a { color: var(--accent); text-decoration: none; }
   form.filters, form.inline-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 12px 0; }
   input[type=text], input:not([type]) { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; }
@@ -48,15 +69,28 @@
 <header>
   <b>zakup</b>
   <nav>
-    <a href="/lots">Лоты</a>
-    <a href="/announcements">Объявления</a>
-    <a href="/my">Мои лоты</a>
-    <a href="/subscriptions">Подписки</a>
-    <a href="/matches">Совпадения</a>
-    <a href="/settings">Настройки</a>
+    {% set path = request.url.path %}
+    <a href="/lots" class="{{ 'on' if path in ('/lots', '/announcements') }}">Закупки</a>
+    <a href="/my" class="{{ 'on' if path == '/my' }}">Мои лоты</a>
+    <a href="/subscriptions" class="{{ 'on' if path == '/subscriptions' }}">Подписки</a>
+    <a href="/matches" class="{{ 'on' if path == '/matches' }}">Совпадения</a>
+    <a href="/settings" class="{{ 'on' if path == '/settings' }}">Настройки</a>
   </nav>
   <form class="logout" method="post" action="/logout">
     <span class="muted who">{{ request.state.email }}</span>
+    <span class="a11y">
+      <button type="button" class="a11y-toggle" data-a11y-toggle title="Режим для слабовидящих" aria-label="Режим для слабовидящих" aria-expanded="false">Aa</button>
+      <div class="a11y-panel" data-a11y-panel hidden>
+        <b>Для слабовидящих</b>
+        <div class="a11y-row">Размер
+          <button type="button" data-zoom="-0.1" aria-label="Мельче">−</button>
+          <output data-zoom-value>100%</output>
+          <button type="button" data-zoom="0.1" aria-label="Крупнее">+</button>
+        </div>
+        <label class="a11y-row"><input type="checkbox" data-contrast> Высокий контраст</label>
+        <button type="button" data-a11y-reset>Как было</button>
+      </div>
+    </span>
     <button type="button" class="theme-toggle" data-theme-toggle title="Светлая / тёмная тема" aria-label="Переключить тему"></button>
     <button>Выйти</button>
   </form>
@@ -64,6 +98,43 @@
 {% endblock %}
 <main{% block main_class %}{% endblock %}>{% block main %}{% endblock %}</main>
 <script>
+  (() => {
+    const root = document.documentElement;
+    const panel = document.querySelector("[data-a11y-panel]");
+    const toggle = document.querySelector("[data-a11y-toggle]");
+    if (!panel) return;
+    const store = (key, value) => { try { value ? localStorage.setItem(key, value) : localStorage.removeItem(key); } catch (e) {} };
+    const zoomNow = () => parseFloat(root.style.zoom) || 1;
+    const show = () => {
+      panel.querySelector("[data-zoom-value]").textContent = Math.round(zoomNow() * 100) + "%";
+      panel.querySelector("[data-contrast]").checked = root.dataset.contrast === "high";
+    };
+    const setZoom = (value) => {
+      const zoom = Math.min(2, Math.max(1, Math.round(value * 10) / 10));
+      root.style.zoom = zoom === 1 ? "" : zoom;
+      store("zakup-zoom", zoom === 1 ? "" : String(zoom));
+      show();
+    };
+    toggle.addEventListener("click", () => {
+      panel.hidden = !panel.hidden;
+      toggle.setAttribute("aria-expanded", String(!panel.hidden));
+      show();
+    });
+    document.addEventListener("click", (event) => {
+      if (!panel.hidden && !event.target.closest(".a11y")) { panel.hidden = true; toggle.setAttribute("aria-expanded", "false"); }
+    });
+    for (const button of panel.querySelectorAll("[data-zoom]")) {
+      button.addEventListener("click", () => setZoom(zoomNow() + parseFloat(button.dataset.zoom)));
+    }
+    panel.querySelector("[data-contrast]").addEventListener("change", (event) => {
+      if (event.target.checked) root.dataset.contrast = "high"; else delete root.dataset.contrast;
+      store("zakup-contrast", event.target.checked ? "high" : "");
+    });
+    panel.querySelector("[data-a11y-reset]").addEventListener("click", () => {
+      delete root.dataset.contrast; store("zakup-contrast", "");
+      setZoom(1);
+    });
+  })();
   for (const button of document.querySelectorAll("[data-theme-toggle]")) {
     const show = () => { button.textContent = document.documentElement.dataset.theme === "dark" ? "☀" : "☾"; };
     button.addEventListener("click", () => {

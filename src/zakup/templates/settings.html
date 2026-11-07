@@ -47,6 +47,22 @@
   <p class="note muted">Откроется Telegram: выберите группу — бот @{{ bot_username }} добавится в неё и подтвердит подключение. Ссылка одноразовая, действует 30 минут. Потом обновите эту страницу.</p>
   {% endif %}
 </section>
+<section class="panel" id="ai">
+  <h2>Искусственный интеллект</h2>
+  <p class="muted">Кто ищет товары под лоты по техспецификации. По умолчанию — Claude Code на этом сервере по подписке владельца, ключи не нужны. Если выбрать OpenAI или Anthropic, поиск пойдёт только через их API с вашим ключом.</p>
+  <form method="post" action="/settings/ai">
+    {% for key, name in providers.items() %}
+    <label class="status" style="margin-bottom:6px"><input type="radio" name="provider" value="{{ key }}" {% if ai_provider == key %}checked{% endif %}> {{ name }}{% if key in ai_keys %} <span class="muted">· ключ сохранён</span>{% endif %}</label>
+    {% endfor %}
+    <div class="actions" style="margin-top:8px">
+      <input name="api_key" type="password" autocomplete="off" placeholder="API-ключ (для OpenAI / Anthropic)" style="flex:1; min-width:220px">
+      <input name="model" value="{{ ai_model }}" placeholder="модель (необязательно)" style="width:200px">
+      <button class="primary">Сохранить</button>
+    </div>
+    <p class="note muted">Модели по умолчанию: {% for key, model in default_models.items() %}{{ providers[key].split(" (")[0] }} — {{ model }}{% if not loop.last %}; {% endif %}{% endfor %}. Ключ хранится зашифрованным и на страницу не выводится.</p>
+  </form>
+  {% if saved == "ai" %}<p class="note">Сохранено.</p>{% endif %}
+</section>
 <section class="panel">
   <h2>Ваша организация</h2>
   <p class="muted">БИН или ИИН, под которым вы подаёте ценовые предложения. По нему в итогах отмечаются ваши предложения, а отмеченные лоты сами получают «Выиграли» или «Не выиграли».</p>

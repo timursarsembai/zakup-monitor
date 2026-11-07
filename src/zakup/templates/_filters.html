@@ -52,7 +52,9 @@
   }
   .filter-open, .sheet-head { display: none; }
   @media (max-width: 760px) {
-    .filter-open { display: block; width: 100%; text-align: left; margin: 10px 0; padding: 10px 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .filter-open { display: block; width: 100%; text-align: left; margin: 12px 0; padding: 12px 14px; border: 0; border-radius: 10px; background: var(--accent); color: #fff; }
+    .filter-open .filter-title { display: block; font-size: 17px; font-weight: 600; }
+    .filter-open .filter-sum { display: block; margin-top: 2px; font-size: 13px; opacity: .85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .filters-panel { display: none; }
     .filters-panel.open { display: block; position: fixed; inset: 0; z-index: 50; margin: 0; border: 0; border-radius: 0; overflow-y: auto; background: var(--bg); padding: 0 14px 0; }
     .sheet-head { display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 2; background: var(--bg); padding: 12px 0; border-bottom: 1px solid var(--line); margin-bottom: 12px; font-size: 17px; }
@@ -79,7 +81,7 @@
   <a href="/lots?{{ query }}" class="{{ 'on' if lots }}">Поиск лотов</a>
   <a href="/announcements?{{ query }}" class="{{ '' if lots else 'on' }}">Поиск объявлений</a>
 </nav>
-<button type="button" class="filter-open" data-filter-open>☰ Фильтр{% if f.describe() %} · <span class="muted">{{ f.describe()|truncate(60) }}</span>{% endif %}</button>
+<button type="button" class="filter-open" data-filter-open><span class="filter-title">⚙ Фильтр и подписка</span>{% if f.describe() %}<span class="filter-sum">{{ f.describe()|truncate(90) }}</span>{% endif %}</button>
 <form method="get" action="/{{ scope }}" class="filters-panel" id="filters">
   <div class="sheet-head"><b>Фильтр</b><button type="button" data-filter-close aria-label="Закрыть">✕</button></div>
   <input type="hidden" name="applied" value="1">
