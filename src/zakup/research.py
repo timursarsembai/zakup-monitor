@@ -25,7 +25,7 @@ import httpx
 import psycopg
 from psycopg.types.json import Jsonb
 
-from zakup import details, secrets_box, sources
+from zakup import contacts, details, secrets_box, sources
 
 logger = logging.getLogger(__name__)
 
@@ -129,9 +129,11 @@ PROMPT = """Ты помогаешь поставщику, который уча�
      напиши об этом в note); price_unit — за что эта цена (шт, упаковка 10 шт, м и т.д.);
    - unit_price — цена за ту же единицу, что в лоте ({unit}), в тенге;
    - url — прямая ссылка на страницу товара (обязательно — чтобы перепроверить);
-   - phone — телефон продавца, если он указан на странице товара, в карточке
-     магазина или в контактах этого сайта (несколько — через запятую); e-mail
-     не нужен; не нашёл — null, не выдумывай;
+   - phone — телефон продавца (несколько — через запятую). Ищи по-настоящему:
+     на странице товара, затем на странице продавца (ссылка «Продавец …»,
+     название магазина) и в его разделе «Контакты»/«О компании»; на
+     маркетплейсах (Satu и др.) телефон обычно там. E-mail не нужен.
+     Не нашёл — null, не выдумывай;
    - image — прямая ссылка на фото товара с этой страницы (обычно og:image), или null;
    - fit — «полностью», если подходит по спецификации, «частично» — если отличается
      в мелочах, «аналог» — похожий товар;
@@ -561,6 +563,8 @@ def run_job(conn: psycopg.Connection, job: dict[str, Any]) -> dict[str, Any]:
     else:
         runner = _anthropic if job["provider"] == "anthropic" else _openai
         found = clean(runner(prompt, job["model"], key))
+    # Телефоны, которые ИИ не увидел (лежат в коде страницы), — достаём сами.
+    contacts.enrich(found)
     if base:
         # Новое — в справочник источников; в результат — прошлое плюс новое.
         sources.remember(conn, found)

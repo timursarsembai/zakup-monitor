@@ -24,7 +24,11 @@
   table.research .ok-list li { color: var(--ok); }
   table.research .bad-list li { color: var(--bad); }
   table.research td.phones { white-space: nowrap; }
-  table.research a.call { display: block; margin-bottom: 4px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; }
+  table.research td.phones { min-width: 200px; }
+  table.research .contact { margin-bottom: 6px; }
+  table.research a.call { display: inline-block; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; }
+  table.research a.wa { display: inline-flex; vertical-align: middle; margin-left: 6px; padding: 4px; border-radius: 6px; color: #fff; background: #25d366; }
+  table.research .contact-label { font-size: .8em; color: var(--muted); white-space: normal; max-width: 240px; margin-top: 2px; }
   table.research td.product { min-width: 300px; max-width: 420px; }
   table.research td.photo { width: 76px; }
   table.research img { width: 72px; height: 72px; object-fit: contain; border-radius: 6px; background: #fff; }
