@@ -137,7 +137,7 @@ def login(
             error, token = "Слишком много неудачных попыток. Попробуйте через 15 минут.", None
         else:
             token = auth.login(conn, email_norm, password, ip, request.headers.get("user-agent"))
-            error = None if token else "Неверный e-mail или пароль."
+            error = None if token else "Неверный логин или пароль."
     if token is None:
         return templates.TemplateResponse(
             request,

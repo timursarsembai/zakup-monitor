@@ -40,7 +40,7 @@ def test_pages_redirect_to_login_and_back(client):
 def test_wrong_password_shows_error(client):
     response = _login(client, password="wrong-password")
     assert response.status_code == 401
-    assert "Неверный e-mail или пароль" in response.text
+    assert "Неверный логин или пароль" in response.text
     assert "zakup_session" not in response.cookies
 
 
@@ -175,3 +175,14 @@ def test_search_finds_finished_lots_with_winner(client, conn, monkeypatch):
     # Разобранный протокол второй раз не качается.
     monkeypatch.setattr(web.results.spec, "download", lambda url: 1 / 0)
     assert web.results.parse_pending(conn, 10) == 0
+
+
+def test_plain_login_without_email_works(client, conn):
+    auth.set_password(conn, "Friend1", "another-long-password")
+    response = client.post(
+        "/login",
+        data={"email": " friend1 ", "password": "another-long-password", "next": "/"},
+        headers=ORIGIN,
+        follow_redirects=False,
+    )
+    assert response.status_code == 303 and "zakup_session" in response.cookies

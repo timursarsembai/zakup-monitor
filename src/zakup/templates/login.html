@@ -28,8 +28,8 @@
   {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
   <input type="hidden" name="next" value="{{ next }}">
   <div class="field">
-    <label for="email">E-mail</label>
-    <input id="email" name="email" type="email" value="{{ email }}" autocomplete="username" required {% if not email %}autofocus{% endif %}>
+    <label for="email">E-mail или логин</label>
+    <input id="email" name="email" type="text" autocapitalize="none" spellcheck="false" value="{{ email }}" autocomplete="username" required {% if not email %}autofocus{% endif %}>
   </div>
   <div class="field">
     <label for="password">Пароль</label>
