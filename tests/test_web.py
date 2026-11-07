@@ -480,3 +480,30 @@ def test_research_list_page(client, conn):
     page = client.get("/research").text
     assert "Подбор товаров" in page and "/lots/90#research" in page and "маржа до 20.0%" in page
     assert "/lots/90" not in client.get("/research?q=кровать").text
+
+
+def test_action_log(client, conn):
+    _announcement_with_lots(conn)
+    auth.set_password(conn, "amir", "amir-password-1")
+    conn.commit()
+    client.post("/login", data={"email": "amir", "password": "wrong-password"}, headers=ORIGIN)
+    client.post("/login", data={"email": "amir", "password": "amir-password-1"}, headers=ORIGIN)
+    client.get("/lots/5001")
+    client.get("/lots/5001")  # повтор в течение 10 минут не пишется
+    client.post("/lots/5001/mark", data={"status": "interested"}, headers=ORIGIN)
+    client.post("/logout", headers=ORIGIN)
+    assert client.get("/log").status_code in (303, 200)
+    _login(client)
+    assert client.get("/log").status_code == 200
+    amir = conn.execute("SELECT id FROM users WHERE email = 'amir'").fetchone()[0]
+    page = client.get(f"/log?user={amir}").text
+    assert page.count(">Открыл лот</td>") == 1 and ">Отметка лота</td>" in page
+    assert "status: interested" in page
+    assert "Неудачный вход" in client.get("/log?action=login_failed").text
+    conn.execute("UPDATE user_actions SET at = now() - interval '31 days' WHERE action = 'view_lot'")
+    conn.commit()
+    from zakup import audit
+    assert audit.purge(conn) == 1
+    client.post("/logout", headers=ORIGIN)
+    client.post("/login", data={"email": "amir", "password": "amir-password-1"}, headers=ORIGIN)
+    assert client.get("/log").status_code == 403

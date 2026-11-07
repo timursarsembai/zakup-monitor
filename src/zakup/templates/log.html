@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% from "_filters.html" import multi with context %}
+{% block title %}{{ _("Журнал действий") }}{% endblock %}
+{% block style %}
+  h1 { font-size: 22px; margin: 6px 0 4px; }
+  .lf { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px 16px; align-items: end; border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin: 12px 0; }
+  .lf .fl { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+  .lf input, .lf select { width: 100%; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); font: inherit; }
+  .lf .pair { display: flex; gap: 6px; }
+  .actions-row { display: flex; gap: 8px; align-items: center; }
+  .primary { background: var(--accent); color: var(--on-accent); border-color: transparent; font-weight: 600; }
+  details.multi { position: relative; }
+  details.multi summary { list-style: none; cursor: pointer; padding: 7px 28px 7px 9px; border: 1px solid var(--line); border-radius: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  details.multi summary::-webkit-details-marker { display: none; }
+  .multi-list { position: absolute; z-index: 5; left: 0; right: 0; min-width: 240px; max-height: 300px; overflow-y: auto; margin-top: 4px; padding: 8px 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgb(0 0 0 / 14%); }
+  .check { display: flex; gap: 8px; margin: 4px 0; font-size: 14px; }
+  td.when { white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .details { font-size: 13px; color: var(--muted); }
+  .bad { color: var(--bad); }
+  .pages { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin: 16px 0; }
+  .pages .page { min-width: 34px; padding: 4px 8px; text-align: center; border: 1px solid var(--line); border-radius: 6px; }
+  .pages .page.on { background: var(--accent); color: var(--on-accent); border-color: transparent; font-weight: 600; }
+  @media (max-width: 760px) { .lf input, .lf select, details.multi summary { font-size: 16px; min-height: 44px; } }
+{% endblock %}
+{% block main %}
+<h1>{{ _("Журнал действий") }}</h1>
+<p class="muted">{{ _("Кто, что и когда делал на сайте. Записи хранятся 30 дней.") }}</p>
+<form class="lf" method="get" action="/log">
+  <div><span class="fl">{{ _("Пользователи") }}</span>
+    {% set user_labels = {} %}{% for id, email in users %}{% set __ = user_labels.update({id: email}) %}{% endfor %}
+    {{ multi("user", user_labels, chosen_users, _("Все")) }}</div>
+  <div><span class="fl">{{ _("Действия") }}</span>
+    {{ multi("action", actions, chosen_actions, _("Все")) }}</div>
+  <div><span class="fl">{{ _("Даты с — по") }}</span>
+    <div class="pair"><input type="date" name="from" value="{{ date_from }}" aria-label="{{ _("с") }}"><input type="date" name="to" value="{{ date_to }}" aria-label="{{ _("по") }}"></div></div>
+  <div><label class="fl" for="per-page">{{ _("Показывать по") }}</label>
+    <select id="per-page" name="per_page">{% for n in page_sizes %}<option value="{{ n }}" {% if n == per_page %}selected{% endif %}>{{ n }}</option>{% endfor %}</select></div>
+  <div class="actions-row"><button class="primary">{{ _("Показать") }}</button><a href="/log">{{ _("Сбросить") }}</a></div>
+</form>
+<p>{{ _("Записей:") }} <b>{{ total }}</b></p>
+<div class="table-wrap"><table>
+  <tr><th>{{ _("Когда") }}</th><th>{{ _("Кто") }}</th><th>{{ _("Действие") }}</th><th>{{ _("Что") }}</th><th>IP</th></tr>
+  {% for at, user_id, who, action, target, details, ip in rows %}
+  <tr>
+    <td class="when">{{ (at|local).strftime("%d.%m.%Y %H:%M:%S") }}</td>
+    <td>{{ who or "—" }}</td>
+    <td class="{{ 'bad' if action == 'login_failed' }}">{{ _(actions.get(action, action)) }}</td>
+    <td>{% if target and target.startswith("/") %}<a href="{{ target }}">{{ target }}</a>{% else %}{{ target or "" }}{% endif %}
+      {% if details %}<div class="details">{% for k, v in details.items() %}{{ k }}: {{ v }}{% if not loop.last %} · {% endif %}{% endfor %}</div>{% endif %}</td>
+    <td class="muted">{{ ip or "" }}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="5" class="muted">{{ _("Записей нет.") }}</td></tr>
+  {% endfor %}
+</table></div>
+{% if pages > 1 %}
+<nav class="pages" aria-label="{{ _("Страницы") }}">
+  {% if page > 1 %}<a href="?{{ query }}&page={{ page - 1 }}">{{ _("← назад") }}</a>{% endif %}
+  {% for p in range(1, pages + 1) if p == 1 or p == pages or (p - page)|abs <= 2 %}
+    {% if loop.previtem is defined and p - loop.previtem > 1 %}<span class="muted">…</span>{% endif %}
+    {% if p == page %}<span class="page on" aria-current="page">{{ p }}</span>{% else %}<a class="page" href="?{{ query }}&page={{ p }}">{{ p }}</a>{% endif %}
+  {% endfor %}
+  {% if page < pages %}<a href="?{{ query }}&page={{ page + 1 }}">{{ _("дальше →") }}</a>{% endif %}
+</nav>
+{% endif %}
+<script>
+  document.addEventListener("click", (event) => {
+    for (const d of document.querySelectorAll("details.multi[open]")) if (!d.contains(event.target)) d.open = false;
+  });
+</script>
+{% endblock %}

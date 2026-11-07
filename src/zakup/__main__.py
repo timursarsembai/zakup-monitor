@@ -8,7 +8,7 @@ import time
 from datetime import date, datetime, timedelta
 from datetime import time as day_time
 
-from zakup import auth, bot, db, details, marks, matcher, notify, results, sync
+from zakup import audit, auth, bot, db, details, marks, matcher, notify, results, sync
 from zakup.goszakup import ENTITIES, PORTAL_TZ, Client
 
 # Сколько истории грузить, если start-from не запускали.
@@ -226,7 +226,8 @@ def _details(conn, client: Client, limit: int, part: str = "all") -> int:
             _match_and_deliver(conn)
         if part in ("finished", "all"):
             print(f"finished details: {details.refresh_finished(conn, client, limit)}, "
-                  f"protocols: {results.parse_pending(conn, PROTOCOLS_PER_RUN)}")
+                  f"protocols: {results.parse_pending(conn, PROTOCOLS_PER_RUN)}, "
+                  f"old actions purged: {audit.purge(conn)}")
     except Exception as error:
         # Only the type: database errors can quote the connection string.
         notify.send(f"zakup: подробности объявлений упали с ошибкой {type(error).__name__}.")

@@ -22,10 +22,10 @@
     {% set margin = (lot_price - item.unit_price) if (lot_price and item.unit_price) else none %}
     <tr>
       <td class="photo">{% if item.image %}<a href="{{ item.url | safe_url }}" target="_blank" rel="noopener noreferrer"><img src="{{ item.image | safe_url }}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()"></a>{% endif %}</td>
-      <td><a href="{{ item.url | safe_url }}" target="_blank" rel="noopener noreferrer">{{ item.name }}</a>
+      <td class="product"><a href="{{ item.url | safe_url }}" target="_blank" rel="noopener noreferrer">{{ item.name }}</a>
         <div class="muted">{{ item.seller }}{% if item.city %} · {{ item.city }}{% endif %}</div>
         {% if item.phone %}<div>📞 {% for phone in item.phone.split(",") %}{% set digits = phone | replace(" ", "") | replace("-", "") | replace("(", "") | replace(")", "") %}<a href="tel:{{ digits }}">{{ phone | trim }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</div>{% endif %}
-        <div class="muted url"><a href="{{ item.url | safe_url }}" target="_blank" rel="noopener noreferrer">{{ item.url | truncate(70) }}</a></div>
+        <div class="muted url"><a href="{{ item.url | safe_url }}" target="_blank" rel="noopener noreferrer">{{ (item.url | replace("https://", "") | replace("http://", "")) | truncate(48) }}</a></div>
         {% if item.note %}<div class="muted">{{ item.note }}</div>{% endif %}</td>
       <td class="num">{{ item.price | money }}{% if item.price_unit %}<div class="muted">{{ _("за") }} {{ item.price_unit }}</div>{% endif %}</td>
       <td class="num"><b>{{ item.unit_price | money }}</b></td>

@@ -47,6 +47,7 @@
   <a href="#ai" role="tab" data-tab="ai">{{ _("Искусственный интеллект") }}</a>
   <a href="#company" role="tab" data-tab="company">{{ _("Организация") }}</a>
   <a href="#users" role="tab" data-tab="users">{{ _("Пользователи") }}</a>
+  <a href="/log" class="tab-link">{{ _("Журнал действий") }} →</a>
   {% endif %}
 </nav>
 
@@ -180,7 +181,7 @@
 
 <script>
   // Вкладки: выбор в адресе (#ai), чтобы после сохранения вернуться туда же.
-  const tabs = [...document.querySelectorAll("[data-tab]")];
+  const tabs = [...document.querySelectorAll("[data-tab]")];  // ссылка «Журнал» — не вкладка
   const showTab = (name) => {
     if (!tabs.some((t) => t.dataset.tab === name)) name = tabs[0].dataset.tab;
     for (const t of tabs) t.setAttribute("aria-selected", String(t.dataset.tab === name));

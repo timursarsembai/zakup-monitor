@@ -379,13 +379,16 @@ class Filters:
         if high < 100:
             clauses.append(f"coalesce({prepayment}, 0) <= %(advance_max)s")
             params["advance_max"] = high
-        tsv = "l.tsv" if lots else "a.tsv"
+        # Слова ищем и в русских названиях (с морфологией), и в казахских.
+        tsv, tsv_kk = ("l.tsv", "l.tsv_kk") if lots else ("a.tsv", "a.tsv_kk")
         if self.q:
-            clauses.append(f"{tsv} @@ websearch_to_tsquery('russian', %(q)s)")
-            params["q"] = _OR.sub(" or ", self.q)
+            clauses.append(f"""({tsv} @@ websearch_to_tsquery('russian', %(q)s)
+                                OR {tsv_kk} @@ websearch_to_tsquery('simple', %(q)s))""")
+            params["q"] = _OR.sub(" or ", _OR_KK.sub(" or ", self.q))
         if words := self.exclude.replace(",", " ").split():
             # Любое из слов исключает запись.
-            clauses.append(f"NOT {tsv} @@ websearch_to_tsquery('russian', %(exclude)s)")
+            clauses.append(f"""NOT ({tsv} @@ websearch_to_tsquery('russian', %(exclude)s)
+                                    OR {tsv_kk} @@ websearch_to_tsquery('simple', %(exclude)s))""")
             params["exclude"] = " or ".join(words)
         return " AND ".join(clauses) or "true", params
 
@@ -486,6 +489,7 @@ def _decimal(value: Any) -> Decimal | None:
 
 # «стол или стул» — то же, что «стол or стул» в синтаксисе websearch_to_tsquery.
 _OR = re.compile(r"\s+или\s+", re.IGNORECASE)
+_OR_KK = re.compile(r"\s+немесе\s+", re.IGNORECASE)
 
 
 def _percent(value: str, default: int) -> int:

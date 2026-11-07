@@ -67,14 +67,17 @@ def test_block_lists_lots_and_links_to_our_site():
                  announcement_name_kz="Үстел сатып алу", disable_person=True),
         _pending(lot_id=6, prepayment=None, lot_kato=[]),
     ])
-    # Коротко и на двух языках: названия, цена × количество = сумма, аванс, признак, ссылка.
-    assert "<b>Стол &lt;дуб&gt; / Үстел</b>" in text and "<i>Үстел сатып алу</i>" in text
-    assert "172 413.79 ₸ × 4 = 689 655.16 ₸ · <b>аванс 30%</b>" in text
-    assert "♿ Среди организаций инвалидов / Мүгедектер ұйымдары арасында" in text
-    assert "⏰ 09.11 09:00" in text
-    assert text.endswith("https://zakup.sarsembai.com/a/77")
+    # Сначала целиком по-казахски, потом целиком по-русски, ссылка — одна, в конце.
+    kazakh, russian = text.split("🇷🇺")
+    assert kazakh.startswith("🇰🇿") and "<b>Үстел сатып алу</b>" in kazakh and "<b>Үстел</b>" in kazakh
+    assert "♿ Мүгедектер ұйымдары арасында" in kazakh and "Стол" not in kazakh.split("• ")[1]
+    assert "<b>Приобретение столика</b>" in russian and "<b>Стол &lt;дуб&gt;</b>" in russian
+    assert "♿ Среди организаций инвалидов" in russian
+    assert "172 413.79 ₸ × 4 = 689 655.16 ₸ · <b>аванс 30%</b>" in russian
+    assert "⏰ 09.11 09:00" in kazakh and "⏰ 09.11 09:00" in russian
+    assert text.endswith("https://zakup.sarsembai.com/a/77") and text.count("https://") == 1
     assert "goszakup.gov.kz" not in text
-    assert text.count("• ") == 2
+    assert text.count("• ") == 4
 
 
 def test_lots_of_one_announcement_become_one_block():
@@ -105,7 +108,8 @@ def test_deliver_respects_message_limit_and_names_subscription(conn, outbox, mon
     assert matcher.deliver(conn, pause=0) == 7
     assert len(sent) > 1
     assert all(text.startswith("🔔 <b>Картриджи</b>") for _, text in sent)
-    assert sum(text.count("• <b>Картриджи партия") for _, text in sent) == 7
+    # Каждый лот — дважды: в казахской и русской частях (казахского названия нет — русское).
+    assert sum(text.count("• <b>Картриджи партия") for _, text in sent) == 14
     assert matcher.pending(conn) == []
 
 

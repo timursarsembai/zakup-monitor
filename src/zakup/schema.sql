@@ -309,3 +309,27 @@ ALTER TABLE lot_specs ADD COLUMN IF NOT EXISTS attempts integer NOT NULL DEFAULT
 -- Казахская версия (2026-11-08): единица измерения и доп. характеристика лота.
 ALTER TABLE lots ADD COLUMN IF NOT EXISTS unit_name_kz text;
 ALTER TABLE lots ADD COLUMN IF NOT EXISTS extra_desc_kz text;
+
+-- Журнал действий пользователей (zakup.audit), хранится 30 дней.
+CREATE TABLE IF NOT EXISTS user_actions (
+    id      bigserial PRIMARY KEY,
+    at      timestamptz NOT NULL DEFAULT now(),
+    user_id bigint REFERENCES users (id) ON DELETE SET NULL,
+    login   text,            -- логин на момент действия: остаётся и после удаления
+    action  text NOT NULL,
+    target  text,            -- что затронуто: /a/123, /lots/456, подписка, пользователь
+    details jsonb,
+    ip      text
+);
+CREATE INDEX IF NOT EXISTS user_actions_at ON user_actions (at DESC);
+CREATE INDEX IF NOT EXISTS user_actions_user_at ON user_actions (user_id, at DESC);
+
+-- Поиск по казахским названиям (словарь simple: казахской морфологии в Postgres нет).
+ALTER TABLE lots ADD COLUMN IF NOT EXISTS tsv_kk tsvector GENERATED ALWAYS AS (
+    to_tsvector('simple', coalesce(name_kz, '') || ' ' || coalesce(extra_desc_kz, ''))
+) STORED;
+CREATE INDEX IF NOT EXISTS lots_tsv_kk ON lots USING gin (tsv_kk);
+ALTER TABLE announcements ADD COLUMN IF NOT EXISTS tsv_kk tsvector GENERATED ALWAYS AS (
+    to_tsvector('simple', coalesce(name_kz, ''))
+) STORED;
+CREATE INDEX IF NOT EXISTS announcements_tsv_kk ON announcements USING gin (tsv_kk);

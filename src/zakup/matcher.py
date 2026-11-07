@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 PORTAL_ANNOUNCEMENT_URL = "https://goszakup.gov.kz/ru/announce/index/{}"
 # В одном блоке уведомления не больше стольких лотов, остальные — на сайте.
-LOTS_PER_BLOCK = 8
+LOTS_PER_BLOCK = 6
 
 
 def announcement_url(announcement_id: int) -> str:
@@ -175,48 +175,48 @@ def _cut(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
 
 
-def _both(russian: str | None, kazakh: str | None, limit: int) -> str:
-    """«Русское / Қазақша» — если казахское есть и отличается, иначе одно русское."""
-    text = html.escape(_cut(russian or "—", limit))
-    if kazakh and kazakh.strip() and kazakh.strip() != (russian or "").strip():
-        text += f" / {html.escape(_cut(kazakh.strip(), limit))}"
-    return text
-
-
-def format_lot(lot: PendingLot) -> str:
-    """Лот одной-двумя строками: название на двух языках, цена × количество = сумма, аванс."""
-    lines = [f"• <b>{_both(lot.lot_name, lot.lot_name_kz, 120)}</b>"]
-    money = []
+def _money_line(lot: PendingLot, advance: str) -> str:
+    parts = []
     if lot.price is not None and lot.count is not None:
-        money.append(f"{_money(lot.price)} × {_quantity(lot.count)} = {_money(lot.amount)}"
-                     if lot.amount is not None else f"{_money(lot.price)} × {_quantity(lot.count)}")
+        parts.append(f"{_money(lot.price)} × {_quantity(lot.count)}"
+                     + (f" = {_money(lot.amount)}" if lot.amount is not None else ""))
     elif lot.amount is not None:
-        money.append(_money(lot.amount))
+        parts.append(_money(lot.amount))
     if lot.prepayment:
-        money.append(f"<b>аванс {float(lot.prepayment):g}%</b>")
-    if money:
-        lines.append("   " + " · ".join(money))
-    return "\n".join(lines)
+        parts.append(f"<b>{advance} {float(lot.prepayment):g}%</b>")
+    return "   " + " · ".join(parts) if parts else ""
 
 
-def format_block(lots: list[PendingLot]) -> str:
-    """Блок одного объявления на двух языках: название, срок, признак, лоты, ссылка."""
+def _part(lots: list[PendingLot], kazakh: bool) -> list[str]:
+    """Одна языковая часть блока: название, номер и срок, признак, лоты."""
     first = lots[0]
-    lines = [f"<b>{html.escape(_cut(first.announcement_name or first.lot_name or 'Объявление', 160))}</b>"]
-    if first.announcement_name_kz and first.announcement_name_kz != first.announcement_name:
-        lines.append(f"<i>{html.escape(_cut(first.announcement_name_kz, 160))}</i>")
+    title = (first.announcement_name_kz if kazakh else None) or first.announcement_name \
+        or first.lot_name or "—"
+    lines = [f"<b>{html.escape(_cut(title, 160))}</b>"]
     head = [f"№ {html.escape(first.number_anno or str(first.announcement_id or ''))}"]
     if first.end_date:
         head.append(f"⏰ {first.end_date.astimezone(PORTAL_TZ):%d.%m %H:%M}")
     lines.append(" · ".join(head))
     if first.disable_person:
-        lines.append("♿ Среди организаций инвалидов / Мүгедектер ұйымдары арасында")
-    lines += [format_lot(lot) for lot in lots[:LOTS_PER_BLOCK]]
+        lines.append("♿ " + ("Мүгедектер ұйымдары арасында" if kazakh
+                             else "Среди организаций инвалидов"))
+    for lot in lots[:LOTS_PER_BLOCK]:
+        name = (lot.lot_name_kz if kazakh else None) or lot.lot_name or "—"
+        lines.append(f"• <b>{html.escape(_cut(name, 120))}</b>")
+        if money := _money_line(lot, "аванс"):
+            lines.append(money)
     if len(lots) > LOTS_PER_BLOCK:
         rest = len(lots) - LOTS_PER_BLOCK
-        lines.append(f"…и ещё {rest} лот. / тағы {rest} лот")
-    if first.announcement_id:
-        lines.append(announcement_url(first.announcement_id))
+        lines.append(f"…тағы {rest} лот" if kazakh else f"…и ещё {rest} лот.")
+    return lines
+
+
+def format_block(lots: list[PendingLot]) -> str:
+    """Блок одного объявления: сначала целиком по-казахски, потом целиком по-русски,
+    в конце — ссылка на наш сайт."""
+    lines = ["🇰🇿", *_part(lots, kazakh=True), "", "🇷🇺", *_part(lots, kazakh=False)]
+    if lots[0].announcement_id:
+        lines += ["", announcement_url(lots[0].announcement_id)]
     return "\n".join(lines)
 
 

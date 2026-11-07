@@ -26,6 +26,7 @@ from psycopg_pool import ConnectionPool
 
 from zakup import (
     SITE_URL,
+    audit,
     auth,
     bot,
     dashboard,
@@ -160,6 +161,17 @@ async def security_headers(request: Request, call_next):
     return response
 
 
+def _audit(request: Request, user: int | None, action: str, target: str | None = None,
+           login: str | None = None, **details) -> None:
+    """Запись в журнал действий; сбой журнала не должен ломать само действие."""
+    try:
+        with pool.connection() as conn:
+            audit.log(conn, user, action, target, details or None,
+                      ip=request.client.host if request.client else None, login=login)
+    except psycopg.Error as error:
+        logger.warning("audit failed: %s", type(error).__name__)
+
+
 class LoginRequired(Exception):
     pass
 
@@ -234,12 +246,17 @@ def login(
             token = auth.login(conn, email_norm, password, ip, request.headers.get("user-agent"))
             error = None if token else i18n.gettext("Неверный логин или пароль.")
     if token is None:
+        _audit(request, None, "login_failed", login=email_norm[:100],
+               reason="lock" if locked else "password")
         return templates.TemplateResponse(
             request,
             "login.html",
             {"next": _safe_next(next), "email": email, "error": error},
             status_code=429 if locked else 401,
         )
+    with pool.connection() as conn:
+        user_id = conn.execute("SELECT id FROM users WHERE email = %s", (email_norm,)).fetchone()[0]
+    _audit(request, user_id, "login")
     response = RedirectResponse(_safe_next(next), status_code=303)
     response.set_cookie(
         SESSION_COOKIE,
@@ -255,7 +272,10 @@ def login(
 @app.post("/logout", dependencies=[Depends(same_origin)])
 def logout(request: Request):
     with pool.connection() as conn:
+        who = auth.user_by_session(conn, request.cookies.get(SESSION_COOKIE))
         auth.logout(conn, request.cookies.get(SESSION_COOKIE))
+    if who:
+        _audit(request, who[0], "logout")
     response = RedirectResponse("/login", status_code=303)
     response.delete_cookie(SESSION_COOKIE, httponly=True, secure=True, samesite="lax")
     return response
@@ -441,6 +461,7 @@ EXPORT_LIMIT = 10_000
 def export(request: Request, user: User):
     from openpyxl import Workbook
 
+    _audit(request, user, "export", "/lots?" + request.url.query)
     current = Filters.from_form(parse_qs(request.url.query))
     where, params = current.where(datetime.now(UTC), "lots")
     with pool.connection() as conn:
@@ -500,6 +521,7 @@ def _goszakup() -> Client:
 @app.get("/a/{announcement_id}")
 def announcement(request: Request, user: User, announcement_id: int, background: BackgroundTasks):
     context = _announcement_context(request, user, announcement_id, background)
+    _audit(request, user, "view_announcement", f"/a/{announcement_id}")
     return templates.TemplateResponse(request, "announcement.html", context)
 
 
@@ -519,6 +541,7 @@ def lot_page(request: Request, user: User, lot_id: int, background: BackgroundTa
         provider = (conn.execute(
             "SELECT ai_provider FROM users WHERE role = 'admin' ORDER BY id LIMIT 1"
         ).fetchone() or ("claude_code",))[0]
+    _audit(request, user, "view_lot", f"/lots/{lot_id}")
     context.update(lot=lot, others=[other for other in context["lots"] if other["id"] != lot_id],
                    here=request.url.path, job=job, lot_info=lot_info,
                    region=research.default_region(lot_info) if lot_info else "",
@@ -541,6 +564,7 @@ def start_research(
         try:
             research.enqueue(conn, user, lot_id, region, whole_kz == "1",
                              is_admin=request.state.role == "admin")
+            _audit(request, user, "research", f"/lots/{lot_id}", region=region[:120])
         except research.QuotaExceeded as error:
             raise HTTPException(429, f"Лимит поиска товаров: {error}") from None
     return RedirectResponse(f"/lots/{lot_id}#research", status_code=303)
@@ -713,6 +737,7 @@ def lot_spec(request: Request, _: User, announcement_id: int, lot_id: int, refre
 
 @app.post("/lots/{lot_id}/mark", dependencies=[Depends(same_origin)])
 def mark_lot(
+    request: Request,
     user: User,
     lot_id: int,
     status: Annotated[str, Form()] = "",
@@ -728,6 +753,10 @@ def mark_lot(
             marks.set_note(conn, user, lot_id, note)
         else:
             marks.set_mark(conn, user, lot_id, status)
+    if note is not None:
+        _audit(request, user, "note", f"/lots/{lot_id}", text=note.strip()[:200])
+    else:
+        _audit(request, user, "mark", f"/lots/{lot_id}", status=status or "—")
     target = _safe_next(next)
     return RedirectResponse(f"{target}#lot-{lot_id}" if "#" not in target else target, status_code=303)
 
@@ -773,6 +802,58 @@ def research_list(request: Request, _: User, q: str = ""):
         request, "research_list.html",
         {"items": items, "q": q, "active": active, "now": datetime.now(UTC)},
     )
+
+
+LOG_PAGE_SIZES = (20, 50, 100)
+
+
+@app.get("/log")
+def action_log(request: Request, _: Admin, page: int = 1, per_page: int = 50):
+    """Журнал действий: фильтр по пользователю, действию и датам, постранично."""
+    query = parse_qs(request.url.query)
+    users = [int(v) for v in query.get("user", []) if v.isdigit()]
+    actions = [v for v in query.get("action", []) if v in audit.ACTIONS]
+    date_from = (query.get("from") or [""])[0]
+    date_to = (query.get("to") or [""])[0]
+    per_page = per_page if per_page in LOG_PAGE_SIZES else 50
+    page = max(page, 1)
+    clauses, params = ["true"], {}
+    if users:
+        clauses.append("a.user_id = ANY(%(users)s)")
+        params["users"] = users
+    if actions:
+        clauses.append("a.action = ANY(%(actions)s)")
+        params["actions"] = actions
+    for name, value, op, shift in (("from", date_from, ">=", 0), ("to", date_to, "<", 1)):
+        try:
+            day = datetime.fromisoformat(value).date() if value else None
+        except ValueError:
+            day = None
+        if day:
+            clauses.append(f"a.at {op} %({name})s")
+            params[name] = datetime.combine(day + timedelta(days=shift), datetime.min.time(),
+                                            PORTAL_TZ)
+    where = " AND ".join(clauses)
+    with pool.connection() as conn:
+        rows = conn.execute(
+            f"""SELECT a.at, a.user_id, coalesce(u.email, a.login), a.action, a.target,
+                       a.details, a.ip
+                FROM user_actions a LEFT JOIN users u ON u.id = a.user_id
+                WHERE {where} ORDER BY a.at DESC, a.id DESC
+                LIMIT {per_page} OFFSET {(page - 1) * per_page}""",
+            params,
+        ).fetchall()
+        total = conn.execute(f"SELECT count(*) FROM user_actions a WHERE {where}", params).fetchone()[0]
+        all_users = conn.execute("SELECT id, email FROM users ORDER BY email").fetchall()
+    keep = [(k, v) for k, vs in query.items() if k not in ("page",) for v in vs]
+    return templates.TemplateResponse(request, "log.html", {
+        "rows": rows, "total": total, "page": page, "per_page": per_page,
+        "pages": max((total + per_page - 1) // per_page, 1), "page_sizes": LOG_PAGE_SIZES,
+        "users": all_users, "chosen_users": users, "chosen_actions": actions,
+        "actions": audit.ACTIONS, "date_from": date_from, "date_to": date_to,
+        "query": urlencode([(k, v) for k, v in keep if k != "per_page"]
+                           + [("per_page", per_page)]),
+    })
 
 
 @app.get("/my")
@@ -835,6 +916,8 @@ async def create_filter_subscription(request: Request, user: User):
         ).fetchone()[0]
         # Если подходит слишком много — не заваливаем чат историей, шлём только новое.
         matcher.seed(conn, sub_id, current, scope)
+    _audit(request, user, "subscription_create", name[:100], scope=scope,
+           to="group" if chat_id else "personal", conditions=current.describe()[:300])
     return RedirectResponse("/subscriptions", status_code=303)
 
 
@@ -848,12 +931,15 @@ def _own_chat(conn, user: int, chat_id: str) -> str | None:
 
 
 @app.post("/subscriptions/{sub_id}/chat", dependencies=[Depends(same_origin)])
-def subscription_chat(user: User, sub_id: int, chat_id: Annotated[str, Form()] = ""):
+def subscription_chat(request: Request, user: User, sub_id: int,
+                      chat_id: Annotated[str, Form()] = ""):
     with pool.connection() as conn:
-        conn.execute(
-            "UPDATE subscriptions SET chat_id = %s WHERE id = %s AND user_id = %s",
+        name = conn.execute(
+            "UPDATE subscriptions SET chat_id = %s WHERE id = %s AND user_id = %s RETURNING name",
             (_own_chat(conn, user, chat_id), sub_id, user),
-        )
+        ).fetchone()
+    if name:
+        _audit(request, user, "subscription_chat", name[0], to="group" if chat_id else "personal")
     return RedirectResponse("/subscriptions", status_code=303)
 
 
@@ -877,6 +963,7 @@ def subscriptions(request: Request, user: User):
 
 @app.post("/subscriptions", dependencies=[Depends(same_origin)])
 def create_subscription(
+    request: Request,
     user: User,
     name: Annotated[str, Form()],
     query: Annotated[str, Form()],
@@ -893,23 +980,32 @@ def create_subscription(
                        (SELECT coalesce(max(seen_seq), 0) FROM lots))""",
             (user, name.strip(), query.strip(), _amount(min_amount), _amount(max_amount)),
         )
+    _audit(request, user, "subscription_create", name.strip()[:100], words=query.strip()[:200])
     return RedirectResponse("/subscriptions", status_code=303)
 
 
 @app.post("/subscriptions/{sub_id}/toggle", dependencies=[Depends(same_origin)])
-def toggle_subscription(user: User, sub_id: int):
+def toggle_subscription(request: Request, user: User, sub_id: int):
     with pool.connection() as conn:
-        conn.execute(
-            "UPDATE subscriptions SET active = NOT active WHERE id = %s AND user_id = %s",
+        row = conn.execute(
+            """UPDATE subscriptions SET active = NOT active WHERE id = %s AND user_id = %s
+               RETURNING name, active""",
             (sub_id, user),
-        )
+        ).fetchone()
+    if row:
+        _audit(request, user, "subscription_toggle", row[0], active=row[1])
     return RedirectResponse("/subscriptions", status_code=303)
 
 
 @app.post("/subscriptions/{sub_id}/delete", dependencies=[Depends(same_origin)])
-def delete_subscription(user: User, sub_id: int):
+def delete_subscription(request: Request, user: User, sub_id: int):
     with pool.connection() as conn:
-        conn.execute("DELETE FROM subscriptions WHERE id = %s AND user_id = %s", (sub_id, user))
+        row = conn.execute(
+            "DELETE FROM subscriptions WHERE id = %s AND user_id = %s RETURNING name",
+            (sub_id, user),
+        ).fetchone()
+    if row:
+        _audit(request, user, "subscription_delete", row[0])
     return RedirectResponse("/subscriptions", status_code=303)
 
 
@@ -1016,6 +1112,7 @@ def change_password(
             auth.set_password(conn, request.state.email, password)
     if error:
         return _settings_page(request, user, error=error, status_code=422, tab="account")
+    _audit(request, user, "password_change")
     # Смена пароля сбрасывает все сессии, в том числе эту: входим заново.
     return RedirectResponse("/login", status_code=303)
 
@@ -1032,6 +1129,7 @@ def add_user(request: Request, admin: Admin, login: Annotated[str, Form()]):
                                   status_code=422, tab="users")
         password = auth.generate_password()
         auth.set_password(conn, login, password)
+    _audit(request, admin, "user_add", login)
     return _settings_page(request, admin, notice=f"Создан пользователь {login}. Пароль: {password} "
                           "— передайте его, больше он нигде не показывается.", tab="users")
 
@@ -1053,6 +1151,7 @@ def set_role(request: Request, admin: Admin, user_id: int, role: Annotated[str, 
     with pool.connection() as conn:
         login = _other_user(conn, admin, user_id)
         conn.execute("UPDATE users SET role = %s WHERE id = %s", (role, user_id))
+    _audit(request, admin, "user_role", login, role=role)
     return _settings_page(request, admin, tab="users", notice=f"{login}: роль — "
                           f"{'администратор' if role == 'admin' else 'пользователь'}.")
 
@@ -1067,6 +1166,7 @@ def toggle_disabled(request: Request, admin: Admin, user_id: int):
         if disabled:
             # Отключение действует сразу: выкидываем из всех открытых сессий.
             conn.execute("DELETE FROM sessions WHERE user_id = %s", (user_id,))
+    _audit(request, admin, "user_disable", login, disabled=disabled)
     return _settings_page(request, admin, tab="users", notice=f"{login}: аккаунт "
                           f"{'отключён — войти нельзя' if disabled else 'снова включён'}.")
 
@@ -1076,6 +1176,7 @@ def delete_user(request: Request, admin: Admin, user_id: int):
     with pool.connection() as conn:
         login = _other_user(conn, admin, user_id)
         conn.execute("DELETE FROM users WHERE id = %s", (user_id,))
+    _audit(request, admin, "user_delete", login)
     return _settings_page(request, admin, tab="users",
                           notice=f"Пользователь {login} удалён вместе с подписками и отметками.")
 
@@ -1088,6 +1189,7 @@ def reset_password(request: Request, admin: Admin, user_id: int):
             raise HTTPException(404, "Нет такого пользователя")
         password = auth.generate_password()
         auth.set_password(conn, row[0], password)
+    _audit(request, admin, "user_reset", row[0])
     if user_id == admin:
         return RedirectResponse("/login", status_code=303)
     return _settings_page(request, admin, notice=f"Новый пароль для {row[0]}: {password} — "
@@ -1121,6 +1223,7 @@ def save_ai(
             "UPDATE users SET ai_provider = %s, ai_model = %s WHERE id = %s",
             (provider, chosen, user),
         )
+    _audit(request, user, "settings_ai", provider, model=chosen, new_key=bool(api_key.strip()))
     return RedirectResponse("/settings?saved=ai#ai", status_code=303)
 
 
@@ -1147,7 +1250,7 @@ def ai_models(user: Admin, provider: str):
 
 
 @app.post("/settings/company", dependencies=[Depends(same_origin)])
-def save_company(user: Admin, company_bin: Annotated[str, Form()] = ""):
+def save_company(request: Request, user: Admin, company_bin: Annotated[str, Form()] = ""):
     company_bin = company_bin.strip()
     if company_bin and not (company_bin.isdigit() and len(company_bin) == 12):
         raise HTTPException(422, "БИН или ИИН — 12 цифр")
@@ -1155,44 +1258,47 @@ def save_company(user: Admin, company_bin: Annotated[str, Form()] = ""):
         conn.execute(
             "UPDATE users SET company_bin = %s WHERE id = %s", (company_bin or None, user)
         )
+    _audit(request, user, "settings_company", company_bin or "—")
     return RedirectResponse("/settings?saved=bin#company", status_code=303)
 
 
 @app.post("/settings/telegram/link", dependencies=[Depends(same_origin)])
-def telegram_link(user: User):
+def telegram_link(request: Request, user: User):
     if not telegram.bot_username():
         raise HTTPException(503, "Telegram-бот не настроен")
     with pool.connection() as conn:
         code = bot.create_link_code(conn, user)
+    _audit(request, user, "telegram_link")
     return RedirectResponse(bot.link_url(code), status_code=303)
 
 
 @app.post("/settings/telegram/group", dependencies=[Depends(same_origin)])
-def telegram_group_link(user: Admin):
+def telegram_group_link(request: Request, user: Admin):
     if not telegram.bot_username():
         raise HTTPException(503, "Telegram-бот не настроен")
     with pool.connection() as conn:
         code = bot.create_link_code(conn, user, "group")
+    _audit(request, user, "group_link")
     return RedirectResponse(bot.group_link_url(code), status_code=303)
 
 
 @app.post("/settings/groups/remove", dependencies=[Depends(same_origin)])
-def telegram_group_remove(user: Admin, chat_id: Annotated[str, Form()]):
+def telegram_group_remove(request: Request, user: Admin, chat_id: Annotated[str, Form()]):
+    # Группы общие: отключение убирает её у всех, их подписки уходят в личку.
     with pool.connection() as conn:
-        conn.execute(
-            "UPDATE subscriptions SET chat_id = NULL WHERE user_id = %s AND chat_id = %s",
-            (user, chat_id),
-        )
-        conn.execute(
-            "DELETE FROM user_groups WHERE user_id = %s AND chat_id = %s", (user, chat_id)
-        )
+        title = conn.execute(
+            "SELECT title FROM telegram_groups WHERE chat_id = %s", (chat_id,)
+        ).fetchone()
+        bot.unlink_group(conn, chat_id)
+    _audit(request, user, "group_remove", title[0] if title else chat_id)
     return RedirectResponse("/settings", status_code=303)
 
 
 @app.post("/settings/telegram/unlink", dependencies=[Depends(same_origin)])
-def telegram_unlink(user: User):
+def telegram_unlink(request: Request, user: User):
     with pool.connection() as conn:
         conn.execute("UPDATE users SET telegram_chat_id = NULL WHERE id = %s", (user,))
+    _audit(request, user, "telegram_unlink")
     return RedirectResponse("/settings", status_code=303)
 
 

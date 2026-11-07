@@ -174,7 +174,8 @@ def test_group_gets_each_lot_once_and_announcement_scope_sends_all_lots(conn, mo
     assert matcher.deliver(conn, pause=0) == 2
     assert [chat for chat, _ in sent] == ["-100"]
     text = sent[0][1]
-    assert text.count("Стол") == 1 and "Стул" in text and "· amir" in text
+    # Лот один раз на каждом языке (казахского названия нет — русское).
+    assert text.count("Стол") == 2 and "Стул" in text and "· amir" in text
     assert conn.execute("SELECT count(*) FROM matches WHERE notified_at IS NULL").fetchone()[0] == 0
 
 
@@ -199,3 +200,12 @@ def test_review_fixes_status_scope_seed_and_rejected_message(conn, monkeypatch):
     monkeypatch.setattr(matcher.telegram, "send_message", reject)
     assert matcher.deliver(conn, pause=0) == 0
     assert conn.execute("SELECT count(*) FROM matches WHERE notified_at IS NULL").fetchone()[0] == 0
+
+
+def test_search_finds_kazakh_names(conn):
+    _announcement(conn, 1, lots=[{"id": 10, "amount": 500_000, "prepayment": 30,
+                                  "kato": ["751410000"], "name": "Стол"}])
+    conn.execute("UPDATE lots SET name_kz = 'Жазу үстелі' WHERE id = 10")
+    assert _lot_ids(conn, Filters(q="үстелі")) == [10]
+    assert _lot_ids(conn, Filters(q="кітап немесе үстелі")) == [10]
+    assert _lot_ids(conn, Filters(exclude="үстелі")) == []
