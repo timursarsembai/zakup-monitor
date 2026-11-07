@@ -1,44 +1,8 @@
 {% extends "base.html" %}
-{% from "_marks.html" import mark_control, note_form, mark_styles %}
+{% from "_lot_card.html" import lot_styles, lot_card, lot_winners, lot_scripts with context %}
 {% block title %}№ {{ a.numberAnno or a.id }}{% endblock %}
 {% block style %}
-{{ mark_styles() }}
-  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
-  .chip { padding: 2px 10px; border-radius: 999px; font-size: 13px; border: 1px solid var(--line); }
-  .chip.status { background: color-mix(in srgb, var(--accent) 14%, transparent); border-color: transparent; }
-  h1 { font-size: 21px; line-height: 1.3; margin: 4px 0 14px; }
-  .head { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 24px; align-items: start; }
-  dl.facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 16px; margin: 0; }
-  dl.facts dt { color: var(--muted); }
-  dl.facts dd { margin: 0; }
-  .aside { border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
-  .total { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
-  .countdown { display: flex; gap: 10px; margin-top: 8px; }
-  .countdown div { text-align: center; min-width: 44px; }
-  .countdown b { display: block; font-size: 22px; font-variant-numeric: tabular-nums; }
-  .countdown span { font-size: 12px; color: var(--muted); }
-  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin: 24px 0 12px; flex-wrap: wrap; }
-  .tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: 8px 12px; }
-  .tabs button[aria-selected=true] { border-bottom-color: var(--accent); font-weight: 600; }
-  .tabs a { margin-left: auto; padding: 8px 4px; }
-  .lot { border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin-bottom: 12px; }
-  .lot-head { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
-  .lot-head .name { font-weight: 600; font-size: 16px; }
-  .lot-sum { text-align: right; font-variant-numeric: tabular-nums; }
-  .lot-sum b { font-size: 17px; }
-  .lot dl.facts { margin-top: 10px; font-size: 14px; }
-  .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 13px; border: 1px solid var(--line); }
-  .badge.hot { background: color-mix(in srgb, #1e9e5a 15%, transparent); border-color: transparent; color: #137a43; font-weight: 600; }
-  .badge.sub { background: color-mix(in srgb, var(--accent) 14%, transparent); border-color: transparent; }
-  @media (prefers-color-scheme: dark) { .badge.hot { color: #6fdc9f; } }
-  details.spec { margin-top: 10px; }
-  details.spec summary { cursor: pointer; color: var(--accent); }
-  .spec-text { white-space: pre-wrap; font-size: 14px; line-height: 1.5; margin-top: 8px; padding: 12px;
-               border-radius: 8px; background: color-mix(in srgb, var(--fg) 4%, transparent); }
-  ul.files { list-style: none; padding: 0; margin: 0; }
-  ul.files li { padding: 8px 0; border-bottom: 1px solid var(--line); }
-  .notice { padding: 8px 12px; border-radius: 8px; background: color-mix(in srgb, #d9a400 15%, transparent); }
-  @media (max-width: 760px) { .head { grid-template-columns: 1fr; } }
+{{ lot_styles() }}
 {% endblock %}
 {% block main %}
 {% if refresh_error %}<p class="notice">{{ refresh_error }}</p>{% endif %}
@@ -91,44 +55,7 @@
 
 <section data-panel="lots">
   {% for lot in lots %}
-  {% set i = info[lot.id] %}
-  {% set plan = (lot.Plans or [])|first %}
-  <div class="lot" id="lot-{{ lot.id }}">
-    <div class="lot-head">
-      <div>
-        <div class="name">{{ lot.nameRu }}</div>
-        {% if lot.descriptionRu %}<div class="muted">{{ lot.descriptionRu }}</div>{% endif %}
-        <div style="margin-top:6px; display:flex; gap:6px; flex-wrap:wrap">
-          {% if i.prepayment %}<span class="badge {% if i.prepayment >= 30 %}hot{% endif %}">аванс {{ '%g'|format(i.prepayment) }}%</span>{% endif %}
-          {% if lot.id in subscribed %}<span class="badge sub">подходит: {{ subscribed[lot.id] }}</span>{% endif %}
-        </div>
-      </div>
-      <div class="lot-sum">
-        <b>{{ lot.amount | money }} ₸</b>
-        <div class="muted">{% if i.price is not none %}{{ i.price | money }} ₸ × {% endif %}{{ '%g'|format(lot.count or 0) }} {{ (i.unit_name or "")|lower }}</div>
-        <div style="margin-top:8px">{{ mark_control(lot.id, marks.get(lot.id), here) }}</div>
-      </div>
-    </div>
-    <dl class="facts">
-      <dt>Номер лота</dt><dd>{{ lot.lotNumber }}</dd>
-      {% if i.extra_desc %}<dt>Доп. характеристика</dt><dd>{{ i.extra_desc }}</dd>{% endif %}
-      <dt>Заказчик</dt><dd>{{ lot.customerNameRu or "—" }}</dd>
-      {% set places = [] %}{% for p in lot.Plans or [] %}{% for k in p.PlansKato or [] %}{% if k.fullDeliveryPlaceNameRu and k.fullDeliveryPlaceNameRu|trim not in places %}{% set _ = places.append(k.fullDeliveryPlaceNameRu|trim) %}{% endif %}{% endfor %}{% endfor %}
-      {% if places %}<dt>Место поставки</dt><dd>{{ places|join("; ") }}</dd>{% endif %}
-      {% if i.supply_date %}<dt>Срок поставки</dt><dd>{{ i.supply_date }}</dd>{% endif %}
-      {% if plan and ((plan.sum2 or 0) > 0 or (plan.sum3 or 0) > 0) %}<dt>По годам</dt><dd>{{ plan.sum1 | money }} / {{ plan.sum2 | money }} / {{ plan.sum3 | money }} ₸</dd>{% endif %}
-      <dt>Статус лота</dt><dd>{{ (lot.RefLotsStatus or {}).nameRu or "—" }}</dd>
-    </dl>
-    {% set r = results.get(lot.id) %}
-    {% if r %}<p style="margin:10px 0 0">{% if r.outcome == "winner" %}🏁 Победитель: <b>{{ r.winner_name }}</b>{% if r.winner_total is not none %} — {{ r.winner_total | money }} ₸{% endif %}{% if company_bin and r.winner_bin == company_bin %} <span class="badge hot">это вы</span>{% endif %}{% else %}🏁 Не состоялась{% if r.reason %} в связи с {{ r.reason }}{% endif %}{% endif %} <span class="muted">· предложений: {{ r.offers|length }}</span></p>{% endif %}
-    {% if marks.get(lot.id) %}{{ note_form(lot.id, marks.get(lot.id), here) }}{% endif %}
-    {% if spec_file(lot) %}
-    <details class="spec" data-src="/a/{{ a.id }}/lots/{{ lot.id }}/spec">
-      <summary>Техническая спецификация</summary>
-      <div class="muted">Загружаю…</div>
-    </details>
-    {% endif %}
-  </div>
+  {{ lot_card(lot) }}
   {% else %}
   <p class="muted">Лотов нет.</p>
   {% endfor %}
@@ -153,42 +80,7 @@
 {% set ended = end and end < now %}
 <section data-panel="winners" hidden>
   {% for lot in lots if lot.id in results %}
-  {% set r = results[lot.id] %}
-  <div class="lot">
-    <div class="lot-head">
-      <div>
-        <a class="name" href="#lot-{{ lot.id }}" data-goto="lots">{{ lot.nameRu }}</a>
-        <div class="muted">Лот {{ lot.lotNumber }} · {{ lot.amount | money }} ₸</div>
-      </div>
-      <div class="lot-sum">
-        {% if r.outcome == "winner" %}<span class="badge hot">Победитель определён</span>{% else %}<span class="badge">Не состоялась</span>{% endif %}
-      </div>
-    </div>
-    {% if r.outcome == "winner" %}
-    <p style="margin:10px 0 0"><b>{{ r.winner_name }}</b> <span class="muted">БИН {{ r.winner_bin }}</span>{% if r.winner_total is not none %} — <b>{{ r.winner_total | money }} ₸</b>{% if lot.amount %} <span class="muted">(−{{ '%.1f'|format((1 - (r.winner_total|float) / lot.amount) * 100) }}% от плана)</span>{% endif %}{% endif %}</p>
-    {% if r.second_name %}<p class="muted" style="margin:4px 0 0">Второе место: {{ r.second_name }}, БИН {{ r.second_bin }}</p>{% endif %}
-    {% else %}
-    <p style="margin:10px 0 0">Закупка не состоялась{% if r.reason %} в связи с {{ r.reason }}{% endif %}.</p>
-    {% endif %}
-    {% if r.offers %}
-    <div class="table-wrap" style="margin-top:10px"><table>
-      <tr><th>№</th><th>Поставщик</th><th>БИН/ИИН</th><th>Цена за ед., ₸</th><th>Сумма, ₸</th><th>Подана</th></tr>
-      {% for o in r.offers %}
-      <tr{% if o.bin == r.winner_bin %} style="font-weight:600"{% endif %}>
-        <td>{{ loop.index }}</td>
-        <td>{{ o.name }}{% if company_bin and o.bin == company_bin %} <span class="badge sub">вы</span>{% endif %}</td>
-        <td>{{ o.bin }}</td>
-        <td class="num">{{ o.price | money if o.price else "" }}</td>
-        <td class="num">{{ o.total | money if o.total else "" }}</td>
-        <td class="muted">{{ o.applied_at }}</td>
-      </tr>
-      {% endfor %}
-    </table></div>
-    {% endif %}
-    {% for c in contracts_by_lot.get(lot.id, []) %}
-    <p class="muted" style="margin:8px 0 0">Договор № {{ c.contractNumberSys }} с {{ (c.Supplier or {}).nameRu or c.supplierBiin }} на {{ c.contractSum | money }} ₸ — {{ (c.RefContractStatus or {}).nameRu or "" }}</p>
-    {% endfor %}
-  </div>
+  {{ lot_winners(lot, results[lot.id]) }}
   {% else %}
   <p class="muted">{% if not ended %}Победители появятся после окончания приема заявок и публикации протокола итогов.{% elif protocols %}Итоги из протокола разобрать не удалось — откройте его на вкладке «Протоколы».{% else %}Протокол итогов ещё не опубликован. Страница проверит его снова при следующем открытии.{% endif %}</p>
   {% endfor %}
@@ -237,17 +129,7 @@
   for (const link of document.querySelectorAll("[data-goto]")) {
     link.addEventListener("click", () => showTab(link.dataset.goto));
   }
-  for (const spec of document.querySelectorAll("details.spec")) {
-    spec.addEventListener("toggle", async () => {
-      if (!spec.open || spec.dataset.loaded) return;
-      spec.dataset.loaded = "1";
-      const body = spec.querySelector("div");
-      try {
-        const response = await fetch(spec.dataset.src);
-        body.outerHTML = response.ok ? await response.text() : '<p class="muted">Не удалось загрузить.</p>';
-      } catch { body.textContent = "Не удалось загрузить."; }
-    });
-  }
+{{ lot_scripts() }}
   const cd = document.querySelector(".countdown");
   if (cd) {
     const end = new Date(cd.dataset.end);

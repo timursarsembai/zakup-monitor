@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% from "_lot_card.html" import lot_styles, lot_card, lot_winners, lot_scripts with context %}
+{% block title %}Лот {{ lot.lotNumber or lot.id }}{% endblock %}
+{% block style %}
+{{ lot_styles() }}
+  .crumbs { margin: 4px 0 10px; }
+  .parent { border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; margin-bottom: 16px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; }
+  .parent .title { font-weight: 600; }
+  .parent .side { text-align: right; white-space: nowrap; }
+  h2 { font-size: 17px; margin: 24px 0 10px; }
+  @media (max-width: 640px) { .parent { grid-template-columns: 1fr; } .parent .side { text-align: left; } }
+{% endblock %}
+{% block main %}
+{% if refresh_error %}<p class="notice">{{ refresh_error }}</p>{% endif %}
+<p class="crumbs muted"><a href="/lots">Лоты</a> → лот {{ lot.lotNumber }}</p>
+
+<div class="parent">
+  <div>
+    <div class="muted">Объявление № {{ a.numberAnno or a.id }} · {{ (a.RefTradeMethods or {}).nameRu or "" }} · {{ (a.RefBuyStatus or {}).nameRu or "" }}</div>
+    <a class="title" href="/a/{{ a.id }}">{{ a.nameRu }}</a>
+    <div class="muted">{% if a.Organizer %}{{ a.Organizer.nameRu }}{% else %}{{ a.orgNameRu }}{% endif %}</div>
+  </div>
+  <div class="side">
+    <div>до {{ (end|local).strftime("%d.%m.%Y %H:%M") if end else "—" }}</div>
+    <div class="muted">{{ time_left(end) }}</div>
+    <div style="margin-top:6px"><a href="/a/{{ a.id }}">Открыть объявление →</a></div>
+  </div>
+</div>
+
+{{ lot_card(lot, link=false) }}
+
+{% if lot.id in results %}
+<h2>Итоги</h2>
+{{ lot_winners(lot, results[lot.id]) }}
+{% elif end and end < now %}
+<p class="muted">Итоги по лоту ещё не опубликованы.</p>
+{% endif %}
+
+{% if others %}
+<h2>Другие лоты этого объявления ({{ others|length }})</h2>
+<div class="table-wrap"><table>
+  <tr><th>Лот</th><th>Наименование</th><th>Кол-во</th><th>Цена за ед., ₸</th><th>Сумма, ₸</th><th>Аванс</th><th>Статус</th></tr>
+  {% for o in others %}
+  {% set oi = info[o.id] %}
+  <tr>
+    <td class="muted">{{ o.lotNumber }}</td>
+    <td><a href="/lots/{{ o.id }}">{{ o.nameRu }}</a>{% if oi.extra_desc %}<div class="muted">{{ oi.extra_desc[:140] }}</div>{% endif %}
+      {% if marks.get(o.id) and marks.get(o.id)[0] %}<div><span class="badge sub">{{ mark_statuses.get(marks.get(o.id)[0]) }}</span></div>{% endif %}</td>
+    <td class="num">{{ '%g'|format(o.count or 0) }} {{ (oi.unit_name or "")|lower }}</td>
+    <td class="num">{{ oi.price | money }}</td>
+    <td class="num">{{ o.amount | money }}</td>
+    <td>{% if oi.prepayment %}<span class="badge {% if oi.prepayment >= 30 %}hot{% endif %}">{{ '%g'|format(oi.prepayment) }}%</span>{% endif %}</td>
+    <td class="muted">{{ (o.RefLotsStatus or {}).nameRu or "" }}</td>
+  </tr>
+  {% endfor %}
+</table></div>
+{% endif %}
+
+<p class="muted" style="margin-top:24px">Данные с портала обновлены {{ (fetched_at|local).strftime("%d.%m.%Y %H:%M") if fetched_at else "—" }}. <a href="{{ portal_url }}" target="_blank" rel="noopener">Объявление на портале ↗</a></p>
+<script>
+{{ lot_scripts() }}
+</script>
+{% endblock %}

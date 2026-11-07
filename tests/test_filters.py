@@ -25,7 +25,7 @@ def test_deadline_rule(today, expected):
 def test_defaults_match_the_owner_request():
     f = Filters()
     assert (f.statuses, f.disable_person, f.regions, f.min_sum, f.deadline) == (
-        [240], True, ["75", "19"], Decimal(300000), DEADLINE_RULE
+        [240], "only", ["75", "19"], Decimal(300000), DEADLINE_RULE
     )
     assert Filters.from_form({}) == f
     assert Filters.from_json(f.to_json()) == f
@@ -38,8 +38,12 @@ def test_form_parsing():
         "advance_only": ["1"],
     })
     assert f.statuses == [240] and f.regions == ["75"] and f.min_sum == Decimal("1000.50")
-    assert f.deadline == "2026-11-20" and f.advance_only and not f.disable_person
+    assert f.deadline == "2026-11-20" and f.advance_only and f.disable_person == ""
     assert Filters.from_form({"applied": ["1"], "deadline_mode": [""]}).deadline == ""
+    assert Filters.from_form({"applied": ["1"], "disable_person": ["1"]}).disable_person == "only"
+    # Подписки, сохранённые до трёх вариантов «организаций инвалидов».
+    assert Filters.from_json({"disable_person": True}).disable_person == "only"
+    assert Filters.from_json({"disable_person": False}).disable_person == ""
 
 
 def test_details_parse_lot_fields():
@@ -59,7 +63,7 @@ def test_details_parse_lot_fields():
     assert fields["kato"] == ["191010000", "751110000", "751410000"]
     assert lots[0] == {"id": 1, "prepayment": 30.0, "kato": ["751110000", "751410000"],
                        "price": 10.5, "unit_name": "Штука", "extra_desc": "дуб",
-                       "supply_date": "16 дней"}
+                       "supply_date": "16 дней", "enstru": []}
     assert lots[1]["price"] is None and lots[1]["kato"] == []
     assert len(lots) == 2
 
@@ -76,6 +80,7 @@ def _announcement(conn, ident, *, status=240, disable=True, kato=("751410000",),
                      "kato": list(kato), "name": f"Лот {ident}"}]
     item = {"id": ident, "disablePersonId": 1 if disable else 0, "kato": [], "Lots": [
         {"id": lot["id"], "trdBuyId": ident, "nameRu": lot["name"], "amount": lot["amount"],
+         "refLotStatusId": status,
          "plnPointKatoList": lot["kato"], "Plans": [{"prepayment": lot["prepayment"]}]}
         for lot in lots
     ]}

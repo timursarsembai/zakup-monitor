@@ -30,6 +30,10 @@ def announcement_url(announcement_id: int) -> str:
     return f"{SITE_URL}/a/{announcement_id}"
 
 
+def lot_url(lot_id: int) -> str:
+    return f"{SITE_URL}/lots/{lot_id}"
+
+
 def run(conn: psycopg.Connection) -> int:
     """Подписки на слова: лоты, пришедшие после прошлого запуска."""
     max_seq = conn.execute("SELECT coalesce(max(seen_seq), 0) FROM lots").fetchone()[0]

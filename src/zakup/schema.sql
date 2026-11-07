@@ -223,3 +223,16 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS company_bin text;
 ALTER TABLE lot_marks ADD COLUMN IF NOT EXISTS result_notified_at timestamptz;
 -- Какой протокол итогов уже разобран (zakup.results.parse_announcement).
 ALTER TABLE announcements ADD COLUMN IF NOT EXISTS protocol_url text;
+
+-- Поля поиска как на портале (2026-11-08): финансовый год, дата протокола итогов,
+-- коды ЕНС ТРУ лота, поиск по наименованию объявления.
+-- finYear в GraphQL — список лет (многолетние закупки).
+ALTER TABLE announcements DROP COLUMN IF EXISTS fin_year;
+ALTER TABLE announcements ADD COLUMN IF NOT EXISTS fin_years integer[];
+ALTER TABLE announcements ADD COLUMN IF NOT EXISTS itogi_date timestamptz;
+ALTER TABLE announcements ADD COLUMN IF NOT EXISTS tsv tsvector GENERATED ALWAYS AS (
+    to_tsvector('russian', coalesce(name_ru, ''))
+) STORED;
+CREATE INDEX IF NOT EXISTS announcements_tsv ON announcements USING gin (tsv);
+ALTER TABLE lots ADD COLUMN IF NOT EXISTS enstru text[];
+CREATE INDEX IF NOT EXISTS lots_status ON lots (status_id);

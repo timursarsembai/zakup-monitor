@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% from "_filters.html" import filter_form, filter_styles, pager with context %}
+{% block title %}Объявления{% endblock %}
+{% block style %}
+{{ filter_styles() }}
+{% endblock %}
+{% block main %}
+{{ filter_form() }}
+
+<p>Найдено объявлений: <b>{{ total }}</b>{% if deadline_date %} · окончание по {{ deadline_date.strftime("%d.%m.%Y") }} включительно{% endif %}</p>
+
+<div class="table-wrap"><table class="results">
+  <tr><th>№</th><th>Наименование объявления</th><th>Способ</th><th>Начало приема заявок</th><th>Окончание приема заявок</th><th>Сумма, ₸</th><th>Статус</th></tr>
+  {% for r in rows %}
+  <tr>
+    <td class="muted"><b>{{ r[1] or r[0] }}</b><div>Лотов: {{ r[2] or "—" }}</div></td>
+    <td style="min-width:260px"><a class="title" href="{{ announcement_url(r[0]) }}">{{ r[3] or "Без названия" }}</a>
+      <div class="muted">Организатор: {{ r[4] or "—" }}</div>
+      {% if r[10] %}<div><span class="badge {% if r[10] >= 30 %}hot{% endif %}">аванс до {{ '%g'|format(r[10]) }}%</span></div>{% endif %}</td>
+    <td class="muted">{{ r[12] or method_names.get(r[5], "") }}</td>
+    <td>{{ (r[6]|local).strftime("%d.%m.%Y %H:%M") if r[6] else "—" }}</td>
+    <td>{{ (r[7]|local).strftime("%d.%m.%Y %H:%M") if r[7] else "—" }}{% if r[7] %}<div class="muted">{{ time_left(r[7]) }}</div>{% endif %}</td>
+    <td class="num"><b>{{ r[8] | money }}</b></td>
+    <td class="muted">{{ r[11] or status_names.get(r[9], r[9] or "") }}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="7" class="muted">Под фильтр ничего не подходит.</td></tr>
+  {% endfor %}
+</table></div>
+{{ pager() }}
+{% endblock %}

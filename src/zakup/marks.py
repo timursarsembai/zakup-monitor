@@ -13,7 +13,7 @@ import psycopg
 
 from zakup import telegram
 from zakup.goszakup import PORTAL_TZ
-from zakup.matcher import announcement_url
+from zakup.matcher import lot_url
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +134,7 @@ def remind(conn: psycopg.Connection, now: datetime | None = None, pause: float =
         ]
         if note:
             lines.append(f"Заметка: {html.escape(note[:300])}")
-        lines.append(f'<a href="{announcement_url(a_id)}#lot-{lot_id}">Открыть лот</a>')
+        lines.append(f'<a href="{lot_url(lot_id)}">Открыть лот</a>')
         try:
             telegram.send_message(chat_id, "\n".join(line for line in lines if line))
         except telegram.TelegramError as error:
@@ -185,7 +185,7 @@ def announce_results(conn: psycopg.Connection, pause: float = 1.1) -> int:
         lines.append(f"Предложений: {len(offers or [])}")
         if new_status != status:
             lines.append(f"Отметка изменена: {STATUSES[new_status]}")
-        lines.append(f'<a href="{announcement_url(a_id)}#lot-{lot_id}">Открыть лот</a>')
+        lines.append(f'<a href="{lot_url(lot_id)}">Открыть лот</a>')
         if chat_id:
             try:
                 telegram.send_message(chat_id, "\n".join(lines))

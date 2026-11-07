@@ -21,6 +21,7 @@ BATCH = 50
 FIELDS = """
   id numberAnno nameRu totalSum countLots publishDate startDate endDate lastUpdateDate
   refBuyStatusId refTradeMethodsId kato disablePersonId refTypeTradeId refSubjectTypeId
+  finYear itogiDatePublic
   customerBin customerNameRu orgBin orgNameRu
   RefBuyStatus { nameRu } RefTradeMethods { nameRu } RefTypeTrade { nameRu }
   RefSubjectType { nameRu }
@@ -33,7 +34,7 @@ FIELDS = """
     RefLotsStatus { nameRu }
     Files { id nameRu originalName filePath }
     Plans {
-      price count amount sum1 sum2 sum3 prepayment supplyDateRu extraDescRu
+      price count amount sum1 sum2 sum3 prepayment supplyDateRu extraDescRu refEnstruCode
       RefUnits { nameRu } PlansKato { refKatoCode fullDeliveryPlaceNameRu }
     }
   }
@@ -48,9 +49,14 @@ def _number(value: Any) -> float | None:
         return None
 
 
+def _years(value: Any) -> list[int]:
+    values = value if isinstance(value, list) else [value]
+    return sorted({int(v) for v in values if isinstance(v, int) or str(v).isdigit()})
+
+
 def parse_lot(lot: dict[str, Any]) -> dict[str, Any]:
     kato = set(lot.get("plnPointKatoList") or [])
-    prepayments, prices, units, extra, supply = [], [], [], [], []
+    prepayments, prices, units, extra, supply, enstru = [], [], [], [], [], []
     for plan in lot.get("Plans") or []:
         if (value := _number(plan.get("prepayment"))) is not None:
             prepayments.append(value)
@@ -60,6 +66,8 @@ def parse_lot(lot: dict[str, Any]) -> dict[str, Any]:
             units.append(unit)
         if plan.get("extraDescRu"):
             extra.append(plan["extraDescRu"].strip())
+        if plan.get("refEnstruCode"):
+            enstru.append(plan["refEnstruCode"])
         if plan.get("supplyDateRu"):
             supply.append(plan["supplyDateRu"].strip())
         kato.update(k["refKatoCode"] for k in plan.get("PlansKato") or [] if k.get("refKatoCode"))
@@ -73,6 +81,7 @@ def parse_lot(lot: dict[str, Any]) -> dict[str, Any]:
         "unit_name": units[0] if units else None,
         "extra_desc": "; ".join(dict.fromkeys(extra)) or None,
         "supply_date": "; ".join(dict.fromkeys(supply)) or None,
+        "enstru": sorted(set(enstru)),
     }
 
 
@@ -94,6 +103,8 @@ def parse(item: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         "customer_bin": item.get("customerBin"),
         "customer_name_ru": item.get("customerNameRu"),
         "last_update_date": parse_date(item.get("lastUpdateDate")),
+        "fin_years": _years(item.get("finYear")),
+        "itogi_date": parse_date(item.get("itogiDatePublic")),
     }
     return fields, lots
 
@@ -105,6 +116,7 @@ def save(conn: psycopg.Connection, item: dict[str, Any]) -> None:
                disable_person = %(disable_person)s, kato = %(kato)s,
                prepayment_max = %(prepayment_max)s, type_trade_id = %(type_trade_id)s,
                subject_type_id = %(subject_type_id)s,
+               fin_years = %(fin_years)s, itogi_date = %(itogi_date)s,
                count_lots = coalesce(%(count_lots)s, count_lots),
                customer_bin = coalesce(%(customer_bin)s, customer_bin),
                customer_name_ru = coalesce(%(customer_name_ru)s, customer_name_ru),
@@ -121,7 +133,7 @@ def save(conn: psycopg.Connection, item: dict[str, Any]) -> None:
         conn.execute(
             """UPDATE lots SET prepayment = %(prepayment)s, kato = %(kato)s, price = %(price)s,
                    unit_name = %(unit_name)s, extra_desc = %(extra_desc)s,
-                   supply_date = %(supply_date)s
+                   supply_date = %(supply_date)s, enstru = %(enstru)s
                WHERE id = %(id)s""",
             lot,
         )
@@ -144,6 +156,7 @@ def refresh(conn: psycopg.Connection, client: Client, limit: int) -> int:
             """SELECT id FROM announcements
                WHERE end_date > now()
                  AND (details_fetched_at IS NULL OR detail IS NULL
+                      OR NOT detail ? 'finYear'
                       OR last_update_date > details_update_date
                       OR details_fetched_at < now() - interval '1 day')
                ORDER BY details_fetched_at NULLS FIRST, end_date
@@ -168,7 +181,7 @@ def refresh_finished(conn: psycopg.Connection, client: Client, limit: int) -> in
         for row in conn.execute(
             """SELECT id FROM announcements
                WHERE status_id = ANY(%s)
-                 AND (detail IS NULL
+                 AND (detail IS NULL OR NOT detail ? 'finYear'
                       OR (detail->>'refBuyStatusId')::int IS DISTINCT FROM status_id)
                  AND (details_fetched_at IS NULL OR details_fetched_at < now() - interval '1 hour')
                ORDER BY end_date DESC

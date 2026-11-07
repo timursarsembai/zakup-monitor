@@ -123,7 +123,7 @@ def test_marks_on_search_my_page_and_hiding(client, conn):
     db.upsert_lot(conn, {"id": 6, "trd_buy_id": 78, "name_ru": "Стул офисный", "amount": 500000})
     conn.commit()
     _login(client)
-    search = "/?applied=1&deadline_mode="
+    search = "/lots?applied=1&deadline_mode="
     assert "Стул офисный" in client.get(search).text
     response = client.post("/lots/6/mark", data={"status": "preparing", "next": search},
                            headers=ORIGIN, follow_redirects=False)
@@ -133,7 +133,7 @@ def test_marks_on_search_my_page_and_hiding(client, conn):
     assert "Готовлю заявку" in my and "Стул офисный" in my and "поставщик Алатау" in my
     client.post("/lots/6/mark", data={"status": "rejected"}, headers=ORIGIN)
     page = client.get(search).text
-    assert "Стул офисный" not in page and "Скрыто лотов" in page
+    assert "Стул офисный" not in page and "Скрыто с отметкой" in page
     assert "Стул офисный" in client.get(search + "&hidden=1").text
     assert client.post("/lots/6/mark", data={"status": "bogus"}, headers=ORIGIN).status_code == 422
     assert client.post("/lots/999/mark", data={"status": "won"}, headers=ORIGIN).status_code == 404
@@ -162,15 +162,16 @@ def test_search_finds_finished_lots_with_winner(client, conn, monkeypatch):
 
     _announcement(conn)
     conn.execute("UPDATE announcements SET status_id = 350, disable_person = false")
+    conn.execute("UPDATE lots SET status_id = 360 WHERE id = 70")
     monkeypatch.setattr(web.results.spec, "download", lambda url: b"pdf")
     monkeypatch.setattr(web.results, "protocol_text", lambda pdf: PROTOCOL)
     detail = conn.execute("SELECT detail FROM announcements WHERE id = 7").fetchone()[0]
     web.results.parse_announcement(conn, 7, detail)
     conn.commit()
     _login(client)
-    base = "/?applied=1&deadline_mode=&status="
-    assert "Весы" not in client.get(base + "240").text
-    page = client.get(base + "350").text
+    base = "/lots?applied=1&deadline_mode="
+    assert "Весы" not in client.get(base + "&status=240").text
+    page = client.get(base + "&stage=done").text
     assert "Весы" in page and "🏁" in page and "37 950.00" in page and "−15.7%" in page
     # Разобранный протокол второй раз не качается.
     monkeypatch.setattr(web.results.spec, "download", lambda url: 1 / 0)
@@ -186,3 +187,40 @@ def test_plain_login_without_email_works(client, conn):
         follow_redirects=False,
     )
     assert response.status_code == 303 and "zakup_session" in response.cookies
+
+
+def test_announcements_page_lot_page_and_portal_fields(client, conn):
+    _announcement_with_lots(conn)
+    _login(client)
+    base = "/announcements?applied=1&deadline_mode="
+    page = client.get(base + "&q=канцтовары&number=500-1").text
+    assert "Канцтовары для школы" in page and "Лотов: 2" in page and "Организатор: Школа" in page
+    assert "Канцтовары для школы" not in client.get(base + "&q=мебель").text
+    assert "Канцтовары для школы" not in client.get(base + "&min_sum=2000000").text
+    lots = client.get("/lots?applied=1&deadline_mode=&exclude=ручка&year=2026").text
+    assert "Бумага А4" in lots and "Ручка шариковая" not in lots
+    assert "Бумага А4" not in client.get("/lots?applied=1&deadline_mode=&year=2025").text
+    assert "Бумага А4" in client.get("/lots?applied=1&deadline_mode=&enstru=1712").text
+    lot = client.get("/lots/5001").text
+    assert "Бумага А4" in lot and "/a/500" in lot and "Другие лоты этого объявления (1)" in lot
+    assert "/lots/5002" in lot
+    workbook = client.get("/export.xlsx?applied=1&deadline_mode=")
+    assert workbook.status_code == 200 and workbook.content[:2] == b"PK"
+    assert client.get("/lots/999999").status_code == 404
+
+
+def _announcement_with_lots(conn):
+    db.upsert_announcement(conn, {"id": 500, "number_anno": "500-1", "name_ru": "Канцтовары для школы",
+                                  "total_sum": 1500000, "org_name_ru": "Школа №1",
+                                  "ref_buy_status_id": 240, "end_date": "2099-01-01 09:00:00"})
+    details.save(conn, {
+        "id": 500, "finYear": [2026, 2027], "endDate": "2099-01-01 09:00:00",
+        "Lots": [
+            {"id": 5001, "trdBuyId": 500, "lotNumber": "L-1", "nameRu": "Бумага А4", "amount": 1000000,
+             "count": 100, "Plans": [{"price": 10000, "refEnstruCode": "171211.100.000000"}]},
+            {"id": 5002, "trdBuyId": 500, "lotNumber": "L-2", "nameRu": "Ручка шариковая",
+             "amount": 500000, "count": 1000, "Plans": [{"price": 500}]},
+        ],
+    })
+    conn.execute("UPDATE lots SET status_id = 240")
+    conn.commit()

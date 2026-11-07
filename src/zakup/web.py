@@ -4,6 +4,7 @@
 заводит `zakup set-password`.
 """
 
+import io
 import os
 from contextlib import asynccontextmanager
 from decimal import Decimal, InvalidOperation
@@ -13,20 +14,25 @@ from datetime import UTC, datetime, timedelta
 from urllib.parse import parse_qs, quote, urlencode, urlsplit
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
-from zakup import auth, bot, details, marks, results, spec, telegram
+from zakup import SITE_URL, auth, bot, details, marks, results, spec, telegram
 from zakup.filters import (
     DEADLINE_RULE,
-    GROUP_ORDER_BY,
-    LOT_ORDER_BY,
+    DISABLE_PERSON,
+    METHOD_NAMES,
+    METHODS,
     REGIONS,
-    STATUSES,
+    SORTS,
+    STAGES,
+    STATUS_NAMES,
+    SUBJECTS,
     Filters,
     deadline_by_rule,
+    fin_years,
 )
 from zakup.goszakup import PORTAL_TZ, Client, GoszakupError, parse_date
 from zakup.matcher import PORTAL_ANNOUNCEMENT_URL
@@ -181,12 +187,46 @@ def healthz() -> dict:
 
 
 @app.get("/")
-def search(request: Request, user: User, page: int = 1, hidden: int = 0):
+def home(request: Request, _: User):
+    query = f"?{request.url.query}" if request.url.query else ""
+    return RedirectResponse(f"/lots{query}", status_code=307)
+
+
+def _search_context(request: Request, current: Filters, scope: str, total: int, page: int,
+                    form: dict, now: datetime) -> dict:
+    query = {k: v for k, v in form.items() if k not in ("page", "hidden")}
+    query["applied"] = ["1"]
+    today = now.astimezone(PORTAL_TZ).date()
+    return {
+        "scope": scope,
+        "f": current,
+        "total": total,
+        "page": page,
+        "pages": max((total + PAGE_SIZE - 1) // PAGE_SIZE, 1),
+        "deadline_date": current.deadline_date(today),
+        "rule_date": deadline_by_rule(today),
+        "rule": DEADLINE_RULE,
+        "stages": STAGES,
+        "status_names": STATUS_NAMES,
+        "regions": REGIONS,
+        "methods": METHODS,
+        "method_names": METHOD_NAMES,
+        "subjects": SUBJECTS,
+        "years": fin_years(today),
+        "sorts": SORTS,
+        "disable_options": DISABLE_PERSON,
+        "query": urlencode(query, doseq=True),
+        "here": request.url.path + (f"?{request.url.query}" if request.url.query else ""),
+    }
+
+
+@app.get("/lots")
+def lots_search(request: Request, user: User, page: int = 1, hidden: int = 0):
     form = parse_qs(request.url.query)
     current = Filters.from_form(form)
     page = max(page, 1)
     now = datetime.now(UTC)
-    where, params = current.where(now)
+    where, params = current.where(now, "lots")
     params["user"] = user
     hidden_where = where
     if not hidden:
@@ -194,73 +234,119 @@ def search(request: Request, user: User, page: int = 1, hidden: int = 0):
         where += """ AND NOT EXISTS (SELECT 1 FROM lot_marks m WHERE m.user_id = %(user)s
                                      AND m.lot_id = l.id AND m.status = 'rejected')"""
     with pool.connection() as conn:
-        groups = conn.execute(
-            f"""SELECT a.id, a.number_anno, a.name_ru, a.end_date,
-                       coalesce(a.customer_name_ru, a.org_name_ru), count(*), sum(l.amount),
-                       max(l.prepayment), a.count_lots,
-                       a.detail->'RefBuyStatus'->>'nameRu'
-                FROM lots l, announcements a WHERE {where}
-                GROUP BY a.id ORDER BY {GROUP_ORDER_BY}
-                LIMIT {PAGE_SIZE + 1} OFFSET {(page - 1) * PAGE_SIZE}""",
-            params,
-        ).fetchall()
-        ids = [g[0] for g in groups[:PAGE_SIZE]]
-        lots: dict[int, list] = {}
-        for row in conn.execute(
-            f"""SELECT l.trd_buy_id, l.id, l.lot_number, l.name_ru,
-                       coalesce(l.extra_desc, l.description_ru), l.count, l.unit_name, l.price,
-                       l.amount, l.prepayment, coalesce(nullif(l.kato, '{{}}'), a.kato),
-                       r.outcome, r.winner_name, r.winner_total, jsonb_array_length(r.offers),
-                       r.reason
+        rows = conn.execute(
+            f"""SELECT l.id, l.lot_number, a.id, a.number_anno, a.name_ru,
+                       coalesce(a.customer_name_ru, l.customer_name_ru, a.org_name_ru),
+                       l.name_ru, coalesce(l.extra_desc, l.description_ru), l.count,
+                       l.unit_name, l.price, l.amount, l.prepayment, a.trade_method_id,
+                       l.status_id, a.end_date, coalesce(nullif(l.kato, '{{}}'), a.kato),
+                       r.outcome, r.winner_name, r.winner_total,
+                       jsonb_array_length(r.offers), r.reason
                 FROM lots l JOIN announcements a ON true
                 LEFT JOIN lot_results r ON r.lot_id = l.id
-                WHERE {where} AND a.id = ANY(%(ids)s)
-                ORDER BY {LOT_ORDER_BY}""",
-            {**params, "ids": ids},
-        ):
-            lots.setdefault(row[0], []).append(row)
-        totals = conn.execute(
-            f"SELECT count(DISTINCT a.id), count(*) FROM lots l, announcements a WHERE {where}",
+                WHERE {where} ORDER BY {current.order_by("lots")}
+                LIMIT {PAGE_SIZE} OFFSET {(page - 1) * PAGE_SIZE}""",
             params,
-        ).fetchone()
+        ).fetchall()
+        total = conn.execute(
+            f"SELECT count(*) FROM lots l, announcements a WHERE {where}", params
+        ).fetchone()[0]
         hidden_count = conn.execute(
             f"""SELECT count(*) FROM lots l, announcements a, lot_marks m
                 WHERE {hidden_where} AND m.user_id = %(user)s AND m.lot_id = l.id
                   AND m.status = 'rejected'""",
             params,
         ).fetchone()[0]
-        lot_marks = marks.of_user(conn, user, [row[1] for rows in lots.values() for row in rows])
+        lot_marks = marks.of_user(conn, user, [row[0] for row in rows])
         stats = conn.execute(
             """SELECT (SELECT count(*) FROM announcements WHERE end_date > now()),
                       (SELECT count(*) FROM announcements
                        WHERE end_date > now() AND details_fetched_at IS NULL),
                       (SELECT max(updated_at) FROM sync_state)"""
         ).fetchone()
-    query = {k: v for k, v in form.items() if k not in ("page", "hidden")}
-    query["applied"] = ["1"]
-    today = now.astimezone(PORTAL_TZ).date()
-    return templates.TemplateResponse(
-        request,
-        "search.html",
-        {
-            "groups": groups[:PAGE_SIZE],
-            "lots": lots,
-            "has_next": len(groups) > PAGE_SIZE,
-            "page": page,
-            "f": current,
-            "totals": totals,
-            "deadline_date": current.deadline_date(today),
-            "rule_date": deadline_by_rule(today),
-            "statuses": STATUSES,
-            "regions": REGIONS,
-            "rule": DEADLINE_RULE,
-            "query": urlencode(query, doseq=True),
-            "stats": stats,
-            "marks": lot_marks,
-            "hidden": hidden,
-            "hidden_count": hidden_count,
-            "here": request.url.path + (f"?{request.url.query}" if request.url.query else ""),
-        },
+    context = _search_context(request, current, "lots", total, page, form, now)
+    context.update(rows=rows, marks=lot_marks, hidden=hidden, hidden_count=hidden_count,
+                   stats=stats)
+    return templates.TemplateResponse(request, "lots.html", context)
+
+
+@app.get("/announcements")
+def announcements_search(request: Request, _: User, page: int = 1):
+    form = parse_qs(request.url.query)
+    current = Filters.from_form(form)
+    page = max(page, 1)
+    now = datetime.now(UTC)
+    where, params = current.where(now, "announcements")
+    with pool.connection() as conn:
+        rows = conn.execute(
+            f"""SELECT a.id, a.number_anno,
+                       coalesce(a.count_lots,
+                                (SELECT count(*) FROM lots c WHERE c.trd_buy_id = a.id)),
+                       a.name_ru, coalesce(a.org_name_ru, a.customer_name_ru),
+                       a.trade_method_id, a.start_date, a.end_date, a.total_sum, a.status_id,
+                       a.prepayment_max, a.detail->'RefBuyStatus'->>'nameRu',
+                       a.detail->'RefTradeMethods'->>'nameRu'
+                FROM announcements a WHERE {where} ORDER BY {current.order_by("announcements")}
+                LIMIT {PAGE_SIZE} OFFSET {(page - 1) * PAGE_SIZE}""",
+            params,
+        ).fetchall()
+        total = conn.execute(
+            f"SELECT count(*) FROM announcements a WHERE {where}", params
+        ).fetchone()[0]
+    context = _search_context(request, current, "announcements", total, page, form, now)
+    context.update(rows=rows)
+    return templates.TemplateResponse(request, "announcements.html", context)
+
+
+EXPORT_LIMIT = 10_000
+
+
+@app.get("/export.xlsx")
+def export(request: Request, user: User):
+    from openpyxl import Workbook
+
+    current = Filters.from_form(parse_qs(request.url.query))
+    where, params = current.where(datetime.now(UTC), "lots")
+    with pool.connection() as conn:
+        rows = conn.execute(
+            f"""SELECT a.number_anno, a.name_ru, coalesce(a.customer_name_ru, l.customer_name_ru),
+                       a.detail->'RefBuyStatus'->>'nameRu', a.detail->'RefTradeMethods'->>'nameRu',
+                       a.end_date, l.lot_number, l.name_ru, coalesce(l.extra_desc, l.description_ru),
+                       l.count, l.unit_name, l.price, l.amount, l.prepayment,
+                       coalesce(nullif(l.kato, '{{}}'), a.kato), r.winner_name, r.winner_total,
+                       a.id, l.id
+                FROM lots l JOIN announcements a ON true
+                LEFT JOIN lot_results r ON r.lot_id = l.id
+                WHERE {where}
+                ORDER BY {current.order_by("lots")} LIMIT {EXPORT_LIMIT}""",
+            params,
+        ).fetchall()
+    book = Workbook()
+    sheet = book.active
+    sheet.title = "Лоты"
+    sheet.append(["Объявление", "Название объявления", "Заказчик", "Статус", "Способ",
+                  "Окончание приёма", "Лот", "Наименование лота", "Описание", "Кол-во",
+                  "Ед.", "Цена за ед., ₸", "Сумма, ₸", "Аванс, %", "Место поставки",
+                  "Победитель", "Сумма победителя, ₸", "Ссылка"])
+    for row in rows:
+        end = row[5].astimezone(PORTAL_TZ).replace(tzinfo=None) if row[5] else None
+        sheet.append([row[0], row[1], row[2], row[3], row[4], end, row[6], row[7], row[8],
+                      row[9], row[10], row[11], row[12], row[13],
+                      ", ".join(templates.env.globals["region_names"](row[14])), row[15], row[16],
+                      f"{SITE_URL}/lots/{row[18]}"])
+    for column, width in zip("ABCDEFGHIJKLMNOPQR", (14, 50, 40, 22, 22, 17, 16, 40, 50, 9, 9,
+                                                   14, 15, 9, 24, 36, 16, 40)):
+        sheet.column_dimensions[column].width = width
+    for cell in sheet["F"][1:]:
+        cell.number_format = "dd.mm.yyyy hh:mm"
+    sheet.freeze_panes = "A2"
+    body = io.BytesIO()
+    book.save(body)
+    name = f"zakup-{datetime.now(PORTAL_TZ):%Y-%m-%d-%H%M}.xlsx"
+    return Response(
+        body.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{name}"'},
     )
 
 
@@ -277,6 +363,26 @@ def _goszakup() -> Client:
 
 @app.get("/a/{announcement_id}")
 def announcement(request: Request, user: User, announcement_id: int):
+    context = _announcement_context(request, user, announcement_id)
+    return templates.TemplateResponse(request, "announcement.html", context)
+
+
+@app.get("/lots/{lot_id}")
+def lot_page(request: Request, user: User, lot_id: int):
+    with pool.connection() as conn:
+        row = conn.execute("SELECT trd_buy_id FROM lots WHERE id = %s", (lot_id,)).fetchone()
+    if row is None or row[0] is None:
+        raise HTTPException(404, "Такого лота нет в базе")
+    context = _announcement_context(request, user, row[0])
+    lot = next((lot for lot in context["lots"] if lot["id"] == lot_id), None)
+    if lot is None:
+        raise HTTPException(404, "Лот удалён из объявления")
+    context.update(lot=lot, others=[other for other in context["lots"] if other["id"] != lot_id],
+                   here=request.url.path)
+    return templates.TemplateResponse(request, "lot.html", context)
+
+
+def _announcement_context(request: Request, user: int, announcement_id: int) -> dict:
     with pool.connection() as conn:
         row = conn.execute(
             "SELECT detail, details_fetched_at, end_date FROM announcements WHERE id = %s",
@@ -350,34 +456,31 @@ def announcement(request: Request, user: User, announcement_id: int):
         ).fetchone()[0]
     # Сначала лоты с авансом побольше, дальше по номеру.
     lots.sort(key=lambda lot: (-(info[lot["id"]]["prepayment"] or 0), lot.get("lotNumber") or ""))
-    return templates.TemplateResponse(
-        request,
-        "announcement.html",
-        {
-            "a": detail,
-            "lots": lots,
-            "info": info,
-            "subscribed": subscribed,
-            "marks": lot_marks,
-            "results": lot_results,
-            "contracts": (outcome or {}).get("contracts") or [],
-            "contracts_by_lot": results.contracts_by_lot(outcome),
-            "appeals": (outcome or {}).get("appeals") or [],
-            "results_at": results_at,
-            "now": now,
-            "company_bin": company_bin,
-            "lot_numbers": {lot["id"]: lot.get("lotNumber") for lot in lots},
-            "here": request.url.path,
-            "documents": documents,
-            "protocols": protocols,
-            "end": parse_date(detail.get("endDate")),
-            "dt": parse_date,
-            "fetched_at": fetched_at,
-            "refresh_error": refresh_error,
-            "spec_file": spec.spec_file,
-            "portal_url": PORTAL_ANNOUNCEMENT_URL.format(announcement_id),
-        },
-    )
+    return {
+        "a": detail,
+        "lots": lots,
+        "info": info,
+        "subscribed": subscribed,
+        "marks": lot_marks,
+        "results": lot_results,
+        "contracts": (outcome or {}).get("contracts") or [],
+        "contracts_by_lot": results.contracts_by_lot(outcome),
+        "appeals": (outcome or {}).get("appeals") or [],
+        "results_at": results_at,
+        "now": now,
+        "company_bin": company_bin,
+        "lot_numbers": {lot["id"]: lot.get("lotNumber") for lot in lots},
+        "here": request.url.path,
+        "documents": documents,
+        "protocols": protocols,
+        "end": parse_date(detail.get("endDate")),
+        "dt": parse_date,
+        "fetched_at": fetched_at,
+        "refresh_error": refresh_error,
+        "spec_file": spec.spec_file,
+        "portal_url": PORTAL_ANNOUNCEMENT_URL.format(announcement_id),
+        "status_names": STATUS_NAMES,
+    }
 
 
 @app.get("/a/{announcement_id}/lots/{lot_id}/spec")

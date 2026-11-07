@@ -1,0 +1,156 @@
+{# Форма поиска для страниц «Лоты» и «Объявления». Импортировать with context. #}
+
+{% macro multi(name, options, chosen, all_label="Все") %}
+<details class="multi">
+  <summary>{% set picked = [] %}{% for key, label in options.items() if key in chosen %}{% set _ = picked.append(label) %}{% endfor %}{% if picked %}{{ picked|join(", ") }}{% else %}<span class="muted">{{ all_label }}</span>{% endif %}</summary>
+  <div class="multi-list">
+    {% for key, label in options.items() %}
+    <label class="check"><input type="checkbox" name="{{ name }}" value="{{ key }}" {% if key in chosen %}checked{% endif %}> {{ label }}</label>
+    {% endfor %}
+  </div>
+</details>
+{% endmacro %}
+
+{% macro filter_styles() %}
+  .filters-panel { border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin: 12px 0; }
+  .fgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px 20px; }
+  .fl { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+  .fgrid input:not([type=checkbox]), .fgrid select { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); font: inherit; font-size: 14px; width: 100%; min-width: 0; }
+  .pair { display: flex; gap: 6px; }
+  .check { display: flex; gap: 8px; align-items: flex-start; margin: 4px 0; color: var(--fg); font-size: 14px; }
+  details.multi { position: relative; }
+  details.multi summary { list-style: none; cursor: pointer; padding: 6px 28px 6px 8px; border: 1px solid var(--line); border-radius: 6px; color: var(--fg); font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  details.multi summary::after { content: "▾"; position: absolute; right: 10px; top: 6px; color: var(--muted); }
+  details.multi summary::-webkit-details-marker { display: none; }
+  .multi-list { position: absolute; z-index: 5; left: 0; right: 0; min-width: 260px; max-height: 320px; overflow-y: auto; margin-top: 4px; padding: 8px 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgb(0 0 0 / 14%); }
+  .multi-list h4 { margin: 8px 0 2px; font-size: 12px; color: var(--muted); font-weight: 500; }
+  .panel-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+  .panel-actions select, .panel-actions input { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; font: inherit; }
+  .primary { background: var(--accent); color: #fff; border-color: transparent; font-weight: 600; }
+  .spacer { flex: 1; }
+  .more-fields > summary { cursor: pointer; color: var(--accent); margin-top: 12px; font-size: 14px; }
+  .scope-tabs { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+  .scope-tabs a { padding: 6px 14px; border-radius: 999px; border: 1px solid var(--line); color: inherit; }
+  .scope-tabs a.on { background: var(--accent); color: #fff; border-color: transparent; font-weight: 600; }
+  .pages { display: flex; gap: 12px; align-items: center; margin: 16px 0; }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 13px; white-space: nowrap; border: 1px solid var(--line); }
+  .badge.hot { background: color-mix(in srgb, #1e9e5a 15%, transparent); border-color: transparent; color: #137a43; font-weight: 600; }
+  .badge.sub { background: color-mix(in srgb, var(--accent) 14%, transparent); border-color: transparent; }
+  @media (prefers-color-scheme: dark) { .badge.hot { color: #6fdc9f; } }
+  table.results td { font-size: 14px; }
+  table.results .title { font-weight: 500; }
+{% endmacro %}
+
+{% macro filter_form() %}
+{% set lots = scope == "lots" %}
+<nav class="scope-tabs">
+  <a href="/lots?{{ query }}" class="{{ 'on' if lots }}">Поиск лотов</a>
+  <a href="/announcements?{{ query }}" class="{{ '' if lots else 'on' }}">Поиск объявлений</a>
+</nav>
+<form method="get" action="/{{ scope }}" class="filters-panel">
+  <input type="hidden" name="applied" value="1">
+  <div class="fgrid">
+    <div><label class="fl" for="f-q">{{ "Наименование или описание лота" if lots else "Наименование объявления" }}</label>
+      <input id="f-q" name="q" value="{{ f.q }}" placeholder="стол or стул"></div>
+    <div><label class="fl" for="f-exclude">Исключить слова</label>
+      <input id="f-exclude" name="exclude" value="{{ f.exclude }}" placeholder="аренда, ремонт"></div>
+    <div><label class="fl" for="f-number">Номер объявления</label>
+      <input id="f-number" name="number" value="{{ f.number }}" placeholder="17914810-1"></div>
+    {% if lots %}<div><label class="fl" for="f-lot">Номер лота</label>
+      <input id="f-lot" name="lot_number" value="{{ f.lot_number }}" placeholder="88448423-ЗЦП1"></div>{% endif %}
+    <div><label class="fl" for="f-customer">{{ "Заказчик или организатор" if lots else "Организатор или заказчик" }}</label>
+      <input id="f-customer" name="customer" value="{{ f.customer }}" placeholder="БИН или наименование"></div>
+    <div><span class="fl">Статус</span>
+      <details class="multi">
+        <summary>{% set picked = [] %}{% for k in f.stages %}{% set _ = picked.append(stages[k]) %}{% endfor %}{% for s in f.statuses %}{% set _ = picked.append(status_names.get(s, s)) %}{% endfor %}{% if picked %}{{ picked|join(", ") }}{% else %}<span class="muted">Все статусы</span>{% endif %}</summary>
+        <div class="multi-list">
+          <h4>Этапы</h4>
+          {% for key, label in stages.items() %}
+          <label class="check"><input type="checkbox" name="stage" value="{{ key }}" {% if key in f.stages %}checked{% endif %}> {{ label }}</label>
+          {% endfor %}
+          <h4>Точный статус</h4>
+          {% for key, label in status_names.items() if (lots and key != 350) or (not lots and key not in (360, 370)) %}
+          <label class="check"><input type="checkbox" name="status" value="{{ key }}" {% if key in f.statuses %}checked{% endif %}> {{ label }}</label>
+          {% endfor %}
+        </div>
+      </details></div>
+    <div><span class="fl">Способ закупки</span>
+      {% set method_labels = {} %}{% for k, v in methods.items() %}{% set _ = method_labels.update({k: v[0]}) %}{% endfor %}
+      {{ multi("method", method_labels, f.methods, "Все способы") }}</div>
+    <div><span class="fl">Место поставки</span>
+      {{ multi("region", regions, f.regions, "Весь Казахстан") }}</div>
+    <div><span class="fl">Предмет закупки</span>
+      {{ multi("subject", subjects, f.subjects, "Товары, работы, услуги") }}</div>
+    <div><label class="fl" for="f-disable">Признаки: организации инвалидов</label>
+      <select id="f-disable" name="disable_person">{% for key, name in disable_options.items() %}<option value="{{ key }}" {% if f.disable_person == key %}selected{% endif %}>{{ name }}</option>{% endfor %}</select></div>
+    <div><span class="fl">Сумма {{ "лота" if lots else "закупки" }}, ₸, с — по</span>
+      <div class="pair">
+        <input name="min_sum" value="{{ '%.0f'|format(f.min_sum) if f.min_sum is not none else '' }}" placeholder="с" inputmode="numeric" aria-label="Сумма с">
+        <input name="max_sum" value="{{ '%.0f'|format(f.max_sum) if f.max_sum is not none else '' }}" placeholder="по" inputmode="numeric" aria-label="Сумма по">
+      </div></div>
+    <div><label class="fl" for="f-deadline">Окончание приема заявок по</label>
+      <select id="f-deadline" name="deadline_mode">
+        <option value="rule" {% if f.deadline == rule %}selected{% endif %}>через 2 дня, в выходные — вторник ({{ rule_date.strftime("%d.%m") }})</option>
+        <option value="date" {% if f.deadline and f.deadline != rule %}selected{% endif %}>по дате (поле ниже)</option>
+        <option value="" {% if not f.deadline %}selected{% endif %}>без ограничения</option>
+      </select></div>
+    <div><span class="fl">Окончание приема заявок с — по</span>
+      <div class="pair">
+        <input type="date" name="end_from" value="{{ f.end_from }}" aria-label="Окончание с">
+        <input type="date" name="deadline_date" value="{{ f.deadline if f.deadline and f.deadline != rule else '' }}" aria-label="Окончание по">
+      </div></div>
+    {% if lots %}<div><span class="fl">Аванс</span>
+      <label class="check"><input type="checkbox" name="advance_only" value="1" {% if f.advance_only %}checked{% endif %}> Только лоты с авансом</label></div>{% endif %}
+  </div>
+  {% set extra = f.start_from or f.start_to or f.itogi_from or f.itogi_to or f.published_from or f.published_to or f.years or f.enstru %}
+  <details class="more-fields" {% if extra %}open{% endif %}>
+    <summary>Ещё поля: начало приёма, протокол итогов, публикация, финансовый год{% if lots %}, ЕНС ТРУ{% endif %}</summary>
+    <div class="fgrid" style="margin-top:10px">
+      <div><span class="fl">Начало приема заявок с — по</span>
+        <div class="pair"><input type="date" name="start_from" value="{{ f.start_from }}" aria-label="Начало с"><input type="date" name="start_to" value="{{ f.start_to }}" aria-label="Начало по"></div></div>
+      <div><span class="fl">Протокол итогов с — по</span>
+        <div class="pair"><input type="date" name="itogi_from" value="{{ f.itogi_from }}" aria-label="Протокол итогов с"><input type="date" name="itogi_to" value="{{ f.itogi_to }}" aria-label="Протокол итогов по"></div></div>
+      <div><span class="fl">Дата публикации с — по</span>
+        <div class="pair"><input type="date" name="published_from" value="{{ f.published_from }}" aria-label="Публикация с"><input type="date" name="published_to" value="{{ f.published_to }}" aria-label="Публикация по"></div></div>
+      <div><span class="fl">Финансовый год</span>
+        {% set year_labels = {} %}{% for y in years %}{% set _ = year_labels.update({y: y|string}) %}{% endfor %}
+        {{ multi("year", year_labels, f.years, "Любой") }}</div>
+      {% if lots %}<div><label class="fl" for="f-enstru">ЕНС ТРУ</label>
+        <input id="f-enstru" name="enstru" value="{{ f.enstru }}" placeholder="код или его начало"></div>{% endif %}
+    </div>
+  </details>
+  <div class="panel-actions">
+    <button class="primary">Найти</button>
+    <a href="/{{ scope }}">Сбросить</a>
+    <label class="muted">Сортировка <select name="sort" onchange="this.form.submit()">
+      {% for key, name in sorts.items() %}<option value="{{ key }}" {% if f.sort == key %}selected{% endif %}>{{ name }}</option>{% endfor %}
+    </select></label>
+    {% if lots %}
+    <button formaction="/export.xlsx" title="Все найденные лоты в Excel">Excel</button>
+    <span class="spacer"></span>
+    <input name="name" placeholder="Название подписки" size="18" aria-label="Название подписки">
+    <button formmethod="post" formaction="/subscriptions/filter">Сохранить как подписку</button>
+    {% endif %}
+  </div>
+</form>
+<script>
+  // Выпадающие списки: клик мимо — закрыть.
+  document.addEventListener("click", (event) => {
+    for (const d of document.querySelectorAll("details.multi[open]")) if (!d.contains(event.target)) d.open = false;
+  });
+  const mode = document.querySelector("[name=deadline_mode]");
+  const until = document.querySelector("[name=deadline_date]");
+  mode.addEventListener("change", () => { if (mode.value !== "date") until.value = ""; else until.focus(); });
+  until.addEventListener("change", () => { if (until.value) mode.value = "date"; });
+</script>
+{% endmacro %}
+
+{% macro pager() %}
+{% if pages > 1 %}
+<nav class="pages">
+  {% if page > 1 %}<a href="?{{ query }}&page={{ page - 1 }}{% if hidden %}&hidden=1{% endif %}">← назад</a>{% endif %}
+  <span class="muted">страница {{ page }} из {{ pages }}</span>
+  {% if page < pages %}<a href="?{{ query }}&page={{ page + 1 }}{% if hidden %}&hidden=1{% endif %}">дальше →</a>{% endif %}
+</nav>
+{% endif %}
+{% endmacro %}
