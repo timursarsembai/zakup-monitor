@@ -408,9 +408,12 @@ def test_dashboard_is_home(client, conn):
     _login(client)
     page = client.get("/")
     assert page.status_code == 200
-    for text in ("Обзор", "лотов под ваш фильтр", "Мои лоты", "Мои подписки", "Новые объявления по дням",
-                 "Регионы", "Способы закупки"):
+    for text in ("Обзор рынка", "Новые объявления по дням", "По дням недели", "Регионы", "Способы закупки",
+                 "Самые дорогие открытые лоты", "Чаще всех побеждают", "Самые частые закупки"):
         assert text in page.text, text
+    # Только общая аналитика, без личных блоков.
+    for text in ("лотов под ваш фильтр", "Мои подписки", "Сроки по вашему фильтру"):
+        assert text not in page.text, text
     assert client.get("/?applied=1", follow_redirects=False).headers["location"] == "/announcements?applied=1"
 
 

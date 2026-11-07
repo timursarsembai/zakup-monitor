@@ -1,23 +1,30 @@
 {% extends "base.html" %}
+{% macro num(v) %}{{ "{:,}".format(v | int).replace(",", " ") }}{% endmacro %}
+{% macro big(v) %}{% set v = v | float %}{% if v >= 1e9 %}{{ (v / 1e9) | round(1) }} {{ _("млрд ₸") }}{% elif v >= 1e6 %}{{ (v / 1e6) | round(1) }} {{ _("млн ₸") }}{% else %}{{ num(v) }} ₸{% endif %}{% endmacro %}
+{% macro pct(v) %}{% if v is not none %}{{ ((v | float) * 100) | round | int }}%{% else %}—{% endif %}{% endmacro %}
 {% block title %}{{ _("Обзор") }}{% endblock %}
 {% block style %}
   h1 { font-size: 22px; margin: 6px 0 4px; }
-  h2 { font-size: 16px; margin: 0 0 10px; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; margin-top: 14px; }
+  h2 { font-size: 16px; margin: 0 0 4px; }
+  .card > .muted:first-of-type { margin: 0 0 10px; }
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin: 12px 0 4px; overflow-x: auto; scrollbar-width: thin; }
+  .tabs a { padding: 9px 14px; border-bottom: 2px solid transparent; color: var(--muted); white-space: nowrap; }
+  .tabs a[aria-selected=true] { color: var(--fg); border-bottom-color: var(--accent); font-weight: 600; }
+  [data-tab-panel][hidden] { display: none; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 14px; margin-top: 14px; }
   .card { border: 1px solid var(--line); border-radius: 12px; padding: 16px; min-width: 0; }
-  .card.wide { grid-column: span 2; }
-  .kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; margin-top: 14px; }
-  .kpi { border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; color: inherit; display: block; }
-  a.kpi:hover { border-color: var(--accent); }
+  .card.wide { grid-column: 1 / -1; }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; margin-top: 14px; }
+  .kpi { border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
   .kpi b { display: block; font-size: 26px; line-height: 1.2; font-variant-numeric: tabular-nums; }
   .kpi span { font-size: 13px; color: var(--muted); }
-  .kpi.accent { background: color-mix(in srgb, var(--accent) 12%, transparent); border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
-  .bars { display: flex; align-items: flex-end; gap: 4px; height: 120px; margin-top: 8px; }
+  .bars { display: flex; align-items: flex-end; gap: 4px; height: 130px; margin-top: 8px; }
   .bars div { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; min-width: 0; height: 100%; }
   .bars i { display: block; width: 100%; background: var(--accent); border-radius: 4px 4px 0 0; min-height: 2px; }
-  .bars i.weekend { opacity: .35; }
-  .bars small { font-size: 11px; color: var(--muted); margin-top: 4px; white-space: nowrap; }
-  .hbar { display: grid; grid-template-columns: minmax(0, 150px) minmax(0, 1fr) auto; gap: 8px; align-items: center; margin: 6px 0; font-size: 14px; }
+  .bars i.dim { opacity: .35; }
+  .bars small { font-size: 11px; color: var(--muted); margin-top: 4px; white-space: nowrap; text-align: center; line-height: 1.25; }
+  .bars em { font-style: normal; font-size: 11px; margin-bottom: 2px; font-variant-numeric: tabular-nums; }
+  .hbar { display: grid; grid-template-columns: minmax(0, 170px) minmax(0, 1fr) auto; gap: 8px; align-items: center; margin: 6px 0; font-size: 14px; }
   .hbar .track { height: 8px; background: color-mix(in srgb, var(--fg) 8%, transparent); border-radius: 4px; overflow: hidden; }
   .hbar .track i { display: block; height: 100%; background: var(--accent); }
   .hbar .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -25,105 +32,249 @@
   .list li { padding: 8px 0; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; gap: 12px; }
   .list li:last-child { border-bottom: 0; }
   .num { font-variant-numeric: tabular-nums; white-space: nowrap; }
-  .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; border: 1px solid var(--line); }
-  .badge.hot { background: color-mix(in srgb, #1e9e5a 15%, transparent); border-color: transparent; color: var(--ok); font-weight: 600; }
-  .urgent { color: var(--bad); font-weight: 600; }
-  .marks { display: flex; flex-wrap: wrap; gap: 8px; }
-  .marks a { padding: 6px 12px; border: 1px solid var(--line); border-radius: 999px; color: inherit; }
-  .marks a b { margin-left: 4px; }
-  @media (max-width: 700px) { .card.wide { grid-column: auto; } .bars small { font-size: 9px; } }
+  .scroll { overflow-x: auto; }
+  table.stats { width: 100%; border-collapse: collapse; font-size: 14px; }
+  table.stats th, table.stats td { padding: 7px 8px; border-bottom: 1px solid var(--line); text-align: right; vertical-align: top; }
+  table.stats th:first-child, table.stats td:first-child, table.stats td.text { text-align: left; }
+  table.stats td.text { min-width: 220px; }
+  table.stats td.rank { color: var(--muted); width: 1%; }
+  @media (max-width: 700px) {
+    .bars small, .bars em { font-size: 9px; } .bars { gap: 2px; }
+    .grid { grid-template-columns: minmax(0, 1fr); }
+    .kpis { grid-template-columns: 1fr 1fr; gap: 8px; } .kpi { padding: 10px 12px; } .kpi b { font-size: 21px; }
+  }
 {% endblock %}
 {% block main %}
-<h1>{{ _("Обзор") }}</h1>
-<p class="muted">{{ _("Данные обновлены") }} {{ (m.freshness[0]|local).strftime("%d.%m %H:%M") if m.freshness[0] else "—" }} {{ _("· обзор рынка пересчитывается раз в 5 минут.") }}</p>
+<h1>{{ _("Обзор рынка госзакупок") }}</h1>
+<p class="muted">{{ _("По данным портала goszakup.gov.kz в нашей базе с") }} {{ m.since.strftime("%d.%m.%Y") if m.since else "—" }}. {{ _("Обновлено") }} {{ (m.freshness[0]|local).strftime("%d.%m %H:%M") if m.freshness[0] else "—" }}{{ _(", цифры пересчитываются раз в 5 минут.") }}</p>
 
-<div class="kpis">
-  <a class="kpi accent" href="/lots"><b>{{ m.default_now[0] }}</b><span>{{ _("лотов под ваш фильтр сейчас (окончание") }} {{ m.rule_day.strftime("%d.%m") }})</span></a>
-  <a class="kpi" href="/announcements?applied=1&deadline_mode=&stage=open&disable_person=&advance_min=0"><b>{{ "{:,}".format(m.open[0]).replace(",", " ") }}</b><span>{{ _("открытых объявлений ·") }} {{ ((m.open[1] | float) / 1e9) | round(1) }} {{ _("млрд ₸") }}</span></a>
-  <div class="kpi"><b>{{ "{:,}".format(m.open_lots[0]).replace(",", " ") }}</b><span>{{ _("открытых лотов, с авансом") }} {{ (m.open_lots[1] / (m.open_lots[0] or 1) * 100) | round | int }}{{ _("%, от 30% —") }} {{ (m.open_lots[2] / (m.open_lots[0] or 1) * 100) | round | int }}%</span></div>
-  <div class="kpi"><b>{{ "{:,}".format(m.open_lots[3]).replace(",", " ") }}</b><span>{{ _("лотов среди организаций инвалидов") }}</span></div>
-  <div class="kpi"><b>{% if m.results[2] is not none %}{{ ((m.results[2] | float) * 100) | round(1) }}%{% else %}—{% endif %}</b><span>{{ _("медианное снижение цены победителем (итоги за 30 дней,") }} {{ m.results[0] }} {{ _("лотов)") }}</span></div>
-  <div class="kpi"><b>{% if m.lot_outcomes[0] + m.lot_outcomes[1] %}{{ (m.lot_outcomes[1] / (m.lot_outcomes[0] + m.lot_outcomes[1]) * 100) | round | int }}%{% else %}—{% endif %}</b><span>{{ _("лотов не состоялись за неделю (нет или одно предложение)") }}</span></div>
-</div>
+<nav class="tabs" role="tablist">
+  <a href="#now" role="tab" data-tab="now">{{ _("Сейчас") }}</a>
+  <a href="#dynamics" role="tab" data-tab="dynamics">{{ _("Динамика") }}</a>
+  <a href="#regions" role="tab" data-tab="regions">{{ _("Регионы") }}</a>
+  <a href="#top" role="tab" data-tab="top">{{ _("Крупнейшие") }}</a>
+  <a href="#competition" role="tab" data-tab="competition">{{ _("Конкуренция") }}</a>
+  <a href="#demand" role="tab" data-tab="demand">{{ _("Что покупают") }}</a>
+</nav>
 
-<div class="grid">
-  <section class="card">
-    <h2>{{ _("Мои лоты") }}</h2>
-    <p><a href="/my">♥ {{ _("В избранном:") }} <b>{{ p.marks.get("interested", 0) }}</b></a></p>
-    {% if not p.marks %}<p class="muted">{{ _("Нажмите ♡ «В избранное» у лота — он появится здесь.") }}</p>{% endif %}
-    {% if p.upcoming %}
-    <h2 style="margin-top:14px">{{ _("Ближайшие сроки") }}</h2>
-    <ul class="list">
-      {% for l in p.upcoming %}
-      {% set left = (l[4] - now).total_seconds() %}
-      <li><span><a href="/lots/{{ l[0] }}">{{ l[1] or "—" }}</a> </span>
-        <span class="num {{ 'urgent' if left < 86400 }}">{{ time_left(l[4]) }}</span></li>
+{# ---------- Сейчас ---------- #}
+<div data-tab-panel="now">
+  {% set lots = m.open_lots %}
+  <div class="kpis">
+    <div class="kpi"><b>{{ num(m.open[0]) }}</b><span>{{ _("открытых объявлений на") }} {{ big(m.open[1]) }}</span></div>
+    <div class="kpi"><b>{{ num(lots[0]) }}</b><span>{{ _("открытых лотов, медианный лот —") }} {{ big(lots[5] or 0) }}</span></div>
+    <div class="kpi"><b>{{ pct(lots[2] / (lots[0] or 1)) }}</b><span>{{ _("лотов с авансом; от 30% —") }} {{ pct(lots[3] / (lots[0] or 1)) }}</span></div>
+    <div class="kpi"><b>{{ num(lots[4]) }}</b><span>{{ _("лотов только для организаций инвалидов") }}</span></div>
+    <div class="kpi"><b>{{ pct(m.results[2]) }}</b><span>{{ _("медианное снижение цены на торгах") }}</span></div>
+    <div class="kpi"><b>{{ pct(m.results[1] / ((m.results[0] + m.results[1]) or 1)) }}</b><span>{{ _("лотов не состоялись (нет заявок или одна)") }}</span></div>
+  </div>
+  <div class="grid">
+    <section class="card">
+      <h2>{{ _("Товары, работы, услуги") }}</h2>
+      <p class="muted">{{ _("Открытые объявления по предмету закупки.") }}</p>
+      {% set total = m.open[1] | float or 1 %}
+      {% for name, count, sum in m.subjects %}
+      <div class="hbar"><span class="name">{{ _(name) }}</span><span class="track"><i style="width: {{ ((sum | float) / total * 100) | round(1) }}%"></i></span><span class="num muted">{{ big(sum) }} · {{ num(count) }}</span></div>
       {% endfor %}
-    </ul>
-    {% endif %}
-  </section>
-
-  <section class="card">
-    <h2>{{ _("Мои подписки") }}</h2>
-    {% if p.subscriptions %}
-    <ul class="list">
-      {% for s in p.subscriptions %}
-      <li><a href="/matches?filtered=1&sub={{ s[0] }}">{{ s[1] }}</a>{% if not s[2] %} <span class="muted">{{ _("выкл.") }}</span>{% endif %}
-        <span class="num muted">{{ _("за сутки") }} <b>{{ s[3] }}</b> {{ _("· за неделю") }} {{ s[4] }}</span></li>
-      {% endfor %}
-    </ul>
-    {% else %}<p class="muted">{{ _("Подписок нет. Задайте поиск и нажмите «Подписаться на этот поиск».") }}</p>{% endif %}
-  </section>
-
-  <section class="card">
-    <h2>{{ _("Сроки по вашему фильтру") }}</h2>
-    <p class="muted">{{ _("Лоты под фильтр по умолчанию — по дню окончания приёма.") }}</p>
-    {% if m.deadlines %}
-    <ul class="list">
-      {% for d, count, total in m.deadlines %}
-      <li><span>{{ d.strftime("%d.%m") }}, {{ _(["пн", "вт", "ср", "чт", "пт", "сб", "вс"][d.weekday()]) }}{% if d == m.rule_day %} <span class="badge hot">{{ _("через 2 рабочих дня") }}</span>{% endif %}</span>
-        <span class="num"><a href="/lots?applied=1&deadline_mode=date&deadline_date={{ d.isoformat() }}&end_from={{ d.isoformat() }}&status=240&disable_person=only&region=75&region=19&min_sum=300000&advance_min=30">{{ count }} {{ _("лот.") }}</a> · {{ total | money }} ₸</span></li>
-      {% endfor %}
-    </ul>
-    {% else %}<p class="muted">{{ _("В ближайшую неделю ничего не заканчивается.") }}</p>{% endif %}
-  </section>
-
-  <section class="card wide">
-    <h2>{{ _("Новые объявления по дням") }}</h2>
-    <div class="bars" role="img" aria-label="{{ _("Число опубликованных объявлений за 14 дней") }}">
-      {% for d, count, total in m.days %}
-      <div title="{{ d.strftime('%d.%m') }}: {{ count }} {{ _("объявлений") }}, {{ total | money }} ₸">
-        <i class="{{ 'weekend' if d.weekday() >= 5 }}" style="height: {{ (count / m.days_max * 100) | round(1) }}%"></i>
-        <small>{{ d.strftime("%d.%m") }}</small>
+    </section>
+    <section class="card">
+      <h2>{{ _("Способы закупки") }}</h2>
+      <p class="muted">{{ _("Открытые объявления; срок — сколько дней в среднем даётся на подачу заявок.") }}</p>
+      <div class="scroll"><table class="stats">
+        <tr><th>{{ _("Способ") }}</th><th>{{ _("Объявл.") }}</th><th>{{ _("Сумма") }}</th><th>{{ _("Срок") }}</th></tr>
+        {% for name, count, sum, days in m.methods %}
+        <tr><td>{{ _(name) }}</td><td class="num">{{ num(count) }}</td><td class="num">{{ big(sum) }}</td><td class="num">{{ days | round(1) }} {{ _("дн.") }}</td></tr>
+        {% endfor %}
+      </table></div>
+    </section>
+    <section class="card wide">
+      <h2>{{ _("Когда заканчивается приём заявок") }}</h2>
+      <p class="muted">{{ _("Открытые лоты по дню окончания приёма, ближайшие 8 дней.") }}</p>
+      <div class="bars" role="img" aria-label="{{ _("Число лотов по дню окончания приёма") }}">
+        {% for d, count in m.ending %}
+        <div title="{{ d.strftime('%d.%m') }}: {{ count }}"><em>{{ count }}</em>
+          <i class="{{ 'dim' if d.weekday() >= 5 }}" style="height: {{ (count / m.ending_max * 100) | round(1) }}%"></i>
+          <small>{{ d.strftime("%d.%m") }}<br>{{ _(["пн", "вт", "ср", "чт", "пт", "сб", "вс"][d.weekday()]) }}</small></div>
+        {% endfor %}
       </div>
+    </section>
+  </div>
+</div>
+
+{# ---------- Динамика ---------- #}
+<div data-tab-panel="dynamics" hidden>
+  <div class="grid">
+    <section class="card wide">
+      <h2>{{ _("Новые объявления по дням") }}</h2>
+      <p class="muted">{{ _("Опубликовано за последние 14 дней; выходные — бледнее.") }}</p>
+      <div class="bars" role="img" aria-label="{{ _("Число опубликованных объявлений за 14 дней") }}">
+        {% for d, count, total in m.days %}
+        <div title="{{ d.strftime('%d.%m') }}: {{ count }} {{ _("объявлений") }}, {{ big(total) }}"><em>{{ count }}</em>
+          <i class="{{ 'dim' if d.weekday() >= 5 }}" style="height: {{ (count / m.days_max * 100) | round(1) }}%"></i>
+          <small>{{ d.strftime("%d.%m") }}</small></div>
+        {% endfor %}
+      </div>
+    </section>
+    <section class="card">
+      <h2>{{ _("По дням недели") }}</h2>
+      <p class="muted">{{ _("Сколько объявлений в среднем публикуют в такой день.") }}</p>
+      <div class="bars">
+        {% for d, count, total in m.weekdays %}
+        <div title="{{ big(total) }}"><em>{{ count | round | int }}</em>
+          <i class="{{ 'dim' if d >= 6 }}" style="height: {{ (count / m.weekdays_max * 100) | round(1) }}%"></i>
+          <small>{{ _(["пн", "вт", "ср", "чт", "пт", "сб", "вс"][d - 1]) }}</small></div>
+        {% endfor %}
+      </div>
+    </section>
+    <section class="card">
+      <h2>{{ _("По часам публикации") }}</h2>
+      <p class="muted">{{ _("Время Алматы, последние 4 недели. Больше всего — к концу рабочего дня.") }}</p>
+      <div class="bars">
+        {% for h, count in m.hours %}
+        <div title="{{ h }}:00 — {{ count }}"><i class="{{ 'dim' if h < 8 or h > 19 }}" style="height: {{ (count / m.hours_max * 100) | round(1) }}%"></i>
+          <small>{{ h if h % 3 == 0 else "&nbsp;" | safe }}</small></div>
+        {% endfor %}
+      </div>
+    </section>
+  </div>
+</div>
+
+{# ---------- Регионы ---------- #}
+<div data-tab-panel="regions" hidden>
+  <section class="card" style="margin-top:14px">
+    <h2>{{ _("Регионы: открытые лоты и итоги") }}</h2>
+    <p class="muted">{{ _("По месту поставки. Итоги — разобранные протоколы: среднее число заявок у лотов с победителем и доля несостоявшихся.") }}</p>
+    <div class="scroll"><table class="stats">
+      <tr><th>{{ _("Регион") }}</th><th>{{ _("Сумма лотов") }}</th><th>{{ _("Лотов") }}</th><th>{{ _("Средний лот") }}</th><th>{{ _("С авансом") }}</th><th>{{ _("Заявок на лот") }}</th><th>{{ _("Не состоялись") }}</th></tr>
+      {% for name, count, total, avg, advance, won, failed, offers in m.regions %}
+      <tr><td><div class="hbar" style="margin:0;grid-template-columns:minmax(0,170px) 80px"><span class="name">{{ _(name) }}</span><span class="track"><i style="width: {{ ((total | float) / (m.regions_max | float) * 100) | round(1) }}%"></i></span></div></td>
+        <td class="num">{{ big(total) }}</td><td class="num">{{ num(count) }}</td><td class="num">{{ big(avg) }}</td>
+        <td class="num">{{ pct(advance) }}</td><td class="num">{{ (offers | float) | round(1) if offers is not none else "—" }}</td>
+        <td class="num">{{ pct(failed / (won + failed)) if won + failed else "—" }}</td></tr>
       {% endfor %}
-    </div>
-    <p class="muted" style="margin-top:8px">{{ _("История в базе — с 30 октября; в выходные госорганы почти не публикуют.") }}</p>
-  </section>
-
-  <section class="card">
-    <h2>{{ _("Регионы: открытые лоты") }}</h2>
-    {% for name, count, total in m.regions %}
-    <div class="hbar"><span class="name">{{ _(name) }}</span><span class="track"><i style="width: {{ (count / m.regions_max * 100) | round(1) }}%"></i></span><span class="num muted">{{ count }}</span></div>
-    {% endfor %}
-  </section>
-
-  <section class="card">
-    <h2>{{ _("Способы закупки: открытые") }}</h2>
-    <ul class="list">
-      {% for name, count, total in m.methods %}
-      <li><span>{{ _(name) }}</span><span class="num">{{ count }} · <span class="muted">{{ ((total | float) / 1e6) | round(1) }} {{ _("млн ₸") }}</span></span></li>
-      {% endfor %}
-    </ul>
-  </section>
-
-  <section class="card">
-    <h2>{{ _("Данные") }}</h2>
-    <ul class="list">
-      <li><span>{{ _("Последнее обновление с портала") }}</span><span class="num">{{ (m.freshness[0]|local).strftime("%d.%m %H:%M") if m.freshness[0] else "—" }}</span></li>
-      <li><span>{{ _("Техспецификации открытых лотов в базе") }}</span><span class="num">{{ m.freshness[2] }} {{ _("из") }} {{ m.freshness[1] }}</span></li>
-      <li><span>{{ _("Итогов разобрано за 30 дней") }}</span><span class="num">{{ m.results[0] + m.results[1] }}</span></li>
-    </ul>
+    </table></div>
   </section>
 </div>
+
+{# ---------- Крупнейшие ---------- #}
+<div data-tab-panel="top" hidden>
+  <div class="grid">
+    <section class="card wide">
+      <h2>{{ _("Самые дорогие открытые лоты") }}</h2>
+      <div class="scroll"><table class="stats">
+        <tr><th></th><th style="text-align:left">{{ _("Лот") }}</th><th style="text-align:left">{{ _("Заказчик") }}</th><th>{{ _("Сумма") }}</th><th>{{ _("Аванс") }}</th><th>{{ _("Приём до") }}</th></tr>
+        {% for id, ru, kk, amount, customer, end, advance in m.top_lots %}
+        <tr><td class="rank">{{ loop.index }}</td><td class="text"><a href="/lots/{{ id }}">{{ pick(ru, kk) or "—" }}</a></td><td class="text muted">{{ customer or "—" }}</td>
+          <td class="num">{{ big(amount or 0) }}</td><td class="num">{{ (advance | int) ~ "%" if advance else "—" }}</td><td class="num">{{ (end|local).strftime("%d.%m") if end else "—" }}</td></tr>
+        {% endfor %}
+      </table></div>
+    </section>
+    <section class="card wide">
+      <h2>{{ _("Крупнейшие открытые объявления") }}</h2>
+      <div class="scroll"><table class="stats">
+        <tr><th></th><th style="text-align:left">{{ _("Объявление") }}</th><th style="text-align:left">{{ _("Заказчик") }}</th><th>{{ _("Лотов") }}</th><th>{{ _("Сумма") }}</th><th>{{ _("Приём до") }}</th></tr>
+        {% for id, ru, kk, total, lots_n, customer, end in m.top_announcements %}
+        <tr><td class="rank">{{ loop.index }}</td><td class="text"><a href="/a/{{ id }}">{{ pick(ru, kk) or "—" }}</a></td><td class="text muted">{{ customer or "—" }}</td>
+          <td class="num">{{ lots_n or "—" }}</td><td class="num">{{ big(total or 0) }}</td><td class="num">{{ (end|local).strftime("%d.%m") if end else "—" }}</td></tr>
+        {% endfor %}
+      </table></div>
+    </section>
+    <section class="card wide">
+      <h2>{{ _("Крупнейшие заказчики сейчас") }}</h2>
+      <p class="muted">{{ _("По сумме открытых лотов.") }}</p>
+      <div class="scroll"><table class="stats">
+        <tr><th></th><th style="text-align:left">{{ _("Заказчик") }}</th><th>{{ _("Объявл.") }}</th><th>{{ _("Лотов") }}</th><th>{{ _("Сумма") }}</th></tr>
+        {% for customer, anns, lots_n, total in m.top_customers %}
+        <tr><td class="rank">{{ loop.index }}</td><td class="text"><a href="/lots?applied=1&stage=open&customer={{ customer | urlencode }}">{{ customer }}</a></td>
+          <td class="num">{{ anns }}</td><td class="num">{{ lots_n }}</td><td class="num">{{ big(total or 0) }}</td></tr>
+        {% endfor %}
+      </table></div>
+    </section>
+  </div>
+</div>
+
+{# ---------- Конкуренция ---------- #}
+<div data-tab-panel="competition" hidden>
+  {% set r = m.results %}
+  <div class="kpis">
+    <div class="kpi"><b>{{ num(r[0] + r[1]) }}</b><span>{{ _("лотов с разобранными итогами") }}</span></div>
+    <div class="kpi"><b>{{ (r[3] | float) | round(1) if r[3] is not none else "—" }}</b><span>{{ _("заявок в среднем на лот с победителем") }}</span></div>
+    <div class="kpi"><b>{{ pct(r[2]) }}</b><span>{{ _("медианное снижение от выделенной суммы") }}</span></div>
+    <div class="kpi"><b>{{ big(r[4]) }}</b><span>{{ _("сэкономлено бюджета на торгах") }}</span></div>
+  </div>
+  <div class="grid">
+    <section class="card">
+      <h2>{{ _("Сколько заявок подают") }}</h2>
+      <p class="muted">{{ _("Лоты с победителем по числу ценовых предложений. «1» — победил единственный участник.") }}</p>
+      <div class="bars">
+        {% for n, count in m.offers %}
+        <div><em>{{ count }}</em><i style="height: {{ (count / m.offers_max * 100) | round(1) }}%"></i><small>{{ n }}{{ "+" if n == 6 }}</small></div>
+        {% endfor %}
+      </div>
+    </section>
+    <section class="card">
+      <h2>{{ _("Почему закупки не состоялись") }}</h2>
+      <ul class="list">
+        {% for reason, count in m.fail_reasons %}
+        <li><span>{{ _(reason) }}</span><span class="num">{{ num(count) }}</span></li>
+        {% else %}<li class="muted">{{ _("Пока нет данных.") }}</li>{% endfor %}
+      </ul>
+      <h2 style="margin-top:16px">{{ _("Снижение цены по способам") }}</h2>
+      <ul class="list">
+        {% for name, count, discount in m.discount_by_method %}
+        <li><span>{{ _(name) }} <span class="muted">· {{ count }} {{ _("лот.") }}</span></span><span class="num">{{ pct(discount) }}</span></li>
+        {% endfor %}
+      </ul>
+    </section>
+    <section class="card wide">
+      <h2>{{ _("Чаще всех побеждают") }}</h2>
+      <p class="muted">{{ _("Поставщики по числу выигранных лотов в разобранных протоколах.") }}</p>
+      <div class="scroll"><table class="stats">
+        <tr><th></th><th style="text-align:left">{{ _("Поставщик") }}</th><th>{{ _("Побед") }}</th><th>{{ _("Сумма договоров") }}</th></tr>
+        {% for name, wins, total in m.top_winners %}
+        <tr><td class="rank">{{ loop.index }}</td><td class="text">{{ name }}</td><td class="num">{{ wins }}</td><td class="num">{{ big(total or 0) }}</td></tr>
+        {% endfor %}
+      </table></div>
+    </section>
+  </div>
+</div>
+
+{# ---------- Что покупают ---------- #}
+<div data-tab-panel="demand" hidden>
+  <div class="grid">
+    <section class="card">
+      <h2>{{ _("Самые частые закупки") }}</h2>
+      <p class="muted">{{ _("Лоты за 14 дней с одинаковым названием.") }}</p>
+      <div class="scroll"><table class="stats">
+        <tr><th style="text-align:left">{{ _("Что") }}</th><th>{{ _("Лотов") }}</th><th>{{ _("Заказчиков") }}</th><th>{{ _("Сумма") }}</th></tr>
+        {% for ru, kk, count, total, customers in m.top_names %}
+        <tr><td class="text"><a href="/lots?applied=1&q={{ ru | urlencode }}">{{ pick(ru, kk) }}</a></td><td class="num">{{ num(count) }}</td><td class="num">{{ customers }}</td><td class="num">{{ big(total or 0) }}</td></tr>
+        {% endfor %}
+      </table></div>
+    </section>
+    <section class="card">
+      <h2>{{ _("На что тратят больше всего") }}</h2>
+      <p class="muted">{{ _("Лоты за 14 дней по сумме.") }}</p>
+      <div class="scroll"><table class="stats">
+        <tr><th style="text-align:left">{{ _("Что") }}</th><th>{{ _("Лотов") }}</th><th>{{ _("Сумма") }}</th></tr>
+        {% for ru, kk, count, total in m.top_names_sum %}
+        <tr><td class="text"><a href="/lots?applied=1&q={{ ru | urlencode }}">{{ pick(ru, kk) }}</a></td><td class="num">{{ num(count) }}</td><td class="num">{{ big(total or 0) }}</td></tr>
+        {% endfor %}
+      </table></div>
+    </section>
+  </div>
+</div>
+
+<script>
+  const tabs = [...document.querySelectorAll("[data-tab]")];
+  const showTab = (name) => {
+    if (!tabs.some((t) => t.dataset.tab === name)) name = tabs[0].dataset.tab;
+    for (const t of tabs) t.setAttribute("aria-selected", String(t.dataset.tab === name));
+    for (const p of document.querySelectorAll("[data-tab-panel]")) p.hidden = p.dataset.tabPanel !== name;
+  };
+  for (const t of tabs) t.addEventListener("click", (event) => {
+    event.preventDefault(); history.replaceState(null, "", "#" + t.dataset.tab); showTab(t.dataset.tab);
+  });
+  showTab(location.hash.slice(1));
+</script>
 {% endblock %}

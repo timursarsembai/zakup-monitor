@@ -307,7 +307,7 @@ def home(request: Request, user: User, background: BackgroundTasks):
         elif stale:
             # Показываем прежние цифры сразу, а пересчёт — после ответа.
             background.add_task(_recount_market)
-        context = {"m": market, "p": dashboard.personal(conn, user), "now": datetime.now(UTC)}
+        context = {"m": market, "now": datetime.now(UTC)}
     return templates.TemplateResponse(request, "dashboard.html", context)
 
 
