@@ -66,8 +66,16 @@ services:
       ZAKUP_WEB_PASSWORD: ${ZAKUP_WEB_PASSWORD:-}
     ports:
       - "127.0.0.1:8096:8000"
+    # proxy-network — сеть Nginx Proxy Manager: он ходит на zakup-web:8000.
+    networks:
+      - default
+      - proxy-network
     mem_limit: 256m
     logging: *logging
 
 volumes:
   pgdata:
+
+networks:
+  proxy-network:
+    external: true
