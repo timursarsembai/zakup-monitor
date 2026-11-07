@@ -351,3 +351,6 @@ CREATE TABLE IF NOT EXISTS sources (
     last_found  timestamptz,
     created_at  timestamptz NOT NULL DEFAULT now()
 );
+-- Поиск товаров: сколько предложений искать и «найти ещё» (дополнить прошлый результат).
+ALTER TABLE lot_research ADD COLUMN IF NOT EXISTS target integer NOT NULL DEFAULT 10;
+ALTER TABLE lot_research ADD COLUMN IF NOT EXISTS base_id bigint REFERENCES lot_research (id) ON DELETE SET NULL;

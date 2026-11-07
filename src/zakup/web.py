@@ -547,6 +547,7 @@ def lot_page(request: Request, user: User, lot_id: int, background: BackgroundTa
                    here=request.url.path, job=job, lot_info=lot_info,
                    region=research.default_region(lot_info) if lot_info else "",
                    provider_name=research.PROVIDERS.get(provider, provider),
+                   targets=research.TARGETS,
                    is_admin=request.state.role == "admin")
     return templates.TemplateResponse(request, "lot.html", context)
 
@@ -558,14 +559,18 @@ def start_research(
     lot_id: int,
     region: Annotated[str, Form()] = "",
     whole_kz: Annotated[str, Form()] = "",
+    target: Annotated[int, Form()] = 10,
+    more: Annotated[str, Form()] = "",
 ):
     with pool.connection() as conn:
         if research.lot_context(conn, lot_id) is None:
             raise HTTPException(404, "Нет данных лота: откройте страницу объявления")
         try:
             research.enqueue(conn, user, lot_id, region, whole_kz == "1",
-                             is_admin=request.state.role == "admin")
-            _audit(request, user, "research", f"/lots/{lot_id}", region=region[:120])
+                             is_admin=request.state.role == "admin", target=target,
+                             more=more == "1")
+            _audit(request, user, "research", f"/lots/{lot_id}", region=region[:120],
+                   count=target, more=more == "1")
         except research.QuotaExceeded as error:
             raise HTTPException(429, f"Лимит поиска товаров: {error}") from None
     return RedirectResponse(f"/lots/{lot_id}#research", status_code=303)
@@ -578,7 +583,8 @@ def research_fragment(request: Request, _: User, lot_id: int):
         lot_info = research.lot_context(conn, lot_id)
     return templates.TemplateResponse(
         request, "research_fragment.html",
-        {"job": job, "lot_info": lot_info, "is_admin": request.state.role == "admin"},
+        {"job": job, "lot_info": lot_info, "is_admin": request.state.role == "admin",
+         "targets": research.TARGETS, "lot_id": lot_id},
     )
 
 

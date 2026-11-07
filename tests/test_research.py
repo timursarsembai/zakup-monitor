@@ -97,3 +97,32 @@ def test_sources_from_results_and_manual(conn):
     prompt = sources.for_prompt(conn)
     assert "zeta.kz — Мебель, Оргтехника, Алматы (добавлен вручную)" in prompt
     assert sources.known_categories(conn) == ["Мебель", "Оргтехника"]
+
+
+def test_find_more_extends_saved_result(conn, monkeypatch):
+    user = _lot(conn)
+    first = {"summary": "s", "region_searched": "Актобе", "category": "Мебель",
+             "items": [{"name": "Стол 1", "url": "https://a.kz/1", "in_region": True, "unit_price": 90000}]}
+    calls = []
+
+    def fake(prompt, model):
+        calls.append(prompt)
+        return first if len(calls) == 1 else (
+            {"items": [{"name": "Стол 1", "url": "https://a.kz/1", "unit_price": 90000},
+                       {"name": "Стол 2", "url": "https://b.kz/2", "unit_price": 80000}]}
+            if len(calls) == 2 else {"items": []})
+    monkeypatch.setattr(research, "_claude_code", fake)
+    url = os.environ["TEST_DATABASE_URL"]
+    research.enqueue(conn, user, 90, "Актобе", True, target=15)
+    research.work(url, ["claude_code"], once=True)
+    assert "Найди 15 разных предложений" in calls[0]
+    research.enqueue(conn, user, 90, "", True, target=5, more=True)
+    research.work(url, ["claude_code"], once=True)
+    assert "https://a.kz/1" in calls[1] and "НЕ возвращай" in calls[1]
+    result = research.latest(conn, 90)["result"]
+    assert sorted(i["url"] for i in result["items"]) == ["https://a.kz/1", "https://b.kz/2"]
+    assert result["added"] == 1 and not result["exhausted"]
+    research.enqueue(conn, user, 90, "", True, more=True)
+    research.work(url, ["claude_code"], once=True)
+    result = research.latest(conn, 90)["result"]
+    assert result["exhausted"] and len(result["items"]) == 2

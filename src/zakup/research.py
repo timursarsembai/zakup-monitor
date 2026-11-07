@@ -117,9 +117,11 @@ PROMPT = """Ты помогаешь поставщику, который уча�
 ЗАДАЧА
 1. Пойми, какой именно товар нужен и какие характеристики обязательны.
 2. Ищи продавцов в Казахстане. Сначала в регионе: {region}. {whole_kz}
-3. Найди 6–12 разных предложений с ценой: интернет-магазины, Kaspi, сайты
+3. Найди {target} разных предложений с ценой: интернет-магазины, Kaspi, сайты
    поставщиков, satu.kz и т.п. Открывай страницы, чтобы проверить цену и
    характеристики. Не выдумывай: только то, что реально видел на странице.
+   Если подходящих меньше — верни сколько есть: не добавляй неподходящее ради
+   количества. Ничего не нашёл — пустой список items.{exclude}
 4. Для каждого предложения:
    - name — название товара у продавца; seller — магазин или компания; city — город;
    - in_region — true, если продавец в регионе поставки ({region});
@@ -193,8 +195,16 @@ def default_region(context: dict[str, Any]) -> str:
 
 
 def build_prompt(context: dict[str, Any], region: str, whole_kz: bool,
-                 sources_text: str = "", categories: list[str] | None = None) -> str:
+                 sources_text: str = "", categories: list[str] | None = None,
+                 target: int = 10, exclude: list[str] | None = None) -> str:
+    exclude_text = ""
+    if exclude:
+        # «Найти ещё»: уже найденное не повторяем — нужны только новые предложения.
+        exclude_text = ("\n   Эти предложения уже найдены — НЕ возвращай их и другие товары с тех же "
+                        "страниц, ищи новые:\n" + "\n".join(f"   - {url}" for url in exclude[:60]))
     return PROMPT.format(
+        target=target,
+        exclude=exclude_text,
         sources=sources_text or "   (пока нет — ищи сам)",
         categories=", ".join(categories or []) or "например «Мебель», «Канцтовары», «Оргтехника»",
         **{key: value if value not in (None, "") else "—" for key, value in context.items()},
@@ -220,8 +230,12 @@ def clean_region(region: str) -> str:
     return " ".join(allowed.split())[:120] or "Казахстан"
 
 
+TARGETS = (5, 10, 15, 20)
+
+
 def enqueue(conn: psycopg.Connection, user_id: int, lot_id: int, region: str,
-            whole_kz: bool, is_admin: bool = False) -> int:
+            whole_kz: bool, is_admin: bool = False, target: int = 10, more: bool = False) -> int:
+    """Ставит поиск в очередь. more=True — «найти ещё»: дополнить последний результат."""
     # Кто ищет — решает администратор в своих настройках, для всех пользователей.
     provider, model = conn.execute(
         "SELECT ai_provider, ai_model FROM users WHERE role = 'admin' ORDER BY id LIMIT 1"
@@ -241,11 +255,21 @@ def enqueue(conn: psycopg.Connection, user_id: int, lot_id: int, region: str,
         ).fetchone()[0]
         if used >= USER_DAILY_LIMIT:
             raise QuotaExceeded(f"не больше {USER_DAILY_LIMIT} поисков в сутки")
+    base_id = None
+    if more:
+        base = conn.execute(
+            """SELECT id, region, whole_kz FROM lot_research
+               WHERE lot_id = %s AND status = 'done' ORDER BY id DESC LIMIT 1""",
+            (lot_id,),
+        ).fetchone()
+        if base:
+            base_id, region, whole_kz = base
     job = conn.execute(
-        """INSERT INTO lot_research (lot_id, user_id, provider, model, region, whole_kz)
-           VALUES (%s, %s, %s, %s, %s, %s) RETURNING id""",
+        """INSERT INTO lot_research (lot_id, user_id, provider, model, region, whole_kz,
+                                     target, base_id)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
         (lot_id, user_id, provider, model or DEFAULT_MODELS[provider], clean_region(region),
-         whole_kz),
+         whole_kz, target if target in TARGETS else 10, base_id),
     ).fetchone()[0]
     conn.commit()
     return job
@@ -254,7 +278,7 @@ def enqueue(conn: psycopg.Connection, user_id: int, lot_id: int, region: str,
 def latest(conn: psycopg.Connection, lot_id: int) -> dict[str, Any] | None:
     row = conn.execute(
         """SELECT r.id, r.status, r.provider, r.model, r.region, r.whole_kz, r.result, r.error,
-                  r.created_at, r.finished_at, u.email,
+                  r.created_at, r.finished_at, u.email, r.target, r.base_id,
                   (SELECT count(*) FROM lot_research q
                    WHERE q.status = 'queued' AND q.provider = r.provider AND q.id < r.id)
            FROM lot_research r JOIN users u ON u.id = r.user_id
@@ -264,7 +288,7 @@ def latest(conn: psycopg.Connection, lot_id: int) -> dict[str, Any] | None:
     if row is None:
         return None
     keys = ("id", "status", "provider", "model", "region", "whole_kz", "result", "error",
-            "created_at", "finished_at", "email", "ahead")
+            "created_at", "finished_at", "email", "target", "base_id", "ahead")
     return dict(zip(keys, row))
 
 
@@ -423,12 +447,32 @@ def _number(value: Any) -> float | None:
     return number if number > 0 else None
 
 
+def _base_result(conn: psycopg.Connection, job: dict[str, Any]) -> dict[str, Any] | None:
+    if not job.get("base_id"):
+        return None
+    row = conn.execute("SELECT result FROM lot_research WHERE id = %s", (job["base_id"],)).fetchone()
+    return row[0] if row else None
+
+
+def merge(base: dict[str, Any], found: dict[str, Any]) -> dict[str, Any]:
+    """«Найти ещё»: к прошлому результату — только новые ссылки. added = 0 — больше нет."""
+    known = {i["url"] for i in base.get("items", [])}
+    new = [i for i in found.get("items", []) if i["url"] not in known]
+    items = sorted(base.get("items", []) + new,
+                   key=lambda i: (not i["in_region"], i["unit_price"] is None, i["unit_price"] or 0))
+    return {**base, "items": items, "added": len(new), "exhausted": not new,
+            "category": base.get("category") or found.get("category", "")}
+
+
 def run_job(conn: psycopg.Connection, job: dict[str, Any]) -> dict[str, Any]:
     context = lot_context(conn, job["lot_id"])
     if context is None:
         raise ResearchError("нет данных лота — откройте страницу объявления, чтобы их загрузить")
+    base = _base_result(conn, job)
     prompt = build_prompt(context, job["region"], job["whole_kz"],
-                          sources.for_prompt(conn), sources.known_categories(conn))
+                          sources.for_prompt(conn), sources.known_categories(conn),
+                          target=job.get("target") or 10,
+                          exclude=[i["url"] for i in (base or {}).get("items", [])])
     key = None
     if job["provider"] != "claude_code":
         admin = conn.execute("SELECT id FROM users WHERE role = 'admin' ORDER BY id LIMIT 1").fetchone()
@@ -438,9 +482,16 @@ def run_job(conn: psycopg.Connection, job: dict[str, Any]) -> dict[str, Any]:
     # Поиск идёт минутами: не держим транзакцию открытой.
     conn.commit()
     if job["provider"] == "claude_code":
-        return clean(_claude_code(prompt, job["model"]))
-    runner = _anthropic if job["provider"] == "anthropic" else _openai
-    return clean(runner(prompt, job["model"], key))
+        found = clean(_claude_code(prompt, job["model"]))
+    else:
+        runner = _anthropic if job["provider"] == "anthropic" else _openai
+        found = clean(runner(prompt, job["model"], key))
+    if base:
+        # Новое — в справочник источников; в результат — прошлое плюс новое.
+        sources.remember(conn, found)
+        return merge(base, found)
+    sources.remember(conn, found)
+    return found
 
 
 def work(database_url: str, providers: list[str], once: bool = False) -> None:
@@ -464,13 +515,14 @@ def work(database_url: str, providers: list[str], once: bool = False) -> None:
                    WHERE id = (SELECT id FROM lot_research
                                WHERE status = 'queued' AND provider = ANY(%s)
                                ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED)
-                   RETURNING id, lot_id, user_id, provider, model, region, whole_kz""",
+                   RETURNING id, lot_id, user_id, provider, model, region, whole_kz,
+                             target, base_id""",
                 (providers,),
             ).fetchone()
             conn.commit()
             if row:
                 job = dict(zip(("id", "lot_id", "user_id", "provider", "model", "region",
-                                "whole_kz"), row))
+                                "whole_kz", "target", "base_id"), row))
                 logger.info("research %s: lot %s via %s", job["id"], job["lot_id"], job["provider"])
                 try:
                     result, error = run_job(conn, job), None
@@ -478,13 +530,11 @@ def work(database_url: str, providers: list[str], once: bool = False) -> None:
                     conn.rollback()
                     logger.warning("research %s failed: %s", job["id"], exc)
                     result, error = None, str(exc)[:500]
-                if result:
-                    # Сайты, где нашлись товары, — в справочник источников.
-                    sources.remember(conn, result)
                 conn.execute(
                     """UPDATE lot_research SET status = %s, result = %s, error = %s,
                            finished_at = now() WHERE id = %s""",
-                    ("done" if result else "error", Jsonb(result) if result else None, error,
+                    ("done" if result is not None else "error",
+                     Jsonb(result) if result is not None else None, error,
                      job["id"]),
                 )
                 conn.commit()

@@ -41,6 +41,17 @@
   {% endif %}
   {% endfor %}
   {% if r["items"] and not (r["items"] | selectattr("phone") | list) and not (r["items"] | selectattr("matches") | list) %}<p class="muted">{{ _("Телефоны и разбор по параметрам техспецификации появятся при новом поиске — нажмите «Найти заново».") }}</p>{% endif %}
+  {% if job.base_id %}
+  <p class="{{ 'muted' if r.exhausted else '' }}">{% if r.exhausted %}{{ _("Больше подходящих предложений не нашлось — показано всё, что есть.") }}{% else %}{{ _("Добавлено новых предложений:") }} <b>{{ r.added }}</b>{% endif %}</p>
+  {% endif %}
+  {% if r["items"] and not r.exhausted %}
+  <form class="more-form" method="post" action="/lots/{{ lot_id }}/research">
+    <input type="hidden" name="more" value="1">
+    <button class="primary">➕ {{ _("Найти ещё") }}</button>
+    <select name="target" aria-label="{{ _("Сколько ещё искать") }}">{% for n in targets %}<option value="{{ n }}" {% if n == 5 %}selected{% endif %}>{{ n }}</option>{% endfor %}</select>
+    <span class="muted">{{ _("новых — уже найденные не повторяются, всё сохранится вместе") }}</span>
+  </form>
+  {% endif %}
   {% if not r["items"] %}<p class="muted">{{ _("Подходящих предложений не нашлось.") }}</p>{% endif %}
   <p class="muted">{{ _("Найдено") }} {{ (job.finished_at|local).strftime("%d.%m %H:%M") }}{% if is_admin %} · {{ job.email }}{% endif %} · {{ job.provider }}{% if job.model %} ({{ job.model }}){% endif %}{{ _(". Цены и наличие проверяйте у продавца: это предварительная оценка. Маржа — от цены за единицу в лоте (максимальной), до налогов и доставки.") }}</p>
 {% endif %}

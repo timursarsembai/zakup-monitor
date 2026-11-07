@@ -14,6 +14,9 @@
   .research-box { border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin-top: 16px; }
   .research-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
   .research-form input[name=region] { flex: 1; min-width: 220px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); font: inherit; }
+  .research-form select { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); font: inherit; }
+  .more-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 14px 0 4px; }
+  .more-form select { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); font: inherit; }
   .research-form .primary { background: var(--accent); color: var(--on-accent); border-color: transparent; font-weight: 600; }
   table.research { min-width: 1280px; }
   table.research td.fit { min-width: 170px; font-size: 13px; }
@@ -58,13 +61,14 @@
   <form class="research-form" method="post" action="/lots/{{ lot.id }}/research">
     <input name="region" value="{{ job.region if job else region }}" aria-label="{{ _("Где искать в первую очередь") }}" placeholder="{{ _("Регион поставки") }}">
     <label class="muted"><input type="checkbox" name="whole_kz" value="1" {% if not job or job.whole_kz %}checked{% endif %}> {{ _("и по всему Казахстану") }}</label>
+    <label class="muted">{{ _("Найти") }} <select name="target" aria-label="{{ _("Сколько предложений искать") }}">{% for n in targets %}<option value="{{ n }}" {% if (job.target if job else 10) == n %}selected{% endif %}>{{ n }}</option>{% endfor %}</select> {{ _("предложений") }}</label>
     <button class="primary" {% if job and job.status in ("queued", "running") %}disabled{% endif %}>{{ _("Найти заново") if job else _("Найти товары") }}</button>
   </form>
   <p class="muted">{{ _("Claude прочитает техспецификацию, найдёт в интернете подходящие товары — сначала в регионе поставки, потом по Казахстану — и посчитает маржу от цены в лоте. Сейчас ищет:") }} {{ provider_name }}{% if request.state.role == "admin" %} (<a href="/settings#ai">{{ _("настройки") }}</a>){% endif %}.</p>
   {% else %}
   <p class="muted">{{ _("Нет данных лота для поиска.") }}</p>
   {% endif %}
-  <div data-research data-src="/lots/{{ lot.id }}/research">{% include "research_fragment.html" %}</div>
+  {% set lot_id = lot.id %}<div data-research data-src="/lots/{{ lot.id }}/research">{% include "research_fragment.html" %}</div>
 </section>
 
 {% if lot.id in results %}
