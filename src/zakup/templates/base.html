@@ -117,7 +117,7 @@
     <a class="icon-button lang-switch" href="/lang/{{ other }}" hreflang="{{ other }}" title="{{ 'Русский' if other == 'ru' else 'Қазақша' }}">{{ languages[other] }}</a>
     <button type="button" class="theme-toggle" data-theme-toggle title="{{ _("Сменить тему") }}" aria-label="{{ _("Сменить тему") }}"></button>
     <a href="/settings" class="icon-button {{ 'on' if path == '/settings' }}" title="{{ _("Настройки") }}" aria-label="{{ _("Настройки") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></a>
-    <form method="post" action="/logout"><button>{{ _("Выйти") }}</button></form>
+    <form method="post" action="/logout" data-confirm="{{ _("Выйти из аккаунта?") }}"><button>{{ _("Выйти") }}</button></form>
   </div>
 </header>
 {% endblock %}
@@ -160,6 +160,12 @@
       setZoom(1);
     });
   })();
+  // Подтверждение для форм с data-confirm (выход, удаление и т.п.): защита от
+  // случайного нажатия. Текст — из атрибута, не из кода.
+  document.addEventListener("submit", (event) => {
+    const form = event.target.closest("form[data-confirm]");
+    if (form && !confirm(form.dataset.confirm)) event.preventDefault();
+  });
   // Темы по кругу: светлая → бежевая → синяя → тёмная → светлая.
   // Значок кнопки — кружок цвета текущей темы.
   const THEMES = [["light", "#ffffff", {{ _("Светлая")|tojson }}], ["beige", "#f2ecbc", {{ _("Бежевая")|tojson }}], ["navy", "#142738", {{ _("Синяя")|tojson }}], ["dark", "#151517", {{ _("Тёмная")|tojson }}]];
