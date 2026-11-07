@@ -20,6 +20,7 @@ from fastapi import BackgroundTasks, Depends, FastAPI, Form, HTTPException, Requ
 from fastapi.responses import RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.concurrency import run_in_threadpool
 import psycopg
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
@@ -39,6 +40,7 @@ from zakup import (
     secrets_box,
     sources,
     spec,
+    subjects,
     telegram,
 )
 from zakup.filters import (
@@ -149,6 +151,22 @@ def switch_language(request: Request, code: str):
     return response
 
 
+# Страницы, просмотр которых пишем в журнал (лоты и объявления пишут свои маршруты).
+VIEWED_PAGES = {"/", "/lots", "/announcements", "/my", "/research", "/subscriptions", "/matches",
+                "/settings", "/log"}
+
+
+@app.middleware("http")
+async def page_views(request: Request, call_next):
+    response = await call_next(request)
+    user = getattr(request.state, "user_id", None)
+    if (user and request.method == "GET" and response.status_code == 200
+            and request.url.path in VIEWED_PAGES):
+        target = request.url.path + (f"?{request.url.query}" if request.url.query else "")
+        await run_in_threadpool(_audit, request, user, "view_page", target[:500])
+    return response
+
+
 @app.middleware("http")
 async def security_headers(request: Request, call_next):
     response = await call_next(request)
@@ -189,6 +207,7 @@ def current_user(request: Request) -> int:
         raise LoginRequired()
     request.state.email = user[1]
     request.state.role = user[2]
+    request.state.user_id = user[0]
     return user[0]
 
 
@@ -619,6 +638,14 @@ def _refresh_in_background(announcement_id: int, with_detail: bool, with_results
         _refreshing.discard(announcement_id)
 
 
+def _subjects_in_background(bins: list[str]) -> None:
+    try:
+        with pool.connection() as conn:
+            subjects.ensure(conn, _goszakup(), *bins)
+    except (GoszakupError, httpx.HTTPError, psycopg.Error) as error:
+        logger.warning("background subjects %s failed: %s", bins, error)
+
+
 def _announcement_context(request: Request, user: int, announcement_id: int,
                           background: BackgroundTasks) -> dict:
     with pool.connection() as conn:
@@ -691,6 +718,16 @@ def _announcement_context(request: Request, user: int, announcement_id: int,
         company_bin = conn.execute(
             "SELECT company_bin FROM users WHERE id = %s", (user,)
         ).fetchone()[0]
+        org_bins = [detail.get("customerBin"), detail.get("orgBin")] + [
+            lot.get("customerBin") for lot in lots]
+        org_cards = {b: subjects.card(conn, b) for b in dict.fromkeys(filter(None, org_bins))}
+    missing = [b for b, found in org_cards.items() if found is None]
+    if missing:
+        # Карточки организации ещё нет — догрузим после ответа, следующий заход увидит.
+        background.add_task(_subjects_in_background, missing)
+    text_phones = {lot["id"]: subjects.phones_in_text(lot.get("descriptionRu"),
+                                                      info[lot["id"]].get("extra_desc"))
+                   for lot in lots}
     # Сначала лоты с авансом побольше, дальше по номеру.
     lots.sort(key=lambda lot: (-(info[lot["id"]]["prepayment"] or 0), lot.get("lotNumber") or ""))
     return {
@@ -708,6 +745,8 @@ def _announcement_context(request: Request, user: int, announcement_id: int,
         "results_at": results_at,
         "now": now,
         "company_bin": company_bin,
+        "org_cards": org_cards,
+        "text_phones": text_phones,
         "lot_numbers": {lot["id"]: lot.get("lotNumber") for lot in lots},
         "here": request.url.path,
         "documents": documents,

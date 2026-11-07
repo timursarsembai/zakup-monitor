@@ -16,6 +16,8 @@ def client(conn, monkeypatch):
         os.environ["TEST_DATABASE_URL"], min_size=1, max_size=2, open=False, timeout=5
     )
     monkeypatch.setattr(web, "pool", test_pool)
+    # Карточки организаций догружаются с портала фоном — в тестах без сети.
+    monkeypatch.setattr(web, "_subjects_in_background", lambda bins: None)
     auth.set_password(conn, "owner@mail.kz", "long-enough-password")
     conn.execute("UPDATE users SET role = 'admin' WHERE email = 'owner@mail.kz'")
     conn.commit()
@@ -477,6 +479,8 @@ def test_action_log(client, conn):
     client.post("/login", data={"email": "amir", "password": "amir-password-1"}, headers=ORIGIN)
     client.get("/lots/5001")
     client.get("/lots/5001")  # повтор в течение 10 минут не пишется
+    client.get("/my")
+    client.get("/lots/5001/research")  # фрагменты и опросы — не страницы, не пишем
     client.post("/lots/5001/mark", data={"status": "interested"}, headers=ORIGIN)
     client.post("/logout", headers=ORIGIN)
     assert client.get("/log").status_code in (303, 200)
@@ -486,6 +490,7 @@ def test_action_log(client, conn):
     page = client.get(f"/log?user={amir}").text
     assert page.count(">Открыл лот</td>") == 1 and ">Отметка лота</td>" in page
     assert "status: interested" in page
+    assert page.count(">Открыл страницу</td>") == 2 and ">/my<" in page  # главная после входа и /my
     assert "Неудачный вход" in client.get("/log?action=login_failed").text
     conn.execute("UPDATE user_actions SET at = now() - interval '31 days' WHERE action = 'view_lot'")
     conn.commit()
@@ -556,3 +561,30 @@ def test_old_results_stay_visible_while_searching_more(client, conn):
     assert "Найти ещё" not in fragment  # пока идёт поиск — кнопки нет
     page = client.get("/research").text
     assert "Сейчас ищем" in page and "ещё предложения" in page
+
+
+def test_customer_contacts_on_lot_page(client, conn):
+    from zakup import subjects
+
+    _announcement_with_lots(conn)
+    conn.execute("""UPDATE announcements SET detail = detail || '{"orgBin": "123456789012", "customerBin": "123456789012"}'
+                    WHERE id = 500""")
+    conn.execute("""UPDATE announcements SET detail = jsonb_set(detail, '{Lots,0,customerBin}', '"123456789012"')
+                    WHERE id = 500""")
+    conn.execute("""UPDATE announcements SET detail = jsonb_set(detail, '{Lots,0,descriptionRu}',
+                    '"Вопросы по тел. 8 (701) 111-22-33 (снабжение)"') WHERE id = 500""")
+    conn.commit()
+    _login(client)
+    page = client.get("/lots/5001").text
+    assert "Контакты загружаются" in page and 'href="tel:+77011112233"' in page and "снабжение" in page
+    subjects.save(conn, "123456789012", {
+        "nameRu": "Школа №1", "phone": "+77273382995", "email": "school@mail.kz", "website": "school.kz",
+        "Address": [{"address": "г.Алматы, ул. Абая, 1", "phone": "87017573388"},
+                    {"address": "г.Алматы,  ул. Абая, 1", "phone": ""}]})
+    page = client.get("/lots/5001").text
+    assert 'href="tel:+77273382995"' in page and 'href="https://wa.me/77017573388"' in page
+    assert "wa.me/77273382995" not in page  # городской номер — без WhatsApp
+    assert "mailto:school@mail.kz" in page and 'href="https://school.kz"' in page
+    assert page.count("ул. Абая, 1") == 1
+    announcement = client.get("/a/500").text
+    assert "mailto:school@mail.kz" in announcement and "Найти официальный сайт" not in announcement

@@ -33,6 +33,8 @@ def main() -> int:
     more.add_argument("--limit", type=int, default=2000)
     more.add_argument("--part", choices=["open", "finished", "all"], default="all",
                       help="open — открытые (быстрый круг), finished — завершённые и протоколы")
+    orgs = sub.add_parser("subjects", help="догрузить контакты заказчиков открытых объявлений")
+    orgs.add_argument("--limit", type=int, default=600)
     sub.add_parser("bot", help="Telegram-бот: привязка чатов (работает постоянно)")
     specs_cmd = sub.add_parser("specs", help="заранее разобрать техспецификации открытых лотов")
     specs_cmd.add_argument("--limit", type=int, default=200)
@@ -95,6 +97,11 @@ def main() -> int:
                 return _start_from(conn, client, args.since)
             if args.command == "rescan":
                 return _rescan(conn, client, args.days, args.max_pages)
+            if args.command == "subjects":
+                from zakup import subjects
+
+                print(f"subjects: {subjects.refresh(conn, client, args.limit)}")
+                return 0
             if args.command == "details":
                 return _details(conn, client, args.limit, args.part)
             return _sync(conn, client, args.max_pages)

@@ -66,7 +66,7 @@ services:
         condition: service_started
     entrypoint: ["sh", "-c"]
     command:
-      - while true; do zakup rescan; zakup details --part finished; sleep 900; done
+      - while true; do zakup rescan; zakup details --part finished; zakup subjects; sleep 900; done
     environment: *app-env
     mem_limit: 256m
     logging: *logging

@@ -20,6 +20,7 @@ ACTIONS = {
     "logout": "Выход",
     "view_announcement": "Открыл объявление",
     "view_lot": "Открыл лот",
+    "view_page": "Открыл страницу",
     "mark": "Отметка лота",
     "note": "Заметка к лоту",
     "research": "Поиск товаров с ИИ",
@@ -49,7 +50,7 @@ ACTIONS = {
 def log(conn: psycopg.Connection, user_id: int | None, action: str, target: str | None = None,
         details: dict[str, Any] | None = None, ip: str | None = None,
         login: str | None = None) -> None:
-    if action in ("view_announcement", "view_lot") and user_id:
+    if action in ("view_announcement", "view_lot", "view_page") and user_id:
         recent = conn.execute(
             """SELECT 1 FROM user_actions WHERE user_id = %s AND action = %s AND target = %s
                AND at > now() - %s LIMIT 1""",

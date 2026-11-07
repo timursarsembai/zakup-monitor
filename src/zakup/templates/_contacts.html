@@ -1,0 +1,27 @@
+{# Контакты организации: звонок по номеру, WhatsApp у мобильных, почта, сайт, адреса. #}
+{% macro wa_icon() %}<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2zm0 18.2c-1.6 0-3.1-.4-4.4-1.2l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 1 1 12 20.2zm4.5-6.1c-.2-.1-1.5-.7-1.7-.8-.2-.1-.4-.1-.6.1l-.8 1c-.1.2-.3.2-.5.1a6.7 6.7 0 0 1-3.3-2.9c-.3-.4.3-.4.7-1.3.1-.2 0-.3 0-.4l-.8-1.8c-.2-.5-.4-.4-.6-.4h-.5a1 1 0 0 0-.7.3 3 3 0 0 0-.9 2.2c0 1.3.9 2.5 1.1 2.7.1.2 1.8 2.8 4.4 3.9 1.6.7 2.3.8 3.1.6.5-.1 1.5-.6 1.7-1.2.2-.6.2-1.1.1-1.2l-.5-.3z"/></svg>{% endmacro %}
+
+{% macro phone_links(phones) %}{% for p in phones %}<span class="org-phone"><a class="org-call" href="tel:{{ p.tel }}">📞 {{ p.number }}</a>{% if p.wa %}<a class="org-wa" href="{{ p.wa }}" target="_blank" rel="noopener" title="WhatsApp" aria-label="WhatsApp">{{ wa_icon() }}</a>{% endif %}{% if p.label %} <span class="muted">{{ p.label }}</span>{% endif %}</span>{% endfor %}{% endmacro %}
+
+{% macro org_contacts(card, name="", extra=[]) %}
+<div class="org-contacts">
+  {% if card %}
+    {% if card.phones or extra %}<div class="org-row">{{ phone_links(card.phones) }}{{ phone_links(extra) }}</div>{% endif %}
+    {% if card.email %}<div class="org-row">✉️ <a href="mailto:{{ card.email }}">{{ card.email }}</a></div>{% endif %}
+    {% for address in card.addresses %}<div class="org-row">📍 {{ address }}</div>{% endfor %}
+    <div class="org-row">🌐 {% if card.website %}<a href="{{ card.website | safe_url }}" target="_blank" rel="noopener">{{ card.website | replace("https://", "") | replace("http://", "") }}</a>{% else %}<a href="https://www.google.com/search?q={{ ((card.name_ru or name) ~ ' официальный сайт') | urlencode }}" target="_blank" rel="noopener">{{ _("Найти официальный сайт") }}</a>{% endif %}
+      · <span class="muted">{{ _("БИН") }} {{ card.bin }}</span></div>
+  {% else %}
+    {% if extra %}<div class="org-row">{{ phone_links(extra) }}</div>{% endif %}
+    <div class="org-row muted">{{ _("Контакты загружаются с портала — обновите страницу через минуту.") }}</div>
+  {% endif %}
+</div>
+{% endmacro %}
+
+{% macro contacts_styles() %}
+  .org-contacts { margin-top: 4px; font-size: 14px; }
+  .org-row { margin: 3px 0; display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+  .org-phone { display: inline-flex; align-items: center; gap: 4px; }
+  a.org-call { padding: 2px 8px; border: 1px solid var(--line); border-radius: 6px; white-space: nowrap; }
+  a.org-wa { display: inline-flex; padding: 3px; border-radius: 6px; color: #fff; background: #25d366; }
+{% endmacro %}

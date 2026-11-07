@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "_lot_card.html" import lot_styles, lot_card, lot_winners, lot_scripts with context %}
+{% from "_contacts.html" import org_contacts with context %}
 {% from "_share.html" import share_buttons, share_styles, share_script with context %}
 {% block title %}№ {{ a.numberAnno or a.id }}{% endblock %}
 {% block style %}
@@ -26,9 +27,8 @@
     <dt>{{ _("Способ закупки") }}</dt><dd>{{ loc(a.RefTradeMethods) or "—" }}</dd>
     <dt>{{ _("Тип закупки") }}</dt><dd>{{ (loc(a.RefTypeTrade) or "—")|trim }}</dd>
     <dt>{{ _("Вид предмета") }}</dt><dd>{{ loc(a.RefSubjectType) or "—" }}</dd>
-    <dt>{{ _("Организатор") }}</dt><dd>{% if a.Organizer %}{{ a.Organizer.bin }} {{ loc(a.Organizer) }}{% else %}{{ a.orgBin }} {{ loc(a, "orgNameRu") }}{% endif %}</dd>
-    {% set address = ((a.Organizer or {}).Address or [])|first %}
-    {% if address %}<dt>{{ _("Адрес организатора") }}</dt><dd>{{ address.address }}</dd>{% endif %}
+    <dt>{{ _("Организатор") }}</dt><dd>{% if a.Organizer %}{{ loc(a.Organizer) }}{% else %}{{ loc(a, "orgNameRu") }}{% endif %}{{ org_contacts(org_cards.get(a.orgBin), a.orgNameRu or "") }}</dd>
+    {% if a.customerBin and a.customerBin != a.orgBin %}<dt>{{ _("Заказчик") }}</dt><dd>{{ loc(a, "customerNameRu") }}{{ org_contacts(org_cards.get(a.customerBin), a.customerNameRu or "") }}</dd>{% endif %}
   </dl>
   <div class="aside">
     <div class="muted">{{ _("Сумма закупки") }}</div>

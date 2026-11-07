@@ -380,6 +380,9 @@ _LOCAL_DENY = {"permissions": {"deny": [
 ]}}
 
 
+_last_usage: dict[str, Any] = {}
+
+
 def _claude_code(prompt: str, model: str, schema: dict | None = None,
                  web: bool = True) -> dict[str, Any]:
     binary = shutil.which("claude") or os.path.expanduser("~/.local/bin/claude")
@@ -405,6 +408,9 @@ def _claude_code(prompt: str, model: str, schema: dict | None = None,
         raise ResearchError(f"Claude Code вернул не JSON: {done.stderr[-300:] or done.stdout[-300:]}") from None
     if output.get("is_error") or not output.get("structured_output"):
         raise ResearchError(f"Claude Code: {str(output.get('result') or output.get('subtype'))[:300]}")
+    # Во сколько обошёлся бы запуск по API: считаем себестоимость запроса для тарифов.
+    _last_usage.update(cost_usd=output.get("total_cost_usd"), usage=output.get("usage"),
+                       turns=output.get("num_turns"))
     return output["structured_output"]
 
 
@@ -690,6 +696,7 @@ def work(database_url: str, providers: list[str], once: bool = False) -> None:
                 job = dict(zip(("id", "lot_id", "user_id", "provider", "model", "region",
                                 "whole_kz", "target", "base_id"), row))
                 logger.info("research %s: lot %s via %s", job["id"], job["lot_id"], job["provider"])
+                _last_usage.clear()
                 try:
                     result, error = run_job(conn, job), None
                 except Exception as exc:  # noqa: BLE001 — задача не должна зависнуть в running
@@ -698,10 +705,10 @@ def work(database_url: str, providers: list[str], once: bool = False) -> None:
                     result, error = None, str(exc)[:500]
                 conn.execute(
                     """UPDATE lot_research SET status = %s, result = %s, error = %s,
-                           finished_at = now() WHERE id = %s""",
+                           finished_at = now(), usage = %s WHERE id = %s""",
                     ("done" if result is not None else "error",
                      Jsonb(result) if result is not None else None, error,
-                     job["id"]),
+                     Jsonb(dict(_last_usage)) if _last_usage else None, job["id"]),
                 )
                 conn.commit()
         if once:

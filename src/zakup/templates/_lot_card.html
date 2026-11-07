@@ -1,9 +1,11 @@
 {# Карточка лота и его итоги: на странице объявления и на странице лота.
    Импортировать with context: нужны info, marks, results, company_bin, here, a. #}
 {% from "_marks.html" import mark_control, mark_styles %}
+{% from "_contacts.html" import org_contacts, contacts_styles with context %}
 
 {% macro lot_styles() %}
 {{ mark_styles() }}
+{{ contacts_styles() }}
   .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
   .chip { padding: 2px 10px; border-radius: 999px; font-size: 13px; border: 1px solid var(--line); }
   .chip.status { background: color-mix(in srgb, var(--accent) 14%, transparent); border-color: transparent; }
@@ -81,7 +83,7 @@
     <dl class="facts">
       <dt>{{ _("Номер лота") }}</dt><dd>{{ lot.lotNumber }}</dd>
       {% if i.extra_desc %}<dt>{{ _("Доп. характеристика") }}</dt><dd>{{ pick(i.extra_desc, i.extra_desc_kz) }}</dd>{% endif %}
-      <dt>{{ _("Заказчик") }}</dt><dd>{{ loc(lot, "customerNameRu") or "—" }}</dd>
+      <dt>{{ _("Заказчик") }}</dt><dd>{{ loc(lot, "customerNameRu") or "—" }}{% if not link or lot.customerBin not in (a.customerBin, a.orgBin) %}{{ org_contacts(org_cards.get(lot.customerBin), lot.customerNameRu or "", text_phones.get(lot.id, [])) }}{% elif text_phones.get(lot.id) %}{{ org_contacts(none, "", text_phones[lot.id]) }}{% endif %}</dd>
       {% set places = [] %}{% for p in lot.Plans or [] %}{% for k in p.PlansKato or [] %}{% set place = loc(k, "fullDeliveryPlaceNameRu") %}{% if place and place|trim not in places %}{% set __ = places.append(place|trim) %}{% endif %}{% endfor %}{% endfor %}
       {% if places %}<dt>{{ _("Место поставки") }}</dt><dd>{{ places|join("; ") }}</dd>{% endif %}
       {% if i.supply_date %}<dt>{{ _("Срок поставки") }}</dt><dd>{{ i.supply_date }}</dd>{% endif %}

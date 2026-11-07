@@ -373,3 +373,16 @@ CREATE TABLE IF NOT EXISTS spec_summaries (
     started_at  timestamptz,
     finished_at timestamptz
 );
+-- Стоимость запуска ИИ (по данным Claude Code: цена по API) — для расчёта тарифов.
+ALTER TABLE lot_research ADD COLUMN IF NOT EXISTS usage jsonb;
+-- Организации с портала (заказчики, организаторы): контакты и адреса.
+CREATE TABLE IF NOT EXISTS subjects (
+    bin        text PRIMARY KEY,
+    name_ru    text,
+    name_kz    text,
+    phone      text NOT NULL DEFAULT '',
+    email      text NOT NULL DEFAULT '',
+    website    text NOT NULL DEFAULT '',
+    addresses  jsonb NOT NULL DEFAULT '[]',
+    fetched_at timestamptz NOT NULL DEFAULT now()
+);
