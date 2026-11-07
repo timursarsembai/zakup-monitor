@@ -11,6 +11,7 @@
   .actions form { margin: 0; }
   .primary { background: var(--accent); color: #fff; border-color: transparent; font-weight: 600; }
   .note { margin-top: 14px; font-size: 14px; }
+  .actions input { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; font: inherit; }
 {% endblock %}
 {% block main %}
 <section class="panel">
@@ -33,5 +34,14 @@
     </div>
     <p class="note muted">Откроется бот @{{ bot_username }} — нажмите в нём «Start». Ссылка одноразовая и действует 30 минут. Потом обновите эту страницу.</p>
   {% endif %}
+</section>
+<section class="panel">
+  <h2>Ваша организация</h2>
+  <p class="muted">БИН или ИИН, под которым вы подаёте ценовые предложения. По нему в итогах отмечаются ваши предложения, а отмеченные лоты сами получают «Выиграли» или «Не выиграли».</p>
+  <form class="actions" method="post" action="/settings/company">
+    <input name="company_bin" value="{{ company_bin or '' }}" placeholder="12 цифр" inputmode="numeric" maxlength="12" pattern="\d{12}">
+    <button class="primary">Сохранить</button>
+  </form>
+  {% if saved == "bin" %}<p class="note">Сохранено.</p>{% endif %}
 </section>
 {% endblock %}

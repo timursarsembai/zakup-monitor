@@ -83,6 +83,9 @@
   <button role="tab" data-tab="lots" aria-selected="true">Лоты ({{ lots|length }})</button>
   <button role="tab" data-tab="docs" aria-selected="false">Документация ({{ documents|length }})</button>
   <button role="tab" data-tab="protocols" aria-selected="false">Протоколы ({{ protocols|length }})</button>
+  <button role="tab" data-tab="winners" aria-selected="false">Победители ({{ results|length }})</button>
+  <button role="tab" data-tab="contracts" aria-selected="false">Договоры ({{ contracts|length }})</button>
+  <button role="tab" data-tab="appeals" aria-selected="false">Апелляции ({{ appeals|length }})</button>
   <a href="{{ portal_url }}" target="_blank" rel="noopener">На портале ↗</a>
 </nav>
 
@@ -116,6 +119,8 @@
       {% if plan and ((plan.sum2 or 0) > 0 or (plan.sum3 or 0) > 0) %}<dt>По годам</dt><dd>{{ plan.sum1 | money }} / {{ plan.sum2 | money }} / {{ plan.sum3 | money }} ₸</dd>{% endif %}
       <dt>Статус лота</dt><dd>{{ (lot.RefLotsStatus or {}).nameRu or "—" }}</dd>
     </dl>
+    {% set r = results.get(lot.id) %}
+    {% if r %}<p style="margin:10px 0 0">{% if r.outcome == "winner" %}🏁 Победитель: <b>{{ r.winner_name }}</b>{% if r.winner_total is not none %} — {{ r.winner_total | money }} ₸{% endif %}{% if company_bin and r.winner_bin == company_bin %} <span class="badge hot">это вы</span>{% endif %}{% else %}🏁 Не состоялась{% if r.reason %} в связи с {{ r.reason }}{% endif %}{% endif %} <span class="muted">· предложений: {{ r.offers|length }}</span></p>{% endif %}
     {% if marks.get(lot.id) %}{{ note_form(lot.id, marks.get(lot.id), here) }}{% endif %}
     {% if spec_file(lot) %}
     <details class="spec" data-src="/a/{{ a.id }}/lots/{{ lot.id }}/spec">
@@ -141,18 +146,96 @@
   <ul class="files">
     {% for f in protocols %}
     <li><a href="{{ f.filePath }}" target="_blank" rel="noopener">{{ f.nameRu or f.originalName }}</a></li>
-    {% else %}<li class="muted">Протоколов пока нет: они появляются после окончания приема заявок. Победители, договоры и апелляции — <a href="{{ portal_url }}" target="_blank" rel="noopener">на портале</a>.</li>{% endfor %}
+    {% else %}<li class="muted">Протоколов пока нет: они появляются после окончания приема заявок.</li>{% endfor %}
   </ul>
 </section>
 
-<p class="muted" style="margin-top:24px">Данные с портала обновлены {{ (fetched_at|local).strftime("%d.%m.%Y %H:%M") if fetched_at else "—" }}.</p>
+{% set ended = end and end < now %}
+<section data-panel="winners" hidden>
+  {% for lot in lots if lot.id in results %}
+  {% set r = results[lot.id] %}
+  <div class="lot">
+    <div class="lot-head">
+      <div>
+        <a class="name" href="#lot-{{ lot.id }}" data-goto="lots">{{ lot.nameRu }}</a>
+        <div class="muted">Лот {{ lot.lotNumber }} · {{ lot.amount | money }} ₸</div>
+      </div>
+      <div class="lot-sum">
+        {% if r.outcome == "winner" %}<span class="badge hot">Победитель определён</span>{% else %}<span class="badge">Не состоялась</span>{% endif %}
+      </div>
+    </div>
+    {% if r.outcome == "winner" %}
+    <p style="margin:10px 0 0"><b>{{ r.winner_name }}</b> <span class="muted">БИН {{ r.winner_bin }}</span>{% if r.winner_total is not none %} — <b>{{ r.winner_total | money }} ₸</b>{% if lot.amount %} <span class="muted">(−{{ '%.1f'|format((1 - (r.winner_total|float) / lot.amount) * 100) }}% от плана)</span>{% endif %}{% endif %}</p>
+    {% if r.second_name %}<p class="muted" style="margin:4px 0 0">Второе место: {{ r.second_name }}, БИН {{ r.second_bin }}</p>{% endif %}
+    {% else %}
+    <p style="margin:10px 0 0">Закупка не состоялась{% if r.reason %} в связи с {{ r.reason }}{% endif %}.</p>
+    {% endif %}
+    {% if r.offers %}
+    <div class="table-wrap" style="margin-top:10px"><table>
+      <tr><th>№</th><th>Поставщик</th><th>БИН/ИИН</th><th>Цена за ед., ₸</th><th>Сумма, ₸</th><th>Подана</th></tr>
+      {% for o in r.offers %}
+      <tr{% if o.bin == r.winner_bin %} style="font-weight:600"{% endif %}>
+        <td>{{ loop.index }}</td>
+        <td>{{ o.name }}{% if company_bin and o.bin == company_bin %} <span class="badge sub">вы</span>{% endif %}</td>
+        <td>{{ o.bin }}</td>
+        <td class="num">{{ o.price | money if o.price else "" }}</td>
+        <td class="num">{{ o.total | money if o.total else "" }}</td>
+        <td class="muted">{{ o.applied_at }}</td>
+      </tr>
+      {% endfor %}
+    </table></div>
+    {% endif %}
+    {% for c in contracts_by_lot.get(lot.id, []) %}
+    <p class="muted" style="margin:8px 0 0">Договор № {{ c.contractNumberSys }} с {{ (c.Supplier or {}).nameRu or c.supplierBiin }} на {{ c.contractSum | money }} ₸ — {{ (c.RefContractStatus or {}).nameRu or "" }}</p>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="muted">{% if not ended %}Победители появятся после окончания приема заявок и публикации протокола итогов.{% elif protocols %}Итоги из протокола разобрать не удалось — откройте его на вкладке «Протоколы».{% else %}Протокол итогов ещё не опубликован. Страница проверит его снова при следующем открытии.{% endif %}</p>
+  {% endfor %}
+  {% if results and not company_bin %}<p class="muted">Укажите БИН вашей организации в <a href="/settings">настройках</a> — тогда ваши предложения будут отмечены, а итог по отмеченным лотам поставится сам.</p>{% endif %}
+</section>
+
+<section data-panel="contracts" hidden>
+  {% if contracts %}
+  <div class="table-wrap"><table>
+    <tr><th>Договор</th><th>Поставщик</th><th>Лоты</th><th>Сумма, ₸</th><th>Подписан</th><th>Статус</th></tr>
+    {% for c in contracts %}
+    <tr>
+      <td>{{ c.contractNumberSys }}{% if c.File %}{% for f in c.File if f.filePath %}<div><a href="{{ f.filePath }}" target="_blank" rel="noopener">{{ f.nameRu or "файл" }}</a></div>{% endfor %}{% endif %}</td>
+      <td>{{ (c.Supplier or {}).nameRu or "" }}<div class="muted">{{ c.supplierBiin }}</div></td>
+      <td class="muted">{% for u in c.ContractUnits or [] %}{{ lot_numbers.get(u.lotId) or u.lotId }}{% if not loop.last %}, {% endif %}{% endfor %}</td>
+      <td class="num">{{ c.contractSum | money }}</td>
+      <td>{{ (dt(c.signDate)|local).strftime("%d.%m.%Y") if c.signDate else "—" }}</td>
+      <td>{{ (c.RefContractStatus or {}).nameRu or "" }}</td>
+    </tr>
+    {% endfor %}
+  </table></div>
+  {% else %}
+  <p class="muted">{% if ended %}Договоров пока нет: их подписывают в течение нескольких дней после итогов.{% else %}Договоры появятся после итогов.{% endif %}</p>
+  {% endif %}
+</section>
+
+<section data-panel="appeals" hidden>
+  <ul class="files">
+    {% for ap in appeals %}
+    <li>Обращение № {{ ap.numberAppeal or ap.id }}{% if ap.dateApply %} от {{ (dt(ap.dateApply)|local).strftime("%d.%m.%Y") }}{% endif %}{% if ap.decisionDate %}, решение {{ (dt(ap.decisionDate)|local).strftime("%d.%m.%Y") }}{% endif %}
+      {% for f in ap.Files or [] if f.filePath %}<a href="{{ f.filePath }}" target="_blank" rel="noopener">файл {{ loop.index }}</a> {% endfor %}</li>
+    {% else %}<li class="muted">Апелляций нет.</li>{% endfor %}
+  </ul>
+</section>
+
+<p class="muted" style="margin-top:24px">Данные с портала обновлены {{ (fetched_at|local).strftime("%d.%m.%Y %H:%M") if fetched_at else "—" }}{% if results_at %}, итоги и договоры — {{ (results_at|local).strftime("%d.%m.%Y %H:%M") }}{% endif %}.</p>
 
 <script>
+  const showTab = (name) => {
+    for (const t of document.querySelectorAll("[data-tab]")) t.setAttribute("aria-selected", t.dataset.tab === name);
+    for (const p of document.querySelectorAll("[data-panel]")) p.hidden = p.dataset.panel !== name;
+  };
   for (const tab of document.querySelectorAll("[data-tab]")) {
-    tab.addEventListener("click", () => {
-      for (const t of document.querySelectorAll("[data-tab]")) t.setAttribute("aria-selected", t === tab);
-      for (const p of document.querySelectorAll("[data-panel]")) p.hidden = p.dataset.panel !== tab.dataset.tab;
-    });
+    tab.addEventListener("click", () => showTab(tab.dataset.tab));
+  }
+  for (const link of document.querySelectorAll("[data-goto]")) {
+    link.addEventListener("click", () => showTab(link.dataset.goto));
   }
   for (const spec of document.querySelectorAll("details.spec")) {
     spec.addEventListener("toggle", async () => {

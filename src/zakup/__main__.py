@@ -6,7 +6,7 @@ import os
 import sys
 from datetime import date, datetime, time, timedelta
 
-from zakup import auth, bot, db, details, marks, matcher, notify, sync
+from zakup import auth, bot, db, details, marks, matcher, notify, results, sync
 from zakup.goszakup import ENTITIES, PORTAL_TZ, Client
 
 # Сколько истории грузить, если start-from не запускали.
@@ -25,7 +25,9 @@ def main() -> int:
     again = sub.add_parser("rescan", help="перечитать последние дни: поздние публикации, статусы")
     again.add_argument("--days", type=int, default=30)
     again.add_argument("--max-pages", type=int, default=20)
-    more = sub.add_parser("details", help="дочитать подробности открытых объявлений (GraphQL)")
+    more = sub.add_parser(
+        "details", help="дочитать подробности открытых объявлений и итоги отмеченных лотов"
+    )
     more.add_argument("--limit", type=int, default=2000)
     sub.add_parser("bot", help="Telegram-бот: привязка чатов (работает постоянно)")
     passwd = sub.add_parser("set-password", help="задать пароль (создаст пользователя, если нет)")
@@ -174,7 +176,9 @@ def _rescan(conn, client: Client, days: int, max_pages: int) -> int:
 
 def _details(conn, client: Client, limit: int) -> int:
     try:
-        print(f"details: {details.refresh(conn, client, limit)}")
+        print(f"details: {details.refresh(conn, client, limit)}, "
+              f"results checked: {results.follow(conn, client)}, "
+              f"announced: {marks.announce_results(conn)}")
         _match_and_deliver(conn)
     except Exception as error:
         # Only the type: database errors can quote the connection string.

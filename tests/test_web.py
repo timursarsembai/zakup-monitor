@@ -137,3 +137,21 @@ def test_marks_on_search_my_page_and_hiding(client, conn):
     assert "Стул офисный" in client.get(search + "&hidden=1").text
     assert client.post("/lots/6/mark", data={"status": "bogus"}, headers=ORIGIN).status_code == 422
     assert client.post("/lots/999/mark", data={"status": "won"}, headers=ORIGIN).status_code == 404
+
+
+def test_finished_announcement_shows_winners_and_contracts(client, conn, monkeypatch):
+    from tests.test_results import PROTOCOL, FakeClient, _announcement
+
+    _announcement(conn)
+    conn.commit()
+    monkeypatch.setattr(web.results.spec, "download", lambda url: b"pdf")
+    monkeypatch.setattr(web.results, "protocol_text", lambda pdf: PROTOCOL)
+    monkeypatch.setattr(web, "_goszakup", lambda: FakeClient())
+    # Подробности свежие: перечитывать объявление не нужно, только итоги.
+    conn.execute("UPDATE announcements SET details_fetched_at = now()")
+    conn.commit()
+    _login(client)
+    page = client.get("/a/7").text
+    for text in ("Победители (2)", "Договоры (1)", 'объединение &#34;ОКА&#34;', "37 950.00",
+                 "C-1", "отсутствием представленных ценовых предложений"):
+        assert text in page, text

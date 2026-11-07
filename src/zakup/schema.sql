@@ -200,3 +200,24 @@ CREATE TABLE IF NOT EXISTS lot_marks (
     reminded_hours integer,
     PRIMARY KEY (user_id, lot_id)
 );
+
+-- Итоги лота из протокола итогов (zakup.results).
+CREATE TABLE IF NOT EXISTS lot_results (
+    lot_id       bigint PRIMARY KEY REFERENCES lots (id) ON DELETE CASCADE,
+    outcome      text NOT NULL,   -- 'winner' — победитель определён, 'failed' — не состоялась
+    reason       text,
+    winner_bin   text,
+    winner_name  text,
+    winner_total numeric(20, 2),
+    second_bin   text,
+    second_name  text,
+    offers       jsonb NOT NULL DEFAULT '[]',
+    protocol_url text,
+    parsed_at    timestamptz NOT NULL DEFAULT now()
+);
+-- Договоры и апелляции из GraphQL: {"contracts": [...], "appeals": [...]}.
+ALTER TABLE announcements ADD COLUMN IF NOT EXISTS results jsonb;
+ALTER TABLE announcements ADD COLUMN IF NOT EXISTS results_fetched_at timestamptz;
+-- БИН/ИИН организации пользователя: по нему итог отмеченного лота ставится сам.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS company_bin text;
+ALTER TABLE lot_marks ADD COLUMN IF NOT EXISTS result_notified_at timestamptz;

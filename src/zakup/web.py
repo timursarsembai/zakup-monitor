@@ -18,7 +18,7 @@ from fastapi.templating import Jinja2Templates
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
-from zakup import auth, bot, details, marks, spec, telegram
+from zakup import auth, bot, details, marks, results, spec, telegram
 from zakup.filters import (
     DEADLINE_RULE,
     GROUP_ORDER_BY,
@@ -37,7 +37,15 @@ SESSION_COOKIE = "zakup_session"
 pool = ConnectionPool(os.environ.get("DATABASE_URL", ""), min_size=1, max_size=5, open=False)
 templates = Jinja2Templates(directory=str(files("zakup").joinpath("templates")))
 templates.env.globals["announcement_url"] = "/a/{}".format
-templates.env.filters["money"] = lambda v: "" if v is None else f"{v:,.2f}".replace(",", " ")
+def _money(value) -> str:
+    # Суммы приходят числами из базы и GraphQL и строками из разобранного протокола.
+    try:
+        return f"{Decimal(str(value)):,.2f}".replace(",", " ")
+    except (InvalidOperation, ValueError):
+        return ""
+
+
+templates.env.filters["money"] = _money
 templates.env.filters["local"] = lambda v: v.astimezone(PORTAL_TZ) if v else v
 templates.env.globals["region_names"] = lambda kato: sorted(
     {REGIONS[k[:2]] for k in kato or [] if k[:2] in REGIONS}
@@ -289,6 +297,21 @@ def announcement(request: Request, user: User, announcement_id: int):
                 refresh_error = "Портал сейчас не отвечает, показаны сохранённые данные."
         if detail is None:
             raise HTTPException(502, "Не удалось получить объявление с портала")
+        outcome, results_at = conn.execute(
+            "SELECT results, results_fetched_at FROM announcements WHERE id = %s",
+            (announcement_id,),
+        ).fetchone()
+        # Итоги, договоры и апелляции появляются после окончания приёма заявок.
+        if end_date and end_date < now and results.stale(results_at, now) and not refresh_error:
+            try:
+                results.refresh(conn, _goszakup(), announcement_id)
+                outcome, results_at = conn.execute(
+                    "SELECT results, results_fetched_at FROM announcements WHERE id = %s",
+                    (announcement_id,),
+                ).fetchone()
+            except GoszakupError:
+                conn.rollback()
+                refresh_error = "Портал сейчас не отвечает, итоги могут быть неполными."
         subscribed = {
             r[0]: r[1]
             for r in conn.execute(
@@ -316,6 +339,10 @@ def announcement(request: Request, user: User, announcement_id: int):
     info = {lot["id"]: details.parse_lot(lot) for lot in lots}
     with pool.connection() as conn:
         lot_marks = marks.of_user(conn, user, list(info))
+        lot_results = results.by_lot(conn, list(info))
+        company_bin = conn.execute(
+            "SELECT company_bin FROM users WHERE id = %s", (user,)
+        ).fetchone()[0]
     # Сначала лоты с авансом побольше, дальше по номеру.
     lots.sort(key=lambda lot: (-(info[lot["id"]]["prepayment"] or 0), lot.get("lotNumber") or ""))
     return templates.TemplateResponse(
@@ -327,6 +354,14 @@ def announcement(request: Request, user: User, announcement_id: int):
             "info": info,
             "subscribed": subscribed,
             "marks": lot_marks,
+            "results": lot_results,
+            "contracts": (outcome or {}).get("contracts") or [],
+            "contracts_by_lot": results.contracts_by_lot(outcome),
+            "appeals": (outcome or {}).get("appeals") or [],
+            "results_at": results_at,
+            "now": now,
+            "company_bin": company_bin,
+            "lot_numbers": {lot["id"]: lot.get("lotNumber") for lot in lots},
             "here": request.url.path,
             "documents": documents,
             "protocols": protocols,
@@ -391,10 +426,14 @@ def my_lots(request: Request, user: User):
                       (SELECT lot->'RefLotsStatus'->>'nameRu'
                        FROM jsonb_array_elements(a.detail->'Lots') lot
                        WHERE (lot->>'id')::bigint = l.id),
-                      a.detail->'RefBuyStatus'->>'nameRu'
+                      a.detail->'RefBuyStatus'->>'nameRu',
+                      r.outcome, r.winner_name, r.winner_total, r.reason,
+                      r.winner_bin = u.company_bin
                FROM lot_marks m
+               JOIN users u ON u.id = m.user_id
                JOIN lots l ON l.id = m.lot_id
                LEFT JOIN announcements a ON a.id = l.trd_buy_id
+               LEFT JOIN lot_results r ON r.lot_id = l.id
                WHERE m.user_id = %s AND m.status <> ''
                ORDER BY a.end_date NULLS LAST, l.trd_buy_id, l.id""",
             (user,),
@@ -495,11 +534,11 @@ def matches(request: Request, user: User):
 
 
 @app.get("/settings")
-def settings(request: Request, user: User, sent: str = ""):
+def settings(request: Request, user: User, sent: str = "", saved: str = ""):
     with pool.connection() as conn:
-        chat_id = conn.execute(
-            "SELECT telegram_chat_id FROM users WHERE id = %s", (user,)
-        ).fetchone()[0]
+        chat_id, company_bin = conn.execute(
+            "SELECT telegram_chat_id, company_bin FROM users WHERE id = %s", (user,)
+        ).fetchone()
     return templates.TemplateResponse(
         request,
         "settings.html",
@@ -508,8 +547,22 @@ def settings(request: Request, user: User, sent: str = ""):
             "bot_username": telegram.bot_username(),
             "configured": bool(telegram.token() and telegram.bot_username()),
             "sent": sent,
+            "saved": saved,
+            "company_bin": company_bin,
         },
     )
+
+
+@app.post("/settings/company", dependencies=[Depends(same_origin)])
+def save_company(user: User, company_bin: Annotated[str, Form()] = ""):
+    company_bin = company_bin.strip()
+    if company_bin and not (company_bin.isdigit() and len(company_bin) == 12):
+        raise HTTPException(422, "БИН или ИИН — 12 цифр")
+    with pool.connection() as conn:
+        conn.execute(
+            "UPDATE users SET company_bin = %s WHERE id = %s", (company_bin or None, user)
+        )
+    return RedirectResponse("/settings?saved=bin", status_code=303)
 
 
 @app.post("/settings/telegram/link", dependencies=[Depends(same_origin)])

@@ -35,6 +35,8 @@
         {% if r[6] and r[6] != r[5] %}<div class="muted">{{ r[6][:200] }}</div>{% endif %}
         <div class="muted">{{ r[9] or "" }} · объявление № {{ r[11] or r[4] }}{% if r[12] %} · лот {{ r[12] }}{% endif %}</div>
         <div class="muted">На портале: {{ r[13] or r[14] or "—" }}</div>
+        {% if r[15] == "winner" %}<div>🏁 Победитель: <b>{{ r[16] }}</b>{% if r[17] is not none %} — {{ r[17] | money }} ₸{% endif %}{% if r[19] %} <span class="badge hot">это вы</span>{% endif %}</div>
+        {% elif r[15] == "failed" %}<div>🏁 Не состоялась{% if r[18] %} в связи с {{ r[18] }}{% endif %}</div>{% endif %}
       </div>
       <div class="side">
         <b>{{ r[7] | money }} ₸</b>

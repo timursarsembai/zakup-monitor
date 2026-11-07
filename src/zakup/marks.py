@@ -125,11 +125,10 @@ def remind(conn: psycopg.Connection, now: datetime | None = None, pause: float =
         hours = _threshold(end, status_at, reminded, now)
         if hours is None:
             continue
-        amount_text = f"{amount:,.0f}".replace(",", " ") + " ₸" if amount is not None else ""
         lines = [
             f"⏰ <b>Осталось {_left(end, now)}</b> — приём до "
             f"{end.astimezone(PORTAL_TZ):%d.%m %H:%M}",
-            f"{html.escape(name or '—')} · {amount_text}",
+            f"{html.escape(name or '—')} · {_money(amount)}",
             html.escape(customer or ""),
             f"Ваша отметка: {STATUSES[status]}",
         ]
@@ -151,3 +150,61 @@ def remind(conn: psycopg.Connection, now: datetime | None = None, pause: float =
         sent += 1
         time.sleep(pause)
     return sent
+
+
+OUTCOME_TEXT = {"winner": "Итоги подведены", "failed": "Закупка не состоялась"}
+
+
+def announce_results(conn: psycopg.Connection, pause: float = 1.1) -> int:
+    """Сообщает итог по отмеченным лотам. Если в протоколе есть БИН организации
+    пользователя, сам ставит «Выиграли» или «Не выиграли»."""
+    rows = conn.execute(
+        """SELECT m.user_id, m.lot_id, m.status, u.telegram_chat_id, u.company_bin,
+                  r.outcome, r.reason, r.winner_bin, r.winner_name, r.winner_total, r.offers,
+                  l.trd_buy_id, l.name_ru, l.amount
+           FROM lot_marks m
+           JOIN users u ON u.id = m.user_id
+           JOIN lot_results r ON r.lot_id = m.lot_id
+           JOIN lots l ON l.id = m.lot_id
+           WHERE m.status NOT IN ('', 'rejected') AND m.result_notified_at IS NULL"""
+    ).fetchall()
+    sent = 0
+    for (user_id, lot_id, status, chat_id, company_bin, outcome, reason, winner_bin,
+         winner_name, winner_total, offers, a_id, name, amount) in rows:
+        mine = company_bin and any(o.get("bin") == company_bin for o in offers or [])
+        new_status = status
+        if mine and status not in ("won", "lost"):
+            new_status = "won" if winner_bin == company_bin else "lost"
+        lines = [f"🏁 <b>{OUTCOME_TEXT.get(outcome, outcome)}</b>",
+                 f"{html.escape(name or '—')} · {_money(amount)}"]
+        if outcome == "winner":
+            lines.append(f"Победитель: {html.escape(winner_name or winner_bin or '—')}"
+                         f"{' — ' + _money(winner_total) if winner_total is not None else ''}")
+        elif reason:
+            lines.append(f"Причина: {html.escape(reason)}")
+        lines.append(f"Предложений: {len(offers or [])}")
+        if new_status != status:
+            lines.append(f"Отметка изменена: {STATUSES[new_status]}")
+        lines.append(f'<a href="{announcement_url(a_id)}#lot-{lot_id}">Открыть лот</a>')
+        if chat_id:
+            try:
+                telegram.send_message(chat_id, "\n".join(lines))
+            except telegram.TelegramError as error:
+                logger.warning("result not sent: %s", error)
+                if not error.chat_gone:
+                    break
+        conn.execute(
+            """UPDATE lot_marks SET result_notified_at = now(), status = %s,
+                   status_at = CASE WHEN status = %s THEN status_at ELSE now() END
+               WHERE user_id = %s AND lot_id = %s""",
+            (new_status, new_status, user_id, lot_id),
+        )
+        conn.commit()
+        sent += 1
+        if chat_id:
+            time.sleep(pause)
+    return sent
+
+
+def _money(value) -> str:
+    return f"{value:,.2f}".replace(",", " ").removesuffix(".00") + " ₸" if value is not None else ""
