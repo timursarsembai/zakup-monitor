@@ -18,7 +18,11 @@ STATUSES = {
     210: "Опубликовано",
     230: "Опубликовано (дополнение заявок)",
     280: "Опубликовано (ожидание проведения аукциона)",
+    350: "Завершено (итоги подведены)",
+    430: "Отменено",
 }
+# Приём заявок по ним закончен: окончание в прошлом не отсекаем.
+FINISHED = {350, 430}
 # Первые две цифры КАТО.
 REGIONS = {
     "75": "г. Алматы",
@@ -97,8 +101,13 @@ class Filters:
 
     def where(self, now: datetime) -> tuple[str, dict[str, Any]]:
         """SQL-условие по лотам (алиас l) с их объявлениями (алиас a) и параметры."""
-        clauses = ["a.end_date > %(now)s", "l.trd_buy_id = a.id"]
+        clauses = ["l.trd_buy_id = a.id"]
         params: dict[str, Any] = {"now": now}
+        if finished := [s for s in self.statuses if s in FINISHED]:
+            clauses.append("(a.end_date > %(now)s OR a.status_id = ANY(%(finished)s))")
+            params["finished"] = finished
+        else:
+            clauses.append("a.end_date > %(now)s")
         if self.statuses:
             clauses.append("a.status_id = ANY(%(statuses)s)")
             params["statuses"] = self.statuses

@@ -155,3 +155,23 @@ def test_finished_announcement_shows_winners_and_contracts(client, conn, monkeyp
     for text in ("Победители (2)", "Договоры (1)", 'объединение &#34;ОКА&#34;', "37 950.00",
                  "C-1", "отсутствием представленных ценовых предложений"):
         assert text in page, text
+
+
+def test_search_finds_finished_lots_with_winner(client, conn, monkeypatch):
+    from tests.test_results import PROTOCOL, _announcement
+
+    _announcement(conn)
+    conn.execute("UPDATE announcements SET status_id = 350, disable_person = false")
+    monkeypatch.setattr(web.results.spec, "download", lambda url: b"pdf")
+    monkeypatch.setattr(web.results, "protocol_text", lambda pdf: PROTOCOL)
+    detail = conn.execute("SELECT detail FROM announcements WHERE id = 7").fetchone()[0]
+    web.results.parse_announcement(conn, 7, detail)
+    conn.commit()
+    _login(client)
+    base = "/?applied=1&deadline_mode=&status="
+    assert "Весы" not in client.get(base + "240").text
+    page = client.get(base + "350").text
+    assert "Весы" in page and "🏁" in page and "37 950.00" in page and "−15.7%" in page
+    # Разобранный протокол второй раз не качается.
+    monkeypatch.setattr(web.results.spec, "download", lambda url: 1 / 0)
+    assert web.results.parse_pending(conn, 10) == 0

@@ -150,18 +150,47 @@ def refresh(conn: psycopg.Connection, client: Client, announcement_id: int) -> N
     detail = conn.execute(
         "SELECT detail FROM announcements WHERE id = %s", (announcement_id,)
     ).fetchone()[0] or {}
-    url = protocol_file(detail)
-    lots = [int(lot["id"]) for lot in detail.get("Lots") or [] if not lot.get("isDeleted")]
-    known = conn.execute(
-        "SELECT count(*) FROM lot_results WHERE lot_id = ANY(%s) AND protocol_url = %s",
-        (lots, url),
-    ).fetchone()[0]
-    if url and known < len(lots):
-        try:
-            _save_protocol(conn, detail, url)
-        except (spec.SpecError, httpx.HTTPError) as error:
-            logger.warning("protocol of %s not parsed: %s", announcement_id, error)
+    parse_announcement(conn, announcement_id, detail)
     conn.commit()
+
+
+def parse_announcement(conn: psycopg.Connection, announcement_id: int, detail: dict) -> None:
+    """Разбирает протокол итогов объявления, если он есть и ещё не разобран."""
+    url = protocol_file(detail)
+    if not url:
+        return
+    done = conn.execute(
+        "SELECT protocol_url = %s FROM announcements WHERE id = %s", (url, announcement_id)
+    ).fetchone()
+    if done and done[0]:
+        return
+    try:
+        _save_protocol(conn, detail, url)
+    except (spec.SpecError, httpx.HTTPError) as error:
+        # Сетевой сбой — попробуем в следующий раз; битый файл — не будем.
+        logger.warning("protocol of %s not parsed: %s", announcement_id, error)
+        if isinstance(error, httpx.HTTPError):
+            return
+    conn.execute(
+        "UPDATE announcements SET protocol_url = %s WHERE id = %s", (url, announcement_id)
+    )
+
+
+def parse_pending(conn: psycopg.Connection, limit: int) -> int:
+    """Протоколы итогов завершённых объявлений, начиная с новых: для поиска по итогам."""
+    rows = conn.execute(
+        """SELECT id, detail FROM announcements
+           WHERE status_id = 350 AND detail IS NOT NULL
+             AND protocol_url IS DISTINCT FROM (
+                 SELECT f->>'filePath' FROM jsonb_array_elements(detail->'Files') f
+                 WHERE lower(f->>'nameRu') = %s LIMIT 1)
+           ORDER BY end_date DESC LIMIT %s""",
+        (PROTOCOL_NAME, limit),
+    ).fetchall()
+    for announcement_id, detail in rows:
+        parse_announcement(conn, announcement_id, detail)
+        conn.commit()
+    return len(rows)
 
 
 def stale(fetched_at: datetime | None, now: datetime | None = None) -> bool:

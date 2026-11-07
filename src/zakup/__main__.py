@@ -174,11 +174,17 @@ def _rescan(conn, client: Client, days: int, max_pages: int) -> int:
     return 0
 
 
+# Протоколы итогов — PDF, каждый качается отдельно: за проход не больше стольких.
+PROTOCOLS_PER_RUN = 300
+
+
 def _details(conn, client: Client, limit: int) -> int:
     try:
         print(f"details: {details.refresh(conn, client, limit)}, "
               f"results checked: {results.follow(conn, client)}, "
               f"announced: {marks.announce_results(conn)}")
+        print(f"finished details: {details.refresh_finished(conn, client, limit)}, "
+              f"protocols: {results.parse_pending(conn, PROTOCOLS_PER_RUN)}")
         _match_and_deliver(conn)
     except Exception as error:
         # Only the type: database errors can quote the connection string.

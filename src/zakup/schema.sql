@@ -221,3 +221,5 @@ ALTER TABLE announcements ADD COLUMN IF NOT EXISTS results_fetched_at timestampt
 -- БИН/ИИН организации пользователя: по нему итог отмеченного лота ставится сам.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS company_bin text;
 ALTER TABLE lot_marks ADD COLUMN IF NOT EXISTS result_notified_at timestamptz;
+-- Какой протокол итогов уже разобран (zakup.results.parse_announcement).
+ALTER TABLE announcements ADD COLUMN IF NOT EXISTS protocol_url text;

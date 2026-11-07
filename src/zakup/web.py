@@ -197,7 +197,8 @@ def search(request: Request, user: User, page: int = 1, hidden: int = 0):
         groups = conn.execute(
             f"""SELECT a.id, a.number_anno, a.name_ru, a.end_date,
                        coalesce(a.customer_name_ru, a.org_name_ru), count(*), sum(l.amount),
-                       max(l.prepayment), a.count_lots
+                       max(l.prepayment), a.count_lots,
+                       a.detail->'RefBuyStatus'->>'nameRu'
                 FROM lots l, announcements a WHERE {where}
                 GROUP BY a.id ORDER BY {GROUP_ORDER_BY}
                 LIMIT {PAGE_SIZE + 1} OFFSET {(page - 1) * PAGE_SIZE}""",
@@ -208,8 +209,12 @@ def search(request: Request, user: User, page: int = 1, hidden: int = 0):
         for row in conn.execute(
             f"""SELECT l.trd_buy_id, l.id, l.lot_number, l.name_ru,
                        coalesce(l.extra_desc, l.description_ru), l.count, l.unit_name, l.price,
-                       l.amount, l.prepayment, coalesce(nullif(l.kato, '{{}}'), a.kato)
-                FROM lots l, announcements a WHERE {where} AND a.id = ANY(%(ids)s)
+                       l.amount, l.prepayment, coalesce(nullif(l.kato, '{{}}'), a.kato),
+                       r.outcome, r.winner_name, r.winner_total, jsonb_array_length(r.offers),
+                       r.reason
+                FROM lots l JOIN announcements a ON true
+                LEFT JOIN lot_results r ON r.lot_id = l.id
+                WHERE {where} AND a.id = ANY(%(ids)s)
                 ORDER BY {LOT_ORDER_BY}""",
             {**params, "ids": ids},
         ):

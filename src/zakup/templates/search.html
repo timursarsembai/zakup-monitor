@@ -89,7 +89,7 @@
   <header class="card-head">
     <div>
       <a class="title" href="{{ announcement_url(g[0]) }}">{{ g[2] or "Без названия" }}</a>
-      <div class="muted">№ {{ g[1] or g[0] }} · {{ g[4] or "" }}</div>
+      <div class="muted">№ {{ g[1] or g[0] }} · {{ g[4] or "" }}{% if g[9] and g[9] != "Опубликовано (прием ценовых предложений)" %} · <b>{{ g[9] }}</b>{% endif %}</div>
     </div>
     <div class="deadline">
       <div>до {{ (g[3]|local).strftime("%d.%m %H:%M") if g[3] else "" }}</div>
@@ -100,7 +100,9 @@
     <tr><th>Лот</th><th>Кол-во</th><th>Цена за ед., ₸</th><th>Сумма, ₸</th><th>Аванс</th><th>Место</th><th>Отметка</th></tr>
     {% for l in lots.get(g[0], []) %}
     <tr id="lot-{{ l[1] }}">
-      <td><span class="title">{{ l[3] or "—" }}</span>{% if l[4] and l[4] != l[3] %}<div class="muted">{{ l[4][:160] }}</div>{% endif %}<div class="muted">№ {{ l[2] or l[1] }}</div></td>
+      <td><span class="title">{{ l[3] or "—" }}</span>{% if l[4] and l[4] != l[3] %}<div class="muted">{{ l[4][:160] }}</div>{% endif %}<div class="muted">№ {{ l[2] or l[1] }}</div>
+        {% if l[11] == "winner" %}<div>🏁 {{ l[12] }}{% if l[13] is not none %} — <b>{{ l[13] | money }} ₸</b>{% if l[8] %} <span class="muted">(−{{ '%.1f'|format((1 - (l[13]|float) / (l[8]|float)) * 100) }}%)</span>{% endif %}{% endif %} <span class="muted">· предложений: {{ l[14] }}</span></div>
+        {% elif l[11] == "failed" %}<div class="muted">🏁 Не состоялась{% if l[15] %}: {{ l[15] }}{% endif %}</div>{% endif %}</td>
       <td class="num">{% if l[5] is not none %}{{ '%g'|format(l[5]) }}{% endif %} {{ (l[6] or "")|lower }}</td>
       <td class="num">{{ l[7] | money }}</td>
       <td class="num">{{ l[8] | money }}</td>
