@@ -1,3 +1,4 @@
+import time
 from decimal import Decimal, InvalidOperation
 from importlib.resources import files
 from typing import Any, NamedTuple
@@ -12,9 +13,22 @@ def connect(url: str) -> psycopg.Connection:
     return psycopg.connect(url)
 
 
-def migrate(conn: psycopg.Connection) -> None:
-    conn.execute(files("zakup").joinpath("schema.sql").read_text(encoding="utf-8"))
-    conn.commit()
+def migrate(conn: psycopg.Connection, attempts: int = 10) -> None:
+    """Схема целиком. Сборщики в это время пишут в те же таблицы: ALTER TABLE ждёт
+    блокировку недолго и уступает (повтор), а не устраивает взаимную блокировку."""
+    schema = files("zakup").joinpath("schema.sql").read_text(encoding="utf-8")
+    for attempt in range(attempts):
+        try:
+            conn.execute("SET lock_timeout = '3s'")
+            conn.execute(schema)
+            conn.execute("RESET lock_timeout")
+            conn.commit()
+            return
+        except (psycopg.errors.LockNotAvailable, psycopg.errors.DeadlockDetected):
+            conn.rollback()
+            if attempt == attempts - 1:
+                raise
+            time.sleep(1 + attempt)
 
 
 class SyncState(NamedTuple):
