@@ -26,7 +26,7 @@ def personal(conn: psycopg.Connection, user_id: int) -> dict[str, Any]:
         """SELECT l.id, l.name_ru, l.amount, l.prepayment, a.end_date, m.status
            FROM lot_marks m JOIN lots l ON l.id = m.lot_id
            JOIN announcements a ON a.id = l.trd_buy_id
-           WHERE m.user_id = %s AND m.status IN ('interested', 'preparing', 'submitted')
+           WHERE m.user_id = %s AND m.status = 'interested'
              AND a.end_date > now()
            ORDER BY a.end_date LIMIT 6""",
         (user_id,),

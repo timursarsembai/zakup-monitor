@@ -87,7 +87,7 @@
   <tr>
     <td class="muted">{{ o.lotNumber }}</td>
     <td><a href="/lots/{{ o.id }}">{{ loc(o) }}</a>{% if oi.extra_desc %}<div class="muted">{{ pick(oi.extra_desc, oi.extra_desc_kz)[:140] }}</div>{% endif %}
-      {% if marks.get(o.id) and marks.get(o.id)[0] %}<div><span class="badge sub">{{ mark_statuses.get(marks.get(o.id)[0]) }}</span></div>{% endif %}</td>
+      {% if marks.get(o.id) and marks.get(o.id)[0] %}<div><span class="badge sub">♥ {{ _("В избранном") }}</span></div>{% endif %}</td>
     <td class="num">{{ '%g'|format(o.count or 0) }} {{ (pick(oi.unit_name, oi.unit_name_kz) or "")|lower }}</td>
     <td class="num">{{ oi.price | money }}</td>
     <td class="num">{{ o.amount | money }}</td>

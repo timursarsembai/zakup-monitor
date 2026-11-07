@@ -354,3 +354,9 @@ CREATE TABLE IF NOT EXISTS sources (
 -- Поиск товаров: сколько предложений искать и «найти ещё» (дополнить прошлый результат).
 ALTER TABLE lot_research ADD COLUMN IF NOT EXISTS target integer NOT NULL DEFAULT 10;
 ALTER TABLE lot_research ADD COLUMN IF NOT EXISTS base_id bigint REFERENCES lot_research (id) ON DELETE SET NULL;
+
+-- 2026-11-08: из отметок осталось только «избранное» (interested). Прежние
+-- статусы работы с лотом — в избранное, «Не подходит» — снять.
+UPDATE lot_marks SET status = 'interested'
+WHERE status IN ('preparing', 'submitted', 'won', 'lost');
+UPDATE lot_marks SET status = '' WHERE status = 'rejected';

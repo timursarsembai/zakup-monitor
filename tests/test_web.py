@@ -122,26 +122,24 @@ def test_announcement_page_shows_lots_and_loads_spec(client, conn, monkeypatch):
     assert client.get("/a/404404").status_code == 404
 
 
-def test_marks_on_search_my_page_and_hiding(client, conn):
+def test_favorite_heart_on_search_and_my_lots(client, conn):
     db.upsert_announcement(conn, {"id": 78, "name_ru": "Стулья", "end_date": "2099-01-01 09:00:00"})
     db.upsert_lot(conn, {"id": 6, "trd_buy_id": 78, "name_ru": "Стул офисный", "amount": 500000})
     conn.commit()
     _login(client)
-    search = "/lots?applied=1&deadline_mode="
-    assert "Стул офисный" in client.get(search).text
-    response = client.post("/lots/6/mark", data={"status": "preparing", "next": search},
+    search = "/lots?applied=1&deadline_mode=&advance_min=0"
+    page = client.get(search).text
+    assert "Стул офисный" in page and 'name="status" value="interested"' in page and "В избранное" in page
+    response = client.post("/lots/6/mark", data={"status": "interested", "next": search},
                            headers=ORIGIN, follow_redirects=False)
     assert response.headers["location"] == search + "#lot-6"
-    client.post("/lots/6/mark", data={"note": "поставщик Алатау", "next": "/my"}, headers=ORIGIN)
+    assert 'aria-pressed="true"' in client.get(search).text
     my = client.get("/my").text
-    assert "Готовлю заявку" in my and "Стул офисный" in my and "поставщик Алатау" in my
-    client.post("/lots/6/mark", data={"status": "rejected"}, headers=ORIGIN)
-    page = client.get(search).text
-    assert "Стул офисный" not in page and "Скрыто с отметкой" in page
-    assert "Стул офисный" in client.get(search + "&hidden=1").text
-    assert client.post("/lots/6/mark", data={"status": "bogus"}, headers=ORIGIN).status_code == 422
-    assert client.post("/lots/999/mark", data={"status": "won"}, headers=ORIGIN).status_code == 404
-
+    assert "Стул офисный" in my and "В избранном" in my
+    client.post("/lots/6/mark", data={"status": ""}, headers=ORIGIN)
+    assert "Избранных лотов пока нет" in client.get("/my").text
+    assert client.post("/lots/6/mark", data={"status": "won"}, headers=ORIGIN).status_code == 422
+    assert client.post("/lots/999/mark", data={"status": "interested"}, headers=ORIGIN).status_code == 404
 
 def test_finished_announcement_shows_winners_and_contracts(client, conn, monkeypatch):
     from tests.test_results import PROTOCOL, FakeClient, _announcement
@@ -253,20 +251,6 @@ def test_subscribe_only_without_fixed_dates_and_matches_filter(client, conn):
     assert 'value="%d" checked' % sub in matches
     assert 'value="%d" checked' % sub in client.get("/matches").text  # первая по умолчанию
     assert "Отметьте подписки" in client.get("/matches?filtered=1").text
-
-
-def test_my_lots_filter_by_mark(client, conn):
-    db.upsert_announcement(conn, {"id": 79, "name_ru": "Мебель", "end_date": "2099-01-01 09:00:00"})
-    db.upsert_lot(conn, {"id": 7, "trd_buy_id": 79, "name_ru": "Шкаф", "amount": 1})
-    db.upsert_lot(conn, {"id": 8, "trd_buy_id": 79, "name_ru": "Тумба", "amount": 1})
-    conn.commit()
-    _login(client)
-    client.post("/lots/7/mark", data={"status": "interested"}, headers=ORIGIN)
-    client.post("/lots/8/mark", data={"status": "submitted"}, headers=ORIGIN)
-    both = client.get("/my").text
-    assert "Шкаф" in both and "Тумба" in both
-    only = client.get("/my?status=submitted").text
-    assert "Тумба" in only and "Шкаф" not in only
 
 
 def test_lot_page_research_section_and_start(client, conn, monkeypatch):

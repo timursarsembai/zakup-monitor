@@ -1,7 +1,7 @@
-"""Отметки на лотах: «Интересно», «Готовлю заявку», «Заявка подана», итог.
+"""Избранные лоты («♥ В избранное») — «Мои лоты».
 
-Пока приём заявок открыт, по лотам «Интересно» и «Готовлю заявку» бот
-напоминает в Telegram: за сутки и за 3 часа до окончания.
+Пока приём заявок открыт, бот напоминает об избранных лотах в Telegram:
+за сутки и за 3 часа до окончания; после итогов — кто выиграл.
 """
 
 import html
@@ -17,18 +17,10 @@ from zakup.matcher import lot_url
 
 logger = logging.getLogger(__name__)
 
-STATUSES = {
-    "interested": "Интересно",
-    "preparing": "Готовлю заявку",
-    "submitted": "Заявка подана",
-    "won": "Выиграли",
-    "lost": "Не выиграли",
-    "rejected": "Не подходит",
-}
-# Порядок разделов на странице «Мои лоты».
-ORDER = ["preparing", "interested", "submitted", "won", "lost", "rejected"]
-# По этим статусам заявка ещё не подана — о сроке нужно напомнить.
-REMIND_STATUSES = ["interested", "preparing"]
+# Отметка одна — «в избранное» (status 'interested'); пустой статус — не отмечен.
+# Колонка status оставлена, чтобы не трогать схему и старые записи.
+STATUSES = {"interested": "В избранном"}
+REMIND_STATUSES = ["interested"]
 REMIND_HOURS = [24, 3]
 NOTE_LIMIT = 2000
 
@@ -130,7 +122,7 @@ def remind(conn: psycopg.Connection, now: datetime | None = None, pause: float =
             f"{end.astimezone(PORTAL_TZ):%d.%m %H:%M}",
             f"{html.escape(name or '—')} · {_money(amount)}",
             html.escape(customer or ""),
-            f"Отметка / Белгі: {STATUSES[status]}",
+            "♥ В избранном / Таңдаулыда",
         ]
         if note:
             lines.append(f"Заметка: {html.escape(note[:300])}")
@@ -163,8 +155,8 @@ OUTCOME_TEXT = {"winner": "Итоги подведены / Қорытынды ш
 
 
 def announce_results(conn: psycopg.Connection, pause: float = 1.1) -> int:
-    """Сообщает итог по отмеченным лотам. Если в протоколе есть БИН организации
-    пользователя, сам ставит «Выиграли» или «Не выиграли»."""
+    """Сообщает итог по избранным лотам; если в протоколе есть БИН организации
+    пользователя — пишет, выиграли или нет."""
     rows = conn.execute(
         """SELECT m.user_id, m.lot_id, m.status, u.telegram_chat_id, u.company_bin,
                   r.outcome, r.reason, r.winner_bin, r.winner_name, r.winner_total, r.offers,
@@ -179,9 +171,6 @@ def announce_results(conn: psycopg.Connection, pause: float = 1.1) -> int:
     for (user_id, lot_id, status, chat_id, company_bin, outcome, reason, winner_bin,
          winner_name, winner_total, offers, a_id, name, amount) in rows:
         mine = company_bin and any(o.get("bin") == company_bin for o in offers or [])
-        new_status = status
-        if mine and status not in ("won", "lost"):
-            new_status = "won" if winner_bin == company_bin else "lost"
         lines = [f"🏁 <b>{OUTCOME_TEXT.get(outcome, outcome)}</b>",
                  f"{html.escape(name or '—')} · {_money(amount)}"]
         if outcome == "winner":
@@ -190,8 +179,9 @@ def announce_results(conn: psycopg.Connection, pause: float = 1.1) -> int:
         elif reason:
             lines.append(f"Причина / Себебі: {html.escape(reason)}")
         lines.append(f"Предложений / Ұсыныстар: {len(offers or [])}")
-        if new_status != status:
-            lines.append(f"Отметка изменена / Белгі өзгерді: {STATUSES[new_status]}")
+        if mine:
+            won = winner_bin == company_bin
+            lines.append("🎉 Вы выиграли / Сіз ұттыңыз" if won else "Вы не выиграли / Сіз ұтпадыңыз")
         lines.append(f'<a href="{lot_url(lot_id)}">Открыть лот / Лотты ашу</a>')
         if chat_id:
             try:
@@ -201,10 +191,8 @@ def announce_results(conn: psycopg.Connection, pause: float = 1.1) -> int:
                 if not error.chat_gone:
                     break
         conn.execute(
-            """UPDATE lot_marks SET result_notified_at = now(), status = %s,
-                   status_at = CASE WHEN status = %s THEN status_at ELSE now() END
-               WHERE user_id = %s AND lot_id = %s""",
-            (new_status, new_status, user_id, lot_id),
+            "UPDATE lot_marks SET result_notified_at = now() WHERE user_id = %s AND lot_id = %s",
+            (user_id, lot_id),
         )
         conn.commit()
         sent += 1

@@ -95,7 +95,6 @@ def _time_left(end: datetime | None) -> str:
 
 
 templates.env.globals["time_left"] = _time_left
-templates.env.globals["mark_statuses"] = marks.STATUSES
 templates.env.globals["site_url"] = SITE_URL
 templates.env.globals["_"] = i18n.gettext
 templates.env.filters["tr"] = i18n.gettext
@@ -365,20 +364,13 @@ def _search_context(request: Request, current: Filters, scope: str, total: int, 
 
 
 @app.get("/lots")
-def lots_search(request: Request, user: User, page: int = 1, hidden: int = 0,
-                per_page: int = PAGE_SIZE):
+def lots_search(request: Request, user: User, page: int = 1, per_page: int = PAGE_SIZE):
     form = parse_qs(request.url.query)
     current = Filters.from_form(form)
     page = max(page, 1)
     per_page = _per_page(per_page)
     now = datetime.now(UTC)
     where, params = current.where(now, "lots")
-    params["user"] = user
-    hidden_where = where
-    if not hidden:
-        # Лоты, отмеченные «Не подходит», в выдаче не мешают.
-        where += """ AND NOT EXISTS (SELECT 1 FROM lot_marks m WHERE m.user_id = %(user)s
-                                     AND m.lot_id = l.id AND m.status = 'rejected')"""
     with pool.connection() as conn:
         rows = conn.execute(
             f"""SELECT l.id, l.lot_number, a.id, a.number_anno, a.name_ru,
@@ -399,12 +391,6 @@ def lots_search(request: Request, user: User, page: int = 1, hidden: int = 0,
         total = conn.execute(
             f"SELECT count(*) FROM lots l, announcements a WHERE {where}", params
         ).fetchone()[0]
-        hidden_count = conn.execute(
-            f"""SELECT count(*) FROM lots l, announcements a, lot_marks m
-                WHERE {hidden_where} AND m.user_id = %(user)s AND m.lot_id = l.id
-                  AND m.status = 'rejected'""",
-            params,
-        ).fetchone()[0]
         lot_marks = marks.of_user(conn, user, [row[0] for row in rows])
         stats = conn.execute(
             """SELECT (SELECT count(*) FROM announcements WHERE end_date > now()),
@@ -414,8 +400,7 @@ def lots_search(request: Request, user: User, page: int = 1, hidden: int = 0,
         ).fetchone()
         groups = _user_groups(conn, user)
     context = _search_context(request, current, "lots", total, page, form, now, per_page)
-    context.update(rows=rows, marks=lot_marks, hidden=hidden, hidden_count=hidden_count,
-                   stats=stats, groups=groups)
+    context.update(rows=rows, marks=lot_marks, stats=stats, groups=groups)
     return templates.TemplateResponse(request, "lots.html", context)
 
 
@@ -751,7 +736,7 @@ def mark_lot(
     note: Annotated[str | None, Form()] = None,
     next: Annotated[str, Form()] = "/my",
 ):
-    if status and status not in marks.STATUSES:
+    if status not in ("", "interested"):
         raise HTTPException(422, "неизвестная отметка")
     with pool.connection() as conn:
         if not conn.execute("SELECT 1 FROM lots WHERE id = %s", (lot_id,)).fetchone():
@@ -922,17 +907,12 @@ def my_lots(request: Request, user: User):
                ORDER BY a.end_date NULLS LAST, l.trd_buy_id, l.id""",
             (user,),
         ).fetchall()
-    chosen = [v for v in parse_qs(request.url.query).get("status", []) if v in marks.STATUSES]
-    sections = {status: [] for status in marks.ORDER}
-    for row in rows:
-        sections.setdefault(row[0], []).append(row)
-    counts = {status: len(items) for status, items in sections.items()}
-    if chosen:
-        sections = {status: items for status, items in sections.items() if status in chosen}
+    now = datetime.now(UTC)
+    # Сначала открытые — по сроку, потом завершённые.
+    rows.sort(key=lambda r: (r[10] is None or r[10] < now, r[10] or now))
     return templates.TemplateResponse(
         request, "my.html",
-        {"sections": sections, "counts": counts, "chosen": chosen, "now": datetime.now(UTC),
-         "here": request.url.path + (f"?{request.url.query}" if request.url.query else "")},
+        {"rows": rows, "now": now, "here": request.url.path},
     )
 
 

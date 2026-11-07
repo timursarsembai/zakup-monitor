@@ -28,7 +28,7 @@ def test_reminds_once_per_threshold(conn, monkeypatch):
     sent = []
     monkeypatch.setattr(marks.telegram, "send_message", lambda chat, text: sent.append((chat, text)))
     user = _lot(conn, NOW + timedelta(hours=30))
-    marks.set_mark(conn, user, 70, "preparing")
+    marks.set_mark(conn, user, 70, "interested")
     conn.execute("UPDATE lot_marks SET status_at = %s", (NOW - timedelta(days=1),))
     assert marks.remind(conn, NOW, pause=0) == 0  # до окончания больше суток
     later = NOW + timedelta(hours=7)
@@ -39,16 +39,15 @@ def test_reminds_once_per_threshold(conn, monkeypatch):
     assert "Осталось / Қалды: 2 ч" in sent[1][1]
 
 
-def test_no_reminder_for_fresh_or_submitted_marks(conn, monkeypatch):
+def test_no_reminder_for_fresh_or_removed_favorites(conn, monkeypatch):
     sent = []
     monkeypatch.setattr(marks.telegram, "send_message", lambda chat, text: sent.append(text))
     user = _lot(conn, NOW + timedelta(hours=10))
     marks.set_mark(conn, user, 70, "interested")
     conn.execute("UPDATE lot_marks SET status_at = %s", (NOW,))
-    # Отметили, когда до конца было 10 ч: суточное напоминание лишнее, а за 3 часа — придёт.
+    # В избранное добавили, когда до конца было 10 ч: суточное напоминание лишнее, за 3 часа — придёт.
     assert marks.remind(conn, NOW + timedelta(hours=1), pause=0) == 0
     assert marks.remind(conn, NOW + timedelta(hours=8), pause=0) == 1
-    marks.set_mark(conn, user, 70, "submitted")
-    conn.execute("UPDATE lot_marks SET status_at = %s", (NOW - timedelta(days=1),))
+    marks.set_mark(conn, user, 70, "")  # убрали из избранного
     conn.execute("UPDATE lot_marks SET reminded_hours = NULL")
     assert marks.remind(conn, NOW + timedelta(hours=9), pause=0) == 0

@@ -1,6 +1,6 @@
 {# Карточка лота и его итоги: на странице объявления и на странице лота.
    Импортировать with context: нужны info, marks, results, company_bin, here, a. #}
-{% from "_marks.html" import mark_control, note_form, mark_styles %}
+{% from "_marks.html" import mark_control, mark_styles %}
 
 {% macro lot_styles() %}
 {{ mark_styles() }}
@@ -45,8 +45,7 @@
     /* Телефон: всё по левому краю, отметка — во всю ширину, подписи над значениями. */
     .lot-head { flex-direction: column; gap: 10px; }
     .lot-sum { text-align: left; width: 100%; }
-    .lot-sum .mark-form, .lot-sum .mark-select { width: 100%; }
-    .lot-sum .mark-select { font-size: 16px; min-height: 44px; }
+    .lot-sum .fav { font-size: 15px; padding: 8px 14px; }
     .lot dl.facts { grid-template-columns: minmax(0, 1fr); gap: 2px; }
     .lot dl.facts dd { margin-bottom: 8px; }
   }
@@ -83,7 +82,6 @@
     </dl>
     {% set r = results.get(lot.id) %}
     {% if r %}<p style="margin:10px 0 0">{% if r.outcome == "winner" %}{{ _("🏁 Победитель:") }} <b>{{ r.winner_name }}</b>{% if r.winner_total is not none %} — {{ r.winner_total | money }} ₸{% endif %}{% if company_bin and r.winner_bin == company_bin %} <span class="badge hot">{{ _("это вы") }}</span>{% endif %}{% else %}{{ _("🏁 Не состоялась") }}{% if r.reason %} {{ _("в связи с") }} {{ r.reason }}{% endif %}{% endif %} <span class="muted">{{ _("· предложений:") }} {{ r.offers|length }}</span></p>{% endif %}
-    {% if marks.get(lot.id) %}{{ note_form(lot.id, marks.get(lot.id), here) }}{% endif %}
     {% if spec_file(lot) %}
     {% set cached = specs.get(lot.id) %}
     {# Текст уже в базе — показываем сразу; нет — догружаем с портала из браузера. #}

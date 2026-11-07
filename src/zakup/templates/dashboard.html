@@ -49,19 +49,14 @@
 <div class="grid">
   <section class="card">
     <h2>{{ _("Мои лоты") }}</h2>
-    {% if p.marks %}
-    <div class="marks">
-      {% for status, label in mark_statuses.items() if p.marks.get(status) %}
-      <a href="/my?status={{ status }}">{{ _(label) }}<b>{{ p.marks[status] }}</b></a>
-      {% endfor %}
-    </div>
-    {% else %}<p class="muted">{{ _("Отметьте лоты в поиске — «Интересно», «Готовлю заявку»… — и они появятся здесь.") }}</p>{% endif %}
+    <p><a href="/my">♥ {{ _("В избранном:") }} <b>{{ p.marks.get("interested", 0) }}</b></a></p>
+    {% if not p.marks %}<p class="muted">{{ _("Нажмите ♡ «В избранное» у лота — он появится здесь.") }}</p>{% endif %}
     {% if p.upcoming %}
     <h2 style="margin-top:14px">{{ _("Ближайшие сроки") }}</h2>
     <ul class="list">
       {% for l in p.upcoming %}
       {% set left = (l[4] - now).total_seconds() %}
-      <li><span><a href="/lots/{{ l[0] }}">{{ l[1] or "—" }}</a> <span class="muted">· {{ _(mark_statuses.get(l[5])) }}</span></span>
+      <li><span><a href="/lots/{{ l[0] }}">{{ l[1] or "—" }}</a> </span>
         <span class="num {{ 'urgent' if left < 86400 }}">{{ time_left(l[4]) }}</span></li>
       {% endfor %}
     </ul>
