@@ -12,8 +12,9 @@ from zakup.goszakup import PORTAL_TZ
     ("today", "expected"),
     [
         (date(2026, 11, 2), date(2026, 11, 4)),   # пн -> ср
-        (date(2026, 11, 5), date(2026, 11, 7)),   # чт -> сб
-        (date(2026, 11, 6), date(2026, 11, 8)),   # пт -> вс
+        (date(2026, 11, 4), date(2026, 11, 6)),   # ср -> пт
+        (date(2026, 11, 5), date(2026, 11, 9)),   # чт -> пн
+        (date(2026, 11, 6), date(2026, 11, 10)),  # пт -> вт
         (date(2026, 11, 7), date(2026, 11, 10)),  # сб -> вт
         (date(2026, 11, 8), date(2026, 11, 10)),  # вс -> вт
     ],
@@ -72,7 +73,7 @@ NOW = datetime(2026, 11, 7, 6, 0, tzinfo=UTC)  # суббота, 11:00 в Алм
 
 
 def _announcement(conn, ident, *, status=240, disable=True, kato=("751410000",), total=500000,
-                  ends_in_days=2, prepayment=30, lots=None):
+                  ends_in_days=3, prepayment=30, lots=None):
     end = (NOW + timedelta(days=ends_in_days)).astimezone(PORTAL_TZ).strftime("%Y-%m-%d %H:%M:%S")
     db.upsert_announcement(conn, {"id": ident, "name_ru": f"Закупка {ident}", "total_sum": total,
                                   "ref_buy_status_id": status, "end_date": end})
@@ -101,6 +102,7 @@ def test_where_applies_every_default_per_lot(conn):
     _announcement(conn, 5, kato=("196855100",))      # Алматинская область
     _announcement(conn, 6, total=299999)
     _announcement(conn, 7, ends_in_days=4)           # после вторника
+    _announcement(conn, 12, ends_in_days=2)          # понедельник: раньше дня по правилу
     _announcement(conn, 8, ends_in_days=-1)          # уже закончилось
     _announcement(conn, 9, prepayment=0)
     # Объявление на 1 млн, но лоты мелкие или в другом регионе — подходит только один.
@@ -117,7 +119,8 @@ def test_where_applies_every_default_per_lot(conn):
     assert _lot_ids(conn, Filters(q="Лот или годится")) == [10, 50, 90, 113]
     assert Filters.from_form({"applied": ["1"], "advance_min": ["30"], "advance_max": ["500"]}
                              ).describe().endswith("аванс 30–100%")
-    assert _lot_ids(conn, Filters(deadline="")) == [10, 50, 70, 90, 113]
+    assert _lot_ids(conn, Filters(deadline="")) == [10, 50, 70, 90, 113, 120]
+    assert _lot_ids(conn, Filters(deadline="2026-11-10")) == [10, 50, 90, 113, 120]
 
 
 def test_filter_subscription_sends_lots_grouped_by_announcement(conn, monkeypatch):
@@ -142,3 +145,29 @@ def test_filter_subscription_sends_lots_grouped_by_announcement(conn, monkeypatc
     text = sent[0]
     assert text.index("Стол") < text.index("Стул")  # с авансом — первым
     assert "аванс 30%" in text and "/a/1" in text
+
+
+def test_group_gets_each_lot_once_and_announcement_scope_sends_all_lots(conn, monkeypatch):
+    sent = []
+    monkeypatch.setattr(matcher.telegram, "send_message", lambda chat, text: sent.append((chat, text)))
+    conn.execute("INSERT INTO telegram_groups (chat_id, title) VALUES ('-100', 'Партнёры')")
+    users = [conn.execute(
+        "INSERT INTO users (email, telegram_chat_id) VALUES (%s, %s) RETURNING id", (email, chat)
+    ).fetchone()[0] for email, chat in (("amir", "1"), ("serik", "2"))]
+    lot_filter = Filters(min_sum=Decimal(300_000))
+    for user, name, scope in ((users[0], "Мебель", "lots"), (users[1], "Всё", "announcements")):
+        conn.execute(
+            """INSERT INTO subscriptions (user_id, name, query, kind, filters, scope, chat_id)
+               VALUES (%s, %s, '', 'announcements', %s, %s, '-100')""",
+            (user, name, db.Jsonb(lot_filter.to_json()), scope))
+    _announcement(conn, 1, total=500_000, lots=[
+        {"id": 11, "amount": 400_000, "prepayment": 30, "kato": ["751410000"], "name": "Стол"},
+        {"id": 12, "amount": 100_000, "prepayment": 0, "kato": ["751410000"], "name": "Стул"},
+    ])
+    # «Мебель» (лоты): только стол; «Всё» (объявления): объявление целиком — стол и стул.
+    assert matcher.run_filters(conn, NOW) == 3
+    assert matcher.deliver(conn, pause=0) == 2
+    assert [chat for chat, _ in sent] == ["-100"]
+    text = sent[0][1]
+    assert text.count("Стол") == 1 and "Стул" in text and "· amir" in text
+    assert conn.execute("SELECT count(*) FROM matches WHERE notified_at IS NULL").fetchone()[0] == 0

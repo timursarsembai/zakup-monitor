@@ -1,6 +1,22 @@
 {% extends "base.html" %}
 {% block title %}Совпадения{% endblock %}
+{% block style %}
+  .subs { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 14px; align-items: center; }
+  .subs label { display: inline-flex; gap: 6px; align-items: center; padding: 4px 12px; border: 1px solid var(--line); border-radius: 999px; cursor: pointer; font-size: 14px; }
+  .subs label:has(input:checked) { background: color-mix(in srgb, var(--accent) 18%, transparent); border-color: var(--accent); }
+  .subs input { margin: 0; }
+{% endblock %}
 {% block main %}
+{% if subs %}
+<form class="subs" method="get" action="/matches">
+  <span class="muted">Подписки:</span>
+  {% for s in subs %}
+  <label><input type="checkbox" name="sub" value="{{ s[0] }}" {% if s[0] in chosen %}checked{% endif %} onchange="this.form.submit()"> {{ s[1] }} <span class="muted">{{ s[3] }}</span></label>
+  {% endfor %}
+  {% if chosen %}<a href="/matches">все</a>{% endif %}
+  <noscript><button>Показать</button></noscript>
+</form>
+{% endif %}
 <div class="table-wrap"><table>
   <tr><th>Когда</th><th>Подписка</th><th>Лот</th><th>Заказчик</th><th>Сумма, ₸</th><th>Аванс</th><th>Приём до</th></tr>
   {% for r in rows %}

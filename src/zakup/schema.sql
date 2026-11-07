@@ -236,3 +236,28 @@ ALTER TABLE announcements ADD COLUMN IF NOT EXISTS tsv tsvector GENERATED ALWAYS
 CREATE INDEX IF NOT EXISTS announcements_tsv ON announcements USING gin (tsv);
 ALTER TABLE lots ADD COLUMN IF NOT EXISTS enstru text[];
 CREATE INDEX IF NOT EXISTS lots_status ON lots (status_id);
+
+-- Подписки 2026-11-08: с какой страницы сохранён фильтр ('lots' / 'announcements')
+-- и куда слать — в личный чат владельца (NULL) или в подключённую группу.
+ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS scope text NOT NULL DEFAULT 'lots';
+ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS chat_id text;
+-- Telegram-группы: бот добавлен в группу, пользователь привязал её кодом.
+CREATE TABLE IF NOT EXISTS telegram_groups (
+    chat_id   text PRIMARY KEY,
+    title     text,
+    linked_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS user_groups (
+    user_id bigint NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    chat_id text NOT NULL REFERENCES telegram_groups (chat_id) ON DELETE CASCADE ON UPDATE CASCADE,
+    PRIMARY KEY (user_id, chat_id)
+);
+ALTER TABLE telegram_link_codes ADD COLUMN IF NOT EXISTS kind text NOT NULL DEFAULT 'private';
+-- Какие лоты уже ушли в чат: один лот по нескольким подпискам (в т.ч. разных
+-- людей в общей группе) приходит в чат один раз.
+CREATE TABLE IF NOT EXISTS chat_lots (
+    chat_id text NOT NULL,
+    lot_id  bigint NOT NULL REFERENCES lots (id) ON DELETE CASCADE,
+    sent_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (chat_id, lot_id)
+);

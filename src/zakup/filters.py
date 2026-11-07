@@ -11,6 +11,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any
+from urllib.parse import urlencode
 
 from zakup.goszakup import PORTAL_TZ
 
@@ -125,10 +126,14 @@ DEADLINE_RULE = "rule"
 
 
 def deadline_by_rule(today: date) -> date:
-    """«Окончание приема по»: через 2 дня, а в субботу и воскресенье — ближайший вторник."""
-    if today.weekday() >= 5:
-        return today + timedelta(days=(1 - today.weekday()) % 7)
-    return today + timedelta(days=2)
+    """День окончания приёма «через 2 рабочих дня»: пн → ср, ср → пт, чт → пн,
+    пт, сб и вс → вт. Праздники не учитываются."""
+    day, left = today, 2
+    while left:
+        day += timedelta(days=1)
+        if day.weekday() < 5:
+            left -= 1
+    return day
 
 
 def fin_years(today: date) -> list[int]:
@@ -153,7 +158,8 @@ class Filters:
     years: list[int] = field(default_factory=list)
     min_sum: Decimal | None = Decimal(300_000)
     max_sum: Decimal | None = None
-    # «Окончание по». DEADLINE_RULE — по правилу выше, ГГГГ-ММ-ДД — дата, "" — без ограничения.
+    # Окончание приёма. DEADLINE_RULE — ровно в день по правилу выше (каждый день
+    # сдвигается сам — для подписок), ГГГГ-ММ-ДД — «по» эту дату, "" — без ограничения.
     deadline: str = DEADLINE_RULE
     end_from: str = ""
     start_from: str = ""
@@ -323,11 +329,15 @@ class Filters:
             clauses.append(f"{amount} <= %(max_sum)s")
             params["max_sum"] = self.max_sum
         if (deadline := self.deadline_date(now.astimezone(PORTAL_TZ).date())) is not None:
-            # «По» включительно: до конца этого дня по времени Астаны.
+            # «По» включительно: до конца этого дня по времени Астаны. По правилу —
+            # только этот день.
             clauses.append("a.end_date < %(deadline_end)s")
             params["deadline_end"] = datetime.combine(
                 deadline + timedelta(days=1), time.min, PORTAL_TZ
             )
+            if self.deadline == DEADLINE_RULE:
+                clauses.append("a.end_date >= %(deadline_start)s")
+                params["deadline_start"] = datetime.combine(deadline, time.min, PORTAL_TZ)
         for column, start, end in (("end_date", self.end_from, ""),
                                    ("start_date", self.start_from, self.start_to),
                                    ("publish_date", self.published_from, self.published_to),
@@ -357,6 +367,34 @@ class Filters:
             clauses.append(f"NOT {tsv} @@ websearch_to_tsquery('russian', %(exclude)s)")
             params["exclude"] = " or ".join(words)
         return " AND ".join(clauses) or "true", params
+
+    def relative(self) -> bool:
+        """Нет зафиксированных дат: фильтр сам сдвигается со временем — на него
+        можно подписаться."""
+        return not (
+            (self.deadline and self.deadline != DEADLINE_RULE) or self.end_from
+            or self.start_from or self.start_to or self.published_from or self.published_to
+            or self.itogi_from or self.itogi_to
+        )
+
+    def to_query(self, scope: str = "lots") -> str:
+        """Ссылка на поиск с этим фильтром."""
+        pairs: list[tuple[str, Any]] = [("applied", 1)]
+        names = {"stages": "stage", "statuses": "status", "regions": "region",
+                 "methods": "method", "subjects": "subject", "years": "year"}
+        for key, value in self.to_json().items():
+            if key == "deadline":
+                pairs.append(("deadline_mode", "rule" if value == DEADLINE_RULE else ""))
+                if value and value != DEADLINE_RULE:
+                    pairs.append(("deadline_date", value))
+            elif key in names:
+                pairs += [(names[key], item) for item in value]
+            elif isinstance(value, bool):
+                if value:
+                    pairs.append((key, 1))
+            elif value not in (None, ""):
+                pairs.append((key, value))
+        return f"/{scope}?" + urlencode(pairs)
 
     def order_by(self, scope: str = "lots") -> str:
         orders = _LOT_ORDER if scope == "lots" else _ANNOUNCEMENT_ORDER
@@ -397,7 +435,7 @@ class Filters:
         if self.max_sum is not None:
             parts.append(f"до {self.max_sum:,.0f} ₸".replace(",", " "))
         if self.deadline == DEADLINE_RULE:
-            parts.append("окончание через 2 дня (в выходные — по вторник)")
+            parts.append("окончание через 2 рабочих дня")
         elif self.deadline:
             parts.append(f"окончание по {self.deadline}")
         for label, start, end in (("окончание", self.end_from, ""),

@@ -15,7 +15,7 @@ from typing import NamedTuple
 
 import psycopg
 
-from zakup import SITE_URL, telegram
+from zakup import SITE_URL, bot, telegram
 from zakup.filters import REGIONS, Filters
 from zakup.goszakup import PORTAL_TZ
 
@@ -65,13 +65,18 @@ def run_filters(conn: psycopg.Connection, now: datetime | None = None) -> int:
     now = now or datetime.now(UTC)
     found = 0
     subscriptions = conn.execute(
-        "SELECT id, filters FROM subscriptions WHERE active AND kind = 'announcements'"
+        "SELECT id, filters, scope FROM subscriptions WHERE active AND kind = 'announcements'"
     ).fetchall()
-    for sub_id, data in subscriptions:
-        where, params = Filters.from_json(data).where(now)
+    for sub_id, data, scope in subscriptions:
+        where, params = Filters.from_json(data).where(now, scope)
+        # Подписка с поиска объявлений присылает объявление целиком — со всеми лотами.
+        source = (
+            "lots l, announcements a" if scope == "lots"
+            else "announcements a JOIN lots l ON l.trd_buy_id = a.id"
+        )
         found += conn.execute(
             f"""INSERT INTO matches (subscription_id, lot_id)
-                SELECT %(sub_id)s, l.id FROM lots l, announcements a WHERE {where}
+                SELECT %(sub_id)s, l.id FROM {source} WHERE {where}
                 ON CONFLICT DO NOTHING""",
             {**params, "sub_id": sub_id},
         ).rowcount
@@ -101,7 +106,10 @@ class PendingLot(NamedTuple):
 
 def pending(conn: psycopg.Connection, limit: int = 2000) -> list[PendingLot]:
     rows = conn.execute(
-        """SELECT s.id, s.name, u.telegram_chat_id, l.id, l.name_ru,
+        """SELECT s.id,
+                  -- В общей группе видно, чья это подписка.
+                  CASE WHEN s.chat_id IS NULL THEN s.name ELSE s.name || ' · ' || u.email END,
+                  coalesce(s.chat_id, u.telegram_chat_id), l.id, l.name_ru,
                   coalesce(l.extra_desc, l.description_ru), l.amount, l.count, l.unit_name,
                   l.prepayment, l.kato, l.trd_buy_id, coalesce(a.number_anno, l.number_anno),
                   a.name_ru, a.end_date,
@@ -223,9 +231,46 @@ def _mark_notified(conn: psycopg.Connection, chosen: list[Notice]) -> None:
     conn.commit()
 
 
+def _already_sent(conn: psycopg.Connection, found: list[PendingLot]) -> set[tuple[str, int]]:
+    pairs = {(lot.chat_id, lot.lot_id) for lot in found if lot.chat_id}
+    if not pairs:
+        return set()
+    rows = conn.execute(
+        """SELECT chat_id, lot_id FROM chat_lots
+           WHERE (chat_id, lot_id) IN (SELECT * FROM unnest(%s::text[], %s::bigint[]))""",
+        ([p[0] for p in pairs], [p[1] for p in pairs]),
+    )
+    return {(row[0], row[1]) for row in rows}
+
+
+def _remember_sent(conn: psycopg.Connection, chat_id: str, batch: list[Notice]) -> None:
+    lots = sorted({lot_id for notice in batch for _, lot_id in notice.keys})
+    conn.execute(
+        """INSERT INTO chat_lots (chat_id, lot_id) SELECT %s, unnest(%s::bigint[])
+           ON CONFLICT DO NOTHING""",
+        (chat_id, lots),
+    )
+
+
 def deliver(conn: psycopg.Connection, pause: float = 1.1) -> int:
-    """Рассылает новые совпадения. Возвращает число отправленных лотов."""
-    found = notices(pending(conn))
+    """Рассылает новые совпадения. Возвращает число отправленных лотов.
+
+    Лот приходит в чат один раз, даже если подошёл под несколько подписок.
+    """
+    found_lots = pending(conn)
+    sent_before = _already_sent(conn, found_lots)
+    fresh, repeated = [], []
+    seen: set[tuple[str | None, int]] = set()
+    for lot in found_lots:
+        key = (lot.chat_id, lot.lot_id)
+        # Уже был в этом чате или пришёл по второй подписке в тот же чат — не повторяем.
+        if lot.chat_id and (key in sent_before or key in seen):
+            repeated.append((lot.subscription_id, lot.lot_id))
+            continue
+        seen.add(key)
+        fresh.append(lot)
+    _mark_notified(conn, [Notice(None, "", "", repeated)])
+    found = notices(fresh)
     # Без подключённого Telegram совпадение видно только на сайте, но считается обработанным.
     _mark_notified(conn, [n for n in found if not n.chat_id])
     by_chat: dict[str, list[Notice]] = {}
@@ -247,8 +292,10 @@ def deliver(conn: psycopg.Connection, pause: float = 1.1) -> int:
                     "UPDATE users SET telegram_chat_id = NULL WHERE telegram_chat_id = %s",
                     (chat_id,),
                 )
+                bot.unlink_group(conn, chat_id)
                 _mark_notified(conn, chat_notices)
                 break
+            _remember_sent(conn, chat_id, batch)
             _mark_notified(conn, batch)
             sent += sum(len(n.keys) for n in batch)
             # Telegram разрешает в один чат около сообщения в секунду.

@@ -41,6 +41,9 @@
   .range2 .fill { position: absolute; top: 12px; height: 4px; background: var(--accent); border-radius: 2px; pointer-events: none; }
   .presets { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
   .presets button { padding: 2px 8px; font-size: 12px; border-radius: 999px; }
+  .subscribe { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
+  .subscribe input, .subscribe select { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); font: inherit; }
+  .subscribe input { min-width: 240px; }
   .filter-open, .sheet-head { display: none; }
   @media (max-width: 760px) {
     .filter-open { display: block; width: 100%; text-align: left; margin: 10px 0; padding: 10px 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -113,10 +116,10 @@
         <input name="min_sum" value="{{ '%.0f'|format(f.min_sum) if f.min_sum is not none else '' }}" placeholder="с" inputmode="numeric" aria-label="Сумма с">
         <input name="max_sum" value="{{ '%.0f'|format(f.max_sum) if f.max_sum is not none else '' }}" placeholder="по" inputmode="numeric" aria-label="Сумма по">
       </div></div>
-    <div><label class="fl" for="f-deadline">Окончание приема заявок по</label>
+    <div><label class="fl" for="f-deadline">Окончание приема заявок</label>
       <select id="f-deadline" name="deadline_mode">
-        <option value="rule" {% if f.deadline == rule %}selected{% endif %}>через 2 дня, в выходные — вторник ({{ rule_date.strftime("%d.%m") }})</option>
-        <option value="date" {% if f.deadline and f.deadline != rule %}selected{% endif %}>по дате (поле ниже)</option>
+        <option value="rule" {% if f.deadline == rule %}selected{% endif %}>через 2 рабочих дня — {{ rule_date.strftime("%d.%m") }}, {{ ["пн", "вт", "ср", "чт", "пт", "сб", "вс"][rule_date.weekday()] }}</option>
+        <option value="date" {% if f.deadline and f.deadline != rule %}selected{% endif %}>по дате (поле «по»)</option>
         <option value="" {% if not f.deadline %}selected{% endif %}>без ограничения</option>
       </select></div>
     <div><span class="fl">Окончание приема заявок с — по</span>
@@ -161,11 +164,20 @@
     <label class="muted">Сортировка <select name="sort" onchange="this.form.submit()">
       {% for key, name in sorts.items() %}<option value="{{ key }}" {% if f.sort == key %}selected{% endif %}>{{ name }}</option>{% endfor %}
     </select></label>
-    {% if lots %}
-    <button formaction="/export.xlsx" title="Все найденные лоты в Excel">Excel</button>
-    <span class="spacer"></span>
-    <input name="name" placeholder="Название подписки" size="18" aria-label="Название подписки">
-    <button formmethod="post" formaction="/subscriptions/filter">Сохранить как подписку</button>
+    {% if lots %}<button formaction="/export.xlsx" title="Все найденные лоты в Excel">Excel</button>{% endif %}
+  </div>
+  <div class="subscribe">
+    {% if f.relative() %}
+    <input type="hidden" name="scope" value="{{ scope }}">
+    <input name="name" placeholder="Название подписки (необязательно)" aria-label="Название подписки">
+    <select name="chat_id" aria-label="Куда присылать">
+      <option value="">в мой Telegram</option>
+      {% for chat_id, title in groups %}<option value="{{ chat_id }}">в группу «{{ title }}»</option>{% endfor %}
+    </select>
+    <button formmethod="post" formaction="/subscriptions/filter" class="primary">🔔 Подписаться на этот поиск</button>
+    <span class="muted">Новые {{ "лоты" if lots else "объявления" }} по этим условиям придут в Telegram.</span>
+    {% else %}
+    <span class="muted">🔔 Подписаться можно, когда в фильтре нет конкретных дат: окончание «через 2 рабочих дня» или без ограничения — тогда условия сами сдвигаются каждый день.</span>
     {% endif %}
   </div>
 </form>

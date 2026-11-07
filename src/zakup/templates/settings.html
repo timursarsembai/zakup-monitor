@@ -36,6 +36,18 @@
   {% endif %}
 </section>
 <section class="panel">
+  <h2>Telegram-группы</h2>
+  <p class="muted">Результаты подписок можно присылать в общую группу — например, с партнёрами. Каждый участник подключает группу у себя, потом в подписке выбирает «в группу». Если лот подошёл под подписки нескольких человек, в группу он придёт один раз, с названием подписки и логином.</p>
+  {% for chat_id, title in groups %}
+  <div class="status"><span class="dot on"></span>{{ title }}
+    <form method="post" action="/settings/groups/remove" style="display:inline"><input type="hidden" name="chat_id" value="{{ chat_id }}"><button>Отключить</button></form></div>
+  {% endfor %}
+  {% if configured %}
+  <div class="actions"><form method="post" action="/settings/telegram/group"><button class="primary">Подключить группу</button></form></div>
+  <p class="note muted">Откроется Telegram: выберите группу — бот @{{ bot_username }} добавится в неё и подтвердит подключение. Ссылка одноразовая, действует 30 минут. Потом обновите эту страницу.</p>
+  {% endif %}
+</section>
+<section class="panel">
   <h2>Ваша организация</h2>
   <p class="muted">БИН или ИИН, под которым вы подаёте ценовые предложения. По нему в итогах отмечаются ваши предложения, а отмеченные лоты сами получают «Выиграли» или «Не выиграли».</p>
   <form class="actions" method="post" action="/settings/company">

@@ -1,6 +1,45 @@
 {% extends "base.html" %}
 {% block title %}Подписки{% endblock %}
+{% block style %}
+  .sub { border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; margin-bottom: 10px; }
+  .sub-head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: baseline; }
+  .sub-head b { font-size: 16px; }
+  .sub .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
+  .sub .actions form { margin: 0; }
+  .sub select { padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); font: inherit; }
+  .off { opacity: .6; }
+  h2 { font-size: 17px; margin: 28px 0 8px; }
+{% endblock %}
 {% block main %}
+<p class="muted">Подписка — сохранённый поиск. Откройте «Лоты» или «Объявления», задайте условия и нажмите «🔔 Подписаться на этот поиск». Подписок может быть сколько угодно, у каждой своё название, оно стоит в начале уведомления. Один лот в один чат приходит один раз, даже если подошёл под несколько подписок.</p>
+{% for r in rows if r[7] == "announcements" %}
+{% set f = filters[r[0]] %}
+<div class="sub {{ '' if r[5] else 'off' }}">
+  <div class="sub-head">
+    <div><b>{{ r[1] }}</b>{% if not r[5] %} <span class="muted">(выключена)</span>{% endif %}
+      <span class="muted"> · {{ "объявления целиком" if r[9] == "announcements" else "лоты" }} · совпадений: {{ r[6] }}</span></div>
+    <a href="{{ f.to_query(r[9]) }}">Открыть поиск →</a>
+  </div>
+  <div class="muted">{{ f.describe() }}</div>
+  <div class="actions">
+    <form method="post" action="/subscriptions/{{ r[0] }}/chat">
+      <select name="chat_id" onchange="this.form.submit()" aria-label="Куда присылать">
+        <option value="">в мой Telegram</option>
+        {% for chat_id, title in groups %}<option value="{{ chat_id }}" {% if r[10] == chat_id %}selected{% endif %}>в группу «{{ title }}»</option>{% endfor %}
+      </select>
+    </form>
+    <a href="/matches?sub={{ r[0] }}">Совпадения</a>
+    <form method="post" action="/subscriptions/{{ r[0] }}/toggle"><button>{{ "Выключить" if r[5] else "Включить" }}</button></form>
+    <form method="post" action="/subscriptions/{{ r[0] }}/delete" onsubmit="return confirm('Удалить подписку?')"><button>Удалить</button></form>
+  </div>
+</div>
+{% else %}
+<p>Подписок на поиск пока нет.</p>
+{% endfor %}
+{% if not groups %}<p class="muted">Чтобы присылать результаты в общую группу, подключите её в <a href="/settings">настройках</a>.</p>{% endif %}
+
+<h2>Подписки на слова</h2>
+<p class="muted">Проверяют только лоты, пришедшие после создания подписки. Слова через пробел — все сразу, «или» — любое, <code>-слово</code> — исключить, кавычки — фраза.</p>
 <form class="inline-form" method="post" action="/subscriptions">
   <input name="name" placeholder="название" required>
   <input name="query" placeholder="запрос: картридж или тонер" size="30" required>
@@ -8,13 +47,11 @@
   <input name="max_amount" placeholder="до" size="10">
   <button>Добавить</button>
 </form>
-<p class="muted">Подписку-фильтр объявлений проще всего сохранить с главной страницы кнопкой «Сохранить как подписку». Здесь — подписка на слова в новых лотах: она проверяет только лоты, пришедшие после её создания. Синтаксис запроса: слова через пробел — все сразу, <code>or</code> — любое, <code>-слово</code> — исключить, кавычки — фраза.</p>
 <div class="table-wrap"><table>
-  <tr><th>Название</th><th>Условия</th><th>Сумма</th><th>Совпадений</th><th></th></tr>
-  {% for r in rows %}
+  {% for r in rows if r[7] != "announcements" %}
   <tr>
     <td>{{ r[1] }}{% if not r[5] %} <span class="muted">(выключена)</span>{% endif %}</td>
-    <td>{% if r[7] == "announcements" %}{{ described[r[0]] }}{% else %}<code>{{ r[2] }}</code>{% endif %}</td>
+    <td><code>{{ r[2] }}</code></td>
     <td class="num">{% if r[3] is not none %}от {{ r[3] | money }} {% endif %}{% if r[4] is not none %}до {{ r[4] | money }}{% endif %}</td>
     <td class="num">{{ r[6] }}</td>
     <td>
@@ -22,8 +59,6 @@
       <form method="post" action="/subscriptions/{{ r[0] }}/delete" style="display:inline" onsubmit="return confirm('Удалить подписку?')"><button>Удалить</button></form>
     </td>
   </tr>
-  {% else %}
-  <tr><td colspan="5" class="muted">Подписок пока нет.</td></tr>
   {% endfor %}
 </table></div>
 {% endblock %}

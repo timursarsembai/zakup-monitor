@@ -192,6 +192,16 @@ def home(request: Request, _: User):
     return RedirectResponse(f"/lots{query}", status_code=307)
 
 
+def _user_groups(conn, user: int) -> list[tuple[str, str]]:
+    """Подключённые пользователем Telegram-группы: [(chat_id, название)]."""
+    return conn.execute(
+        """SELECT g.chat_id, coalesce(g.title, 'Группа') FROM user_groups ug
+           JOIN telegram_groups g ON g.chat_id = ug.chat_id
+           WHERE ug.user_id = %s ORDER BY g.title""",
+        (user,),
+    ).fetchall()
+
+
 def _search_context(request: Request, current: Filters, scope: str, total: int, page: int,
                     form: dict, now: datetime) -> dict:
     query = {k: v for k, v in form.items() if k not in ("page", "hidden")}
@@ -264,14 +274,15 @@ def lots_search(request: Request, user: User, page: int = 1, hidden: int = 0):
                        WHERE end_date > now() AND details_fetched_at IS NULL),
                       (SELECT max(updated_at) FROM sync_state)"""
         ).fetchone()
+        groups = _user_groups(conn, user)
     context = _search_context(request, current, "lots", total, page, form, now)
     context.update(rows=rows, marks=lot_marks, hidden=hidden, hidden_count=hidden_count,
-                   stats=stats)
+                   stats=stats, groups=groups)
     return templates.TemplateResponse(request, "lots.html", context)
 
 
 @app.get("/announcements")
-def announcements_search(request: Request, _: User, page: int = 1):
+def announcements_search(request: Request, user: User, page: int = 1):
     form = parse_qs(request.url.query)
     current = Filters.from_form(form)
     page = max(page, 1)
@@ -293,8 +304,9 @@ def announcements_search(request: Request, _: User, page: int = 1):
         total = conn.execute(
             f"SELECT count(*) FROM announcements a WHERE {where}", params
         ).fetchone()[0]
+        groups = _user_groups(conn, user)
     context = _search_context(request, current, "announcements", total, page, form, now)
-    context.update(rows=rows)
+    context.update(rows=rows, groups=groups)
     return templates.TemplateResponse(request, "announcements.html", context)
 
 
@@ -546,11 +558,16 @@ def my_lots(request: Request, user: User):
                ORDER BY a.end_date NULLS LAST, l.trd_buy_id, l.id""",
             (user,),
         ).fetchall()
+    chosen = [v for v in parse_qs(request.url.query).get("status", []) if v in marks.STATUSES]
     sections = {status: [] for status in marks.ORDER}
     for row in rows:
         sections.setdefault(row[0], []).append(row)
+    counts = {status: len(items) for status, items in sections.items()}
+    if chosen:
+        sections = {status: items for status, items in sections.items() if status in chosen}
     return templates.TemplateResponse(
-        request, "my.html", {"sections": sections, "now": datetime.now(UTC)}
+        request, "my.html",
+        {"sections": sections, "counts": counts, "chosen": chosen, "now": datetime.now(UTC)},
     )
 
 
@@ -559,12 +576,38 @@ async def create_filter_subscription(request: Request, user: User):
     form = await request.form()
     data = {key: form.getlist(key) for key in form.keys()}
     current = Filters.from_form(data)
-    name = (form.get("name") or "").strip() or "Мой фильтр"
+    if not current.relative():
+        raise HTTPException(
+            422, "Подписка работает только без конкретных дат: срок — «через 2 рабочих дня» "
+                 "или без ограничения."
+        )
+    scope = "announcements" if form.get("scope") == "announcements" else "lots"
+    name = (form.get("name") or "").strip() or current.describe()[:100] or "Мой фильтр"
+    with pool.connection() as conn:
+        chat_id = _own_chat(conn, user, form.get("chat_id") or "")
+        conn.execute(
+            """INSERT INTO subscriptions (user_id, name, query, kind, filters, scope, chat_id)
+               VALUES (%s, %s, '', 'announcements', %s, %s, %s)""",
+            (user, name[:100], Jsonb(current.to_json()), scope, chat_id),
+        )
+    return RedirectResponse("/subscriptions", status_code=303)
+
+
+def _own_chat(conn, user: int, chat_id: str) -> str | None:
+    """Группа, в которую пользователь вправе слать; пусто — личный чат."""
+    if not chat_id:
+        return None
+    if chat_id not in {group[0] for group in _user_groups(conn, user)}:
+        raise HTTPException(403, "Эта группа не подключена к вашему аккаунту")
+    return chat_id
+
+
+@app.post("/subscriptions/{sub_id}/chat", dependencies=[Depends(same_origin)])
+def subscription_chat(user: User, sub_id: int, chat_id: Annotated[str, Form()] = ""):
     with pool.connection() as conn:
         conn.execute(
-            """INSERT INTO subscriptions (user_id, name, query, kind, filters)
-               VALUES (%s, %s, '', 'announcements', %s)""",
-            (user, name[:100], Jsonb(current.to_json())),
+            "UPDATE subscriptions SET chat_id = %s WHERE id = %s AND user_id = %s",
+            (_own_chat(conn, user, chat_id), sub_id, user),
         )
     return RedirectResponse("/subscriptions", status_code=303)
 
@@ -575,13 +618,15 @@ def subscriptions(request: Request, user: User):
         rows = conn.execute(
             """SELECT s.id, s.name, s.query, s.min_amount, s.max_amount, s.active,
                       (SELECT count(*) FROM matches m WHERE m.subscription_id = s.id),
-                      s.kind, s.filters
+                      s.kind, s.filters, s.scope, s.chat_id
                FROM subscriptions s WHERE s.user_id = %s ORDER BY s.id""",
             (user,),
         ).fetchall()
-    described = {r[0]: Filters.from_json(r[8]).describe() for r in rows if r[7] == "announcements"}
+        groups = _user_groups(conn, user)
+    filters = {r[0]: Filters.from_json(r[8]) for r in rows if r[7] == "announcements"}
     return templates.TemplateResponse(
-        request, "subscriptions.html", {"rows": rows, "described": described}
+        request, "subscriptions.html",
+        {"rows": rows, "filters": filters, "groups": groups},
     )
 
 
@@ -625,7 +670,14 @@ def delete_subscription(user: User, sub_id: int):
 
 @app.get("/matches")
 def matches(request: Request, user: User):
+    chosen = [int(v) for v in parse_qs(request.url.query).get("sub", []) if v.isdigit()]
     with pool.connection() as conn:
+        subs = conn.execute(
+            """SELECT s.id, s.name, s.active,
+                      (SELECT count(*) FROM matches m WHERE m.subscription_id = s.id)
+               FROM subscriptions s WHERE s.user_id = %s ORDER BY s.id""",
+            (user,),
+        ).fetchall()
         rows = conn.execute(
             """SELECT m.matched_at, s.name, l.trd_buy_id, l.name_ru, l.amount,
                       coalesce(a.customer_name_ru, l.customer_name_ru), a.end_date, l.prepayment,
@@ -635,10 +687,13 @@ def matches(request: Request, user: User):
                JOIN lots l ON l.id = m.lot_id
                LEFT JOIN announcements a ON a.id = l.trd_buy_id
                WHERE s.user_id = %(user)s
+                 AND (cardinality(%(chosen)s::bigint[]) = 0 OR s.id = ANY(%(chosen)s))
                ORDER BY m.matched_at DESC, a.end_date, l.trd_buy_id, l.id LIMIT 300""",
-            {"user": user},
+            {"user": user, "chosen": chosen},
         ).fetchall()
-    return templates.TemplateResponse(request, "matches.html", {"rows": rows})
+    return templates.TemplateResponse(
+        request, "matches.html", {"rows": rows, "subs": subs, "chosen": chosen}
+    )
 
 
 @app.get("/settings")
@@ -647,6 +702,7 @@ def settings(request: Request, user: User, sent: str = "", saved: str = ""):
         chat_id, company_bin = conn.execute(
             "SELECT telegram_chat_id, company_bin FROM users WHERE id = %s", (user,)
         ).fetchone()
+        groups = _user_groups(conn, user)
     return templates.TemplateResponse(
         request,
         "settings.html",
@@ -657,6 +713,7 @@ def settings(request: Request, user: User, sent: str = "", saved: str = ""):
             "sent": sent,
             "saved": saved,
             "company_bin": company_bin,
+            "groups": groups,
         },
     )
 
@@ -680,6 +737,28 @@ def telegram_link(user: User):
     with pool.connection() as conn:
         code = bot.create_link_code(conn, user)
     return RedirectResponse(bot.link_url(code), status_code=303)
+
+
+@app.post("/settings/telegram/group", dependencies=[Depends(same_origin)])
+def telegram_group_link(user: User):
+    if not telegram.bot_username():
+        raise HTTPException(503, "Telegram-бот не настроен")
+    with pool.connection() as conn:
+        code = bot.create_link_code(conn, user, "group")
+    return RedirectResponse(bot.group_link_url(code), status_code=303)
+
+
+@app.post("/settings/groups/remove", dependencies=[Depends(same_origin)])
+def telegram_group_remove(user: User, chat_id: Annotated[str, Form()]):
+    with pool.connection() as conn:
+        conn.execute(
+            "UPDATE subscriptions SET chat_id = NULL WHERE user_id = %s AND chat_id = %s",
+            (user, chat_id),
+        )
+        conn.execute(
+            "DELETE FROM user_groups WHERE user_id = %s AND chat_id = %s", (user, chat_id)
+        )
+    return RedirectResponse("/settings", status_code=303)
 
 
 @app.post("/settings/telegram/unlink", dependencies=[Depends(same_origin)])

@@ -15,10 +15,23 @@
 
   @media (max-width: 640px) { .item-head { grid-template-columns: 1fr; } .side { text-align: left; } }
   details.closed summary { cursor: pointer; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 4px; align-items: center; }
+  .chips label { display: inline-flex; gap: 6px; align-items: center; padding: 4px 12px; border: 1px solid var(--line); border-radius: 999px; cursor: pointer; font-size: 14px; }
+  .chips label:has(input:checked) { background: color-mix(in srgb, var(--accent) 18%, transparent); border-color: var(--accent); }
+  .chips input { margin: 0; }
 {% endblock %}
 {% block main %}
+<form class="chips" method="get" action="/my">
+  {% for status in counts %}
+  <label><input type="checkbox" name="status" value="{{ status }}" {% if status in chosen %}checked{% endif %} onchange="this.form.submit()"> {{ mark_statuses[status] }} <span class="muted">{{ counts[status] }}</span></label>
+  {% endfor %}
+  {% if chosen %}<a href="/my">все</a>{% endif %}
+  <noscript><button>Показать</button></noscript>
+</form>
 {% set total = sections.values()|map("length")|sum %}
-{% if not total %}
+{% if not total and chosen %}
+<p class="muted">С выбранными отметками лотов нет.</p>
+{% elif not total %}
 <p>Отмеченных лотов пока нет.</p>
 <p class="muted">В поиске и на странице объявления у каждого лота есть список «Отметить…»: «Интересно», «Готовлю заявку», «Заявка подана», итог или «Не подходит». Отмеченные лоты собираются здесь. По лотам «Интересно» и «Готовлю заявку» бот напомнит в Telegram за сутки и за 3 часа до окончания приёма.</p>
 {% endif %}
@@ -49,7 +62,7 @@
   </div>
   {% endfor %}
 {% endset %}
-{% if status in ("lost", "rejected") %}
+{% if status in ("lost", "rejected") and status not in chosen %}
 <details class="closed"><summary><h2 style="display:inline">{{ mark_statuses.get(status, status) }} <span class="muted">{{ rows|length }}</span></h2></summary>{{ block }}</details>
 {% else %}
 <h2>{{ mark_statuses.get(status, status) }} <span class="muted">{{ rows|length }}</span></h2>

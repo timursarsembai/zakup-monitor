@@ -224,3 +224,38 @@ def _announcement_with_lots(conn):
     })
     conn.execute("UPDATE lots SET status_id = 240")
     conn.commit()
+
+
+def test_subscribe_only_without_fixed_dates_and_matches_filter(client, conn):
+    _login(client)
+    base = "/lots?applied=1&deadline_mode=rule"
+    assert "Подписаться на этот поиск" in client.get(base).text
+    fixed = client.get("/lots?applied=1&deadline_mode=date&deadline_date=2026-11-20").text
+    assert "Подписаться на этот поиск" not in fixed and "нет конкретных дат" in fixed
+    data = {"applied": "1", "deadline_mode": "rule", "region": "75", "scope": "announcements",
+            "name": "Алматы"}
+    assert client.post("/subscriptions/filter", data=data, headers=ORIGIN).status_code == 200
+    page = client.get("/subscriptions").text
+    assert "Алматы" in page and "объявления целиком" in page and "/announcements?" in page
+    data["deadline_date"] = "2026-11-20"
+    assert client.post("/subscriptions/filter", data=data, headers=ORIGIN).status_code == 422
+    data.pop("deadline_date")
+    data["chat_id"] = "-100"
+    assert client.post("/subscriptions/filter", data=data, headers=ORIGIN).status_code == 403
+    sub = conn.execute("SELECT id FROM subscriptions").fetchone()[0]
+    matches = client.get(f"/matches?sub={sub}").text
+    assert 'value="%d" checked' % sub in matches
+
+
+def test_my_lots_filter_by_mark(client, conn):
+    db.upsert_announcement(conn, {"id": 79, "name_ru": "Мебель", "end_date": "2099-01-01 09:00:00"})
+    db.upsert_lot(conn, {"id": 7, "trd_buy_id": 79, "name_ru": "Шкаф", "amount": 1})
+    db.upsert_lot(conn, {"id": 8, "trd_buy_id": 79, "name_ru": "Тумба", "amount": 1})
+    conn.commit()
+    _login(client)
+    client.post("/lots/7/mark", data={"status": "interested"}, headers=ORIGIN)
+    client.post("/lots/8/mark", data={"status": "submitted"}, headers=ORIGIN)
+    both = client.get("/my").text
+    assert "Шкаф" in both and "Тумба" in both
+    only = client.get("/my?status=submitted").text
+    assert "Тумба" in only and "Шкаф" not in only
