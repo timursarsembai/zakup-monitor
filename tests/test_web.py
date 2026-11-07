@@ -362,3 +362,31 @@ def test_settings_tabs_and_ai_models(client, conn, monkeypatch):
     assert client.get("/settings/ai/models?provider=anthropic").json() == [["claude-x", "Claude X"]]
     client.post("/settings/ai", data={"provider": "claude_code", "model": "ignored"}, headers=ORIGIN)
     assert conn.execute("SELECT ai_model FROM users WHERE role = 'admin'").fetchone()[0] is None
+
+
+def test_announcements_advance_column_groups_values(client, conn):
+    _announcement_with_lots(conn)
+    conn.execute("UPDATE lots SET prepayment = 30")
+    db.upsert_lot(conn, {"id": 5003, "trd_buy_id": 500, "name_ru": "Скрепки", "amount": 1})
+    conn.execute("UPDATE lots SET prepayment = 100 WHERE id = 5003")
+    conn.commit()
+    _login(client)
+    page = client.get("/announcements?applied=1&deadline_mode=").text
+    cell = page.split('class="advances">', 1)[1].split("</td>", 1)[0]
+    assert cell.count("30%") == 1 and cell.count("100%") == 1
+
+
+def test_admin_manages_roles_disable_delete(client, conn):
+    _login(client)
+    auth.set_password(conn, "serik", "serik-password-1")
+    serik = conn.execute("SELECT id FROM users WHERE email = 'serik'").fetchone()[0]
+    me = conn.execute("SELECT id FROM users WHERE email = 'owner@mail.kz'").fetchone()[0]
+    assert "роль — администратор" in client.post(
+        f"/settings/users/{serik}/role", data={"role": "admin"}, headers=ORIGIN).text
+    assert client.post(f"/settings/users/{me}/role", data={"role": "user"}, headers=ORIGIN).status_code == 422
+    assert "отключён" in client.post(f"/settings/users/{serik}/disable", headers=ORIGIN).text
+    assert auth.login(conn, "serik", "serik-password-1", None, None) is None
+    client.post(f"/settings/users/{serik}/disable", headers=ORIGIN)
+    assert auth.login(conn, "serik", "serik-password-1", None, None) is not None
+    assert "удалён" in client.post(f"/settings/users/{serik}/delete", headers=ORIGIN).text
+    assert conn.execute("SELECT count(*) FROM users WHERE email = 'serik'").fetchone()[0] == 0

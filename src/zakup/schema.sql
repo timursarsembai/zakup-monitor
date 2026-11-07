@@ -297,3 +297,5 @@ UPDATE users SET role = 'admin'
 WHERE id = (SELECT min(id) FROM users) AND NOT EXISTS (SELECT 1 FROM users WHERE role = 'admin');
 -- Сколько лотов распознано в протоколе: 0 — формат не разобран (перечитать после доработки).
 ALTER TABLE announcements ADD COLUMN IF NOT EXISTS protocol_lots integer;
+-- Отключённый пользователь существует (подписки, отметки), но войти не может.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS disabled boolean NOT NULL DEFAULT false;

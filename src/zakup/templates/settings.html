@@ -25,6 +25,11 @@
   .provider:has(input:checked) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
   .provider b { display: block; }
   [data-tab-panel][hidden], [data-provider-fields][hidden] { display: none; }
+  .row-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+  .row-actions form, td form { margin: 0; }
+  td select { padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); font: inherit; }
+  button.danger { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 50%, var(--line)); }
+  tr.off td { opacity: .6; }
   @media (max-width: 760px) {
     .tabs { flex-wrap: nowrap; overflow-x: auto; }
     .tabs a { white-space: nowrap; padding: 10px 12px; }
@@ -146,12 +151,22 @@
   <div class="table-wrap"><table>
     <tr><th>Логин</th><th>Роль</th><th>Telegram</th><th>Последний вход</th><th></th></tr>
     {% for u in users %}
-    <tr>
-      <td>{{ u[1] }}{% if u[0] == me %} <span class="muted">(вы)</span>{% endif %}</td>
-      <td>{{ "администратор" if u[2] == "admin" else "пользователь" }}</td>
+    <tr class="{{ 'off' if u[5] }}">
+      <td>{{ u[1] }}{% if u[0] == me %} <span class="muted">(вы)</span>{% endif %}{% if u[5] %} <span class="muted">· отключён</span>{% endif %}</td>
+      <td>{% if u[0] == me %}{{ "администратор" if u[2] == "admin" else "пользователь" }}{% else %}
+        <form method="post" action="/settings/users/{{ u[0] }}/role">
+          <select name="role" onchange="this.form.submit()" aria-label="Роль {{ u[1] }}">
+            <option value="user" {% if u[2] != "admin" %}selected{% endif %}>пользователь</option>
+            <option value="admin" {% if u[2] == "admin" %}selected{% endif %}>администратор</option>
+          </select><noscript><button>OK</button></noscript>
+        </form>{% endif %}</td>
       <td>{{ "подключён" if u[3] else "—" }}</td>
       <td class="muted">{{ (u[4]|local).strftime("%d.%m.%Y %H:%M") if u[4] else "—" }}</td>
-      <td>{% if u[0] != me %}<form method="post" action="/settings/users/{{ u[0] }}/reset" data-confirm="Сбросить пароль {{ u[1] }}? Старый перестанет работать."><button>Сбросить пароль</button></form>{% endif %}</td>
+      <td>{% if u[0] != me %}<div class="row-actions">
+        <form method="post" action="/settings/users/{{ u[0] }}/reset" data-confirm="Сбросить пароль {{ u[1] }}? Старый перестанет работать."><button>Сбросить пароль</button></form>
+        <form method="post" action="/settings/users/{{ u[0] }}/disable" data-confirm="{{ ('Включить аккаунт ' ~ u[1] ~ '?') if u[5] else ('Отключить ' ~ u[1] ~ '? Войти будет нельзя, данные останутся.') }}"><button>{{ "Включить" if u[5] else "Отключить" }}</button></form>
+        <form method="post" action="/settings/users/{{ u[0] }}/delete" data-confirm="Удалить {{ u[1] }} совсем? Подписки и отметки тоже удалятся. Это не отменить."><button class="danger">Удалить</button></form>
+      </div>{% endif %}</td>
     </tr>
     {% endfor %}
   </table></div>

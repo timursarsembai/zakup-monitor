@@ -349,7 +349,10 @@ def announcements_search(request: Request, user: User, page: int = 1):
                        a.name_ru, coalesce(a.org_name_ru, a.customer_name_ru),
                        a.trade_method_id, a.start_date, a.end_date, a.total_sum, a.status_id,
                        a.prepayment_max, a.detail->'RefBuyStatus'->>'nameRu',
-                       a.detail->'RefTradeMethods'->>'nameRu'
+                       a.detail->'RefTradeMethods'->>'nameRu',
+                       -- Авансы лотов без повторов: 30 и 100, а не 30, 30, 100.
+                       (SELECT array_agg(DISTINCT coalesce(p.prepayment, 0) ORDER BY coalesce(p.prepayment, 0))
+                        FROM lots p WHERE p.trd_buy_id = a.id)
                 FROM announcements a WHERE {where} ORDER BY {current.order_by("announcements")}
                 LIMIT {PAGE_SIZE} OFFSET {(page - 1) * PAGE_SIZE}""",
             params,
@@ -820,7 +823,8 @@ def _settings_page(request: Request, user: int, *, sent: str = "", saved: str = 
         ai_keys = secrets_box.saved_providers(conn, user)
         users = conn.execute(
             """SELECT u.id, u.email, u.role, u.telegram_chat_id IS NOT NULL,
-                      (SELECT max(created_at) FROM sessions s WHERE s.user_id = u.id)
+                      (SELECT max(created_at) FROM sessions s WHERE s.user_id = u.id),
+                      u.disabled
                FROM users u ORDER BY u.role, u.email"""
         ).fetchall() if is_admin else []
     return templates.TemplateResponse(
@@ -890,6 +894,50 @@ def add_user(request: Request, admin: Admin, login: Annotated[str, Form()]):
         auth.set_password(conn, login, password)
     return _settings_page(request, admin, notice=f"Создан пользователь {login}. Пароль: {password} "
                           "— передайте его, больше он нигде не показывается.", tab="users")
+
+
+def _other_user(conn, admin: int, user_id: int) -> str:
+    """Логин пользователя, которым управляет администратор; себя трогать нельзя."""
+    if user_id == admin:
+        raise HTTPException(422, "Свою роль, доступ и аккаунт изменить здесь нельзя")
+    row = conn.execute("SELECT email FROM users WHERE id = %s", (user_id,)).fetchone()
+    if row is None:
+        raise HTTPException(404, "Нет такого пользователя")
+    return row[0]
+
+
+@app.post("/settings/users/{user_id}/role", dependencies=[Depends(same_origin)])
+def set_role(request: Request, admin: Admin, user_id: int, role: Annotated[str, Form()]):
+    if role not in ("admin", "user"):
+        raise HTTPException(422, "неизвестная роль")
+    with pool.connection() as conn:
+        login = _other_user(conn, admin, user_id)
+        conn.execute("UPDATE users SET role = %s WHERE id = %s", (role, user_id))
+    return _settings_page(request, admin, tab="users", notice=f"{login}: роль — "
+                          f"{'администратор' if role == 'admin' else 'пользователь'}.")
+
+
+@app.post("/settings/users/{user_id}/disable", dependencies=[Depends(same_origin)])
+def toggle_disabled(request: Request, admin: Admin, user_id: int):
+    with pool.connection() as conn:
+        login = _other_user(conn, admin, user_id)
+        disabled = conn.execute(
+            "UPDATE users SET disabled = NOT disabled WHERE id = %s RETURNING disabled", (user_id,)
+        ).fetchone()[0]
+        if disabled:
+            # Отключение действует сразу: выкидываем из всех открытых сессий.
+            conn.execute("DELETE FROM sessions WHERE user_id = %s", (user_id,))
+    return _settings_page(request, admin, tab="users", notice=f"{login}: аккаунт "
+                          f"{'отключён — войти нельзя' if disabled else 'снова включён'}.")
+
+
+@app.post("/settings/users/{user_id}/delete", dependencies=[Depends(same_origin)])
+def delete_user(request: Request, admin: Admin, user_id: int):
+    with pool.connection() as conn:
+        login = _other_user(conn, admin, user_id)
+        conn.execute("DELETE FROM users WHERE id = %s", (user_id,))
+    return _settings_page(request, admin, tab="users",
+                          notice=f"Пользователь {login} удалён вместе с подписками и отметками.")
 
 
 @app.post("/settings/users/{user_id}/reset", dependencies=[Depends(same_origin)])

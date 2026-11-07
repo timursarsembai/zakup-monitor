@@ -95,8 +95,11 @@ def login(
 ) -> str | None:
     """Проверяет пароль и создаёт сессию. Возвращает токен для cookie или None."""
     email = normalize_email(email)
-    row = conn.execute("SELECT id, password_hash FROM users WHERE email = %s", (email,)).fetchone()
-    ok = verify_password(password, row[1] if row else None)
+    row = conn.execute(
+        "SELECT id, password_hash, disabled FROM users WHERE email = %s", (email,)
+    ).fetchone()
+    # Отключённый аккаунт не входит даже с верным паролем.
+    ok = verify_password(password, row[1] if row else None) and not row[2]
     log_attempt(conn, email, ip, ok)
     token = None
     if ok:
@@ -117,7 +120,7 @@ def user_by_session(conn: psycopg.Connection, token: str | None) -> tuple[int, s
         return None
     return conn.execute(
         """SELECT u.id, u.email, u.role FROM sessions s JOIN users u ON u.id = s.user_id
-           WHERE s.token_hash = %s AND s.expires_at > now()""",
+           WHERE s.token_hash = %s AND s.expires_at > now() AND NOT u.disabled""",
         (_token_hash(token),),
     ).fetchone()
 
