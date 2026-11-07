@@ -360,3 +360,16 @@ ALTER TABLE lot_research ADD COLUMN IF NOT EXISTS base_id bigint REFERENCES lot_
 UPDATE lot_marks SET status = 'interested'
 WHERE status IN ('preparing', 'submitted', 'won', 'lost');
 UPDATE lot_marks SET status = '' WHERE status = 'rejected';
+
+-- Краткая выжимка техспецификации от ИИ (zakup.research.summarize): одна на лот.
+CREATE TABLE IF NOT EXISTS spec_summaries (
+    lot_id      bigint PRIMARY KEY REFERENCES lots (id) ON DELETE CASCADE,
+    status      text NOT NULL DEFAULT 'queued',   -- queued, running, done, error
+    provider    text NOT NULL,
+    model       text,
+    result      jsonb,
+    error       text,
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    started_at  timestamptz,
+    finished_at timestamptz
+);

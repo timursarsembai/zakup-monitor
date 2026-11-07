@@ -22,7 +22,10 @@ def test_prompt_uses_lot_spec_and_region(conn):
     _lot(conn)
     context = research.lot_context(conn, 90)
     assert context["price"] == 100000 and context["unit"] == "штука"
-    assert research.default_region(context) == "Актюбинская область, г.Актобе"
+    # Актобе — областной центр: город и область (потом весь Казахстан).
+    assert research.default_region(context) == "г. Актобе, Актюбинская область"
+    assert research.default_region({"kato": ["194430100"], "places": "Алматинская область, Кегенский район, с.Кеген"}) == "Алматинская область"
+    assert research.default_region({"kato": ["751110000"], "places": "г.Алматы, Бостандыкский район"}) == "г. Алматы"
     prompt = research.build_prompt(context, "г.Актобе", True)
     assert "Стол дубовый 120х60" in prompt and "г.Актобе" in prompt and "по всему Казахстану" in prompt
 
@@ -126,3 +129,20 @@ def test_find_more_extends_saved_result(conn, monkeypatch):
     research.work(url, ["claude_code"], once=True)
     result = research.latest(conn, 90)["result"]
     assert result["exhausted"] and len(result["items"]) == 2
+
+
+def test_spec_summary_queue_and_cache(conn, monkeypatch):
+    _lot(conn)
+    calls = []
+
+    def fake(prompt, model, schema=None, web=True):
+        calls.append((model, web, "Стол дубовый 120х60" in prompt))
+        return {"item": "Стол дубовый", "params": [{"name": "Размер", "value": "120×60"}],
+                "requirements": ["Гарантия 12 мес."]}
+    monkeypatch.setattr(research, "_claude_code", fake)
+    assert research.request_summary(conn, 90) == "queued"
+    research.work(os.environ["TEST_DATABASE_URL"], ["claude_code"], once=True)
+    assert calls == [("haiku", False, True)]
+    summary = research.summary_of(conn, 90)
+    assert summary["status"] == "done" and summary["result"]["params"][0]["value"] == "120×60"
+    assert research.request_summary(conn, 90) == "done"  # готовая — повторно не ставится

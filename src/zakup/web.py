@@ -561,6 +561,24 @@ def start_research(
     return RedirectResponse(f"/lots/{lot_id}#research", status_code=303)
 
 
+@app.post("/lots/{lot_id}/spec-summary", dependencies=[Depends(same_origin)])
+def request_spec_summary(request: Request, user: User, lot_id: int):
+    with pool.connection() as conn:
+        if not conn.execute("SELECT 1 FROM lot_specs WHERE lot_id = %s AND text IS NOT NULL",
+                            (lot_id,)).fetchone():
+            raise HTTPException(404, "Нет текста техспецификации")
+        status = research.request_summary(conn, lot_id)
+    _audit(request, user, "spec_summary", f"/lots/{lot_id}")
+    return {"status": status}
+
+
+@app.get("/lots/{lot_id}/spec-summary")
+def spec_summary(request: Request, _: User, lot_id: int):
+    with pool.connection() as conn:
+        summary = research.summary_of(conn, lot_id)
+    return templates.TemplateResponse(request, "summary_fragment.html", {"s": summary})
+
+
 @app.get("/lots/{lot_id}/research")
 def research_fragment(request: Request, _: User, lot_id: int):
     with pool.connection() as conn:
@@ -663,6 +681,9 @@ def _announcement_context(request: Request, user: int, announcement_id: int,
         specs = {r[0]: (r[1], r[2], r[3]) for r in conn.execute(
             "SELECT lot_id, text, error, text_kk FROM lot_specs WHERE lot_id = ANY(%s)",
             (list(info),))}
+        summaries = {r[0]: {"status": r[1], "result": r[2], "error": r[3]} for r in conn.execute(
+            "SELECT lot_id, status, result, error FROM spec_summaries WHERE lot_id = ANY(%s)",
+            (list(info),))}
         lot_marks = marks.of_user(conn, user, list(info))
         lot_results = results.by_lot(conn, list(info))
         company_bin = conn.execute(
@@ -677,6 +698,7 @@ def _announcement_context(request: Request, user: int, announcement_id: int,
         "subscribed": subscribed,
         "marks": lot_marks,
         "specs": specs,
+        "summaries": summaries,
         "results": lot_results,
         "contracts": (outcome or {}).get("contracts") or [],
         "contracts_by_lot": results.contracts_by_lot(outcome),
@@ -723,7 +745,7 @@ def lot_spec(request: Request, _: User, announcement_id: int, lot_id: int, refre
                 ).fetchone()
                 text = (kazakh and kazakh[0]) or text
     return templates.TemplateResponse(
-        request, "spec_fragment.html", {"text": text, "error": error, "url": url}
+        request, "spec_fragment.html", {"text": text, "error": error, "url": url, "lot_id": lot_id}
     )
 
 
@@ -778,8 +800,14 @@ def research_list(request: Request, user: User, q: str = "", sources_open: int =
     for row in rows:
         found = (row[3] or {}).get("items") or []
         price = float(row[9]) if row[9] else None
-        margins = [(price - i["unit_price"]) / price * 100 for i in found
-                   if price and i.get("unit_price") and i.get("fit") == "полностью"]
+        # Маржа — по лучшему уровню соответствия, который есть: полностью → частично → аналоги.
+        margins, margin_basis = [], None
+        for fit in ("полностью", "частично", "аналог"):
+            margins = [(price - i["unit_price"]) / price * 100 for i in found
+                       if price and i.get("unit_price") and i.get("fit") == fit]
+            if margins:
+                margin_basis = fit
+                break
         cheapest = min((i["unit_price"] for i in found if i.get("unit_price")), default=None)
         items.append({
             "lot_id": row[0], "finished_at": row[1], "region": row[2], "name": row[4],
@@ -789,6 +817,8 @@ def research_list(request: Request, user: User, q: str = "", sources_open: int =
             "in_region": sum(1 for i in found if i.get("in_region")),
             "full_fit": sum(1 for i in found if i.get("fit") == "полностью"),
             "best_margin": max(margins) if margins else None, "cheapest": cheapest,
+            "margin_basis": margin_basis,
+            "partial_fit": sum(1 for i in found if i.get("fit") == "частично"),
         })
     items.sort(key=lambda i: i["finished_at"], reverse=True)
     return templates.TemplateResponse(

@@ -46,12 +46,12 @@
   <div>
     <a class="title" href="/lots/{{ i.lot_id }}#research">{{ pick(i.name, i.name_kz) or "—" }}</a>
     <div class="muted">{{ _("Лот") }} {{ i.lot_number or i.lot_id }} · <a href="{{ announcement_url(i.announcement_id) }}">{{ _("объявление №") }} {{ i.number or i.announcement_id }}</a>{% if i.end_date %} · {{ _("приём до") }} {{ (i.end_date|local).strftime("%d.%m %H:%M") }}{% endif %}</div>
-    <div>{{ _("Найдено предложений:") }} <b>{{ i.found }}</b>{% if i.full_fit %} · {{ _("полностью подходят:") }} <b>{{ i.full_fit }}</b>{% endif %}{% if i.in_region %} · {{ _("в регионе:") }} {{ i.in_region }}{% endif %} <span class="muted">· {{ i.region }}</span></div>
+    <div>{{ _("Найдено предложений:") }} <b>{{ i.found }}</b>{% if i.full_fit %} · {{ _("полностью подходят:") }} <b>{{ i.full_fit }}</b>{% endif %}{% if i.partial_fit %} · {{ _("частично:") }} {{ i.partial_fit }}{% endif %}{% if i.in_region %} · {{ _("в регионе:") }} {{ i.in_region }}{% endif %} <span class="muted">· {{ i.region }}</span></div>
   </div>
   <div class="side">
     <div>{{ _("За ед. в лоте:") }} <b>{{ i.price | money }} ₸</b></div>
     {% if i.cheapest %}<div class="muted">{{ _("дешевле всего:") }} {{ i.cheapest | money }} ₸</div>{% endif %}
-    {% if i.best_margin is not none %}<div class="{{ 'plus' if i.best_margin > 0 else 'minus' }}">{{ _("маржа до") }} {{ '%.1f'|format(i.best_margin) }}%</div>{% endif %}
+    {% if i.best_margin is not none %}<div class="{{ 'plus' if i.best_margin > 0 else 'minus' }}">{{ _("маржа до") }} {{ '%.1f'|format(i.best_margin) }}%</div>{% if i.margin_basis != "полностью" %}<div class="muted">{{ _("по частично подходящим") if i.margin_basis == "частично" else _("по аналогам") }}</div>{% endif %}{% endif %}
     {% if i.prepayment %}<span class="badge {% if i.prepayment >= 30 %}hot{% endif %}">{{ _("аванс") }} {{ '%g'|format(i.prepayment) }}%</span>{% endif %}
     <div class="muted">{{ (i.finished_at|local).strftime("%d.%m.%Y %H:%M") if i.finished_at else "" }}</div>
   </div>

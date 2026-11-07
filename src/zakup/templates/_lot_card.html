@@ -35,6 +35,14 @@
 
   details.spec { margin-top: 10px; }
   details.spec summary { cursor: pointer; color: var(--accent); }
+  .summary-box { margin: 8px 0 10px; }
+  .summary-btn { padding: 8px 14px; border-radius: 999px; border: 1px solid var(--accent); color: var(--accent); font-weight: 600; }
+  .summary-table th { width: 40%; color: var(--muted); font-weight: 500; font-size: 14px; }
+  .summary-table td { font-size: 14px; }
+  .summary-req { margin: 0 0 8px; padding-left: 18px; font-size: 14px; }
+  details.spec-full > summary { cursor: pointer; color: var(--accent); margin: 6px 0; }
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin 1s linear infinite; vertical-align: -2px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
   .spec-text { white-space: pre-wrap; font-size: 14px; line-height: 1.5; margin-top: 8px; padding: 12px;
                border-radius: 8px; background: color-mix(in srgb, var(--fg) 4%, transparent); }
   ul.files { list-style: none; padding: 0; margin: 0; }
@@ -87,7 +95,11 @@
     {# Текст уже в базе — показываем сразу; нет — догружаем с портала из браузера. #}
     <details class="spec" data-src="/a/{{ a.id }}/lots/{{ lot.id }}/spec"{% if cached and cached[0] %} data-loaded="1"{% endif %}>
       <summary>{{ _("Техническая спецификация") }}</summary>
-      <div class="spec-body">{% if cached and cached[0] %}<div class="spec-text">{{ pick(cached[0], cached[2]) }}</div><p><a href="{{ spec_file(lot) | safe_url }}" target="_blank" rel="noopener">{{ _("Скачать PDF спецификации") }}</a></p>{% else %}<p class="muted">{{ _("Загружаю…") }}</p>{% endif %}</div>
+      <div class="spec-body">{% if cached and cached[0] %}{% set s = summaries.get(lot.id) %}
+        <div class="summary-box" data-summary data-src="/lots/{{ lot.id }}/spec-summary">
+          {% if s %}{% include "summary_fragment.html" %}{% else %}<button type="button" class="summary-btn" data-summary-start>📋 {{ _("Кратко: главное в таблице (ИИ)") }}</button>{% endif %}
+        </div>
+        <details class="spec-full" {% if not (s and s.status == "done") %}open{% endif %}><summary>{{ _("Полный текст") }}</summary><div class="spec-text">{{ pick(cached[0], cached[2]) }}</div></details><p><a href="{{ spec_file(lot) | safe_url }}" target="_blank" rel="noopener">{{ _("Скачать PDF спецификации") }}</a></p>{% else %}<p class="muted">{{ _("Загружаю…") }}</p>{% endif %}</div>
     </details>
     {% endif %}
   </div>
@@ -132,6 +144,27 @@
 {% endmacro %}
 
 {% macro lot_scripts() %}
+  // Выжимка техспецификации: запрос и опрос, пока ИИ готовит.
+  const pollSummary = async (box) => {
+    try {
+      const response = await fetch(box.dataset.src);
+      if (response.ok && !response.redirected) box.innerHTML = await response.text();
+    } catch {}
+    const status = box.querySelector("[data-summary-status]")?.dataset.summaryStatus;
+    if (status === "queued" || status === "running") setTimeout(() => pollSummary(box), 3000);
+  };
+  document.addEventListener("click", async (event) => {
+    const start = event.target.closest("[data-summary-start]");
+    if (!start) return;
+    const box = start.closest("[data-summary]");
+    start.disabled = true;
+    await fetch(box.dataset.src, { method: "POST" });
+    pollSummary(box);
+  });
+  for (const box of document.querySelectorAll("[data-summary]")) {
+    const status = box.querySelector("[data-summary-status]")?.dataset.summaryStatus;
+    if (status === "queued" || status === "running") setTimeout(() => pollSummary(box), 3000);
+  }
   // При ошибке — кнопка «Обновить»: она просит сервер не брать ошибку из кэша.
   const loadSpec = async (spec, refresh) => {
     const body = spec.querySelector(".spec-body");

@@ -59,8 +59,8 @@
   <h2 style="margin-top:0">{{ _("Поиск товаров с ИИ") }}</h2>
   {% if lot_info %}
   <form class="research-form" method="post" action="/lots/{{ lot.id }}/research">
-    <input name="region" value="{{ job.region if job else region }}" aria-label="{{ _("Где искать в первую очередь") }}" placeholder="{{ _("Регион поставки") }}">
-    <label class="muted"><input type="checkbox" name="whole_kz" value="1" {% if not job or job.whole_kz %}checked{% endif %}> {{ _("и по всему Казахстану") }}</label>
+    <input name="region" value="{{ region }}" aria-label="{{ _("Где искать в первую очередь") }}" placeholder="{{ _("Регион поставки") }}">
+    <input type="hidden" name="whole_kz" value="1"><span class="muted">{{ _("и по всему Казахстану") }}</span>
     <label class="muted">{{ _("Найти") }} <select name="target" aria-label="{{ _("Сколько предложений искать") }}">{% for n in targets %}<option value="{{ n }}" {% if (job.target if job else 10) == n %}selected{% endif %}>{{ n }}</option>{% endfor %}</select> {{ _("предложений") }}</label>
     <button class="primary" {% if job and job.status in ("queued", "running") %}disabled{% endif %}>{{ _("Найти заново") if job else _("Найти товары") }}</button>
   </form>

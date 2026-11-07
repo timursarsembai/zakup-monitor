@@ -1,0 +1,18 @@
+{# Краткая выжимка техспецификации от ИИ. Пока готовится — страница опрашивает фрагмент. #}
+<div class="summary" data-summary-status="{{ s.status if s else 'none' }}">
+{% if not s %}
+{% elif s.status in ("queued", "running") %}
+  <p class="muted"><span class="spinner"></span> {{ _("Готовлю краткую выжимку — обычно до минуты…") }}</p>
+{% elif s.status == "error" %}
+  <p class="muted">{{ _("Не удалось сделать выжимку.") }} <button type="button" data-summary-start>{{ _("Попробовать ещё раз") }}</button></p>
+{% else %}
+  {% set r = s.result %}
+  {% if r.item %}<p><b>{{ r.item }}</b></p>{% endif %}
+  {% if r.params %}<div class="table-wrap"><table class="summary-table">
+    {% for p in r.params %}<tr><th>{{ p.name }}</th><td>{{ p.value }}</td></tr>{% endfor %}
+  </table></div>{% endif %}
+  {% if r.requirements %}<p class="muted" style="margin:10px 0 4px">{{ _("Прочие требования") }}</p>
+  <ul class="summary-req">{% for x in r.requirements %}<li>{{ x }}</li>{% endfor %}</ul>{% endif %}
+  <p class="muted">{{ _("Выжимка сделана ИИ по тексту спецификации — сверяйте с полным текстом.") }}</p>
+{% endif %}
+</div>

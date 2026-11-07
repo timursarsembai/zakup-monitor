@@ -502,3 +502,36 @@ def test_sources_sheet_on_research_page(client, conn):
     page = client.get("/research?sources_open=1").text
     assert "Источники для подбора" in page and "zeta.kz" in page and 'class="sheet open"' in page
     assert client.post("/sources", data={"url": "нет"}, headers=ORIGIN).status_code == 422
+
+
+def test_spec_summary_shown_in_lot_card(client, conn):
+    from tests.test_research import _lot
+
+    _lot(conn)
+    _login(client)
+    conn.execute("""UPDATE announcements SET detail = jsonb_set(detail, '{Lots,0,Files}',
+        '[{"id": 9, "nameRu": "Техническая спецификация", "filePath": "https://ows.goszakup.gov.kz/download/9"}]')""")
+    conn.execute("UPDATE lot_specs SET file_url = 'https://ows.goszakup.gov.kz/download/9'")
+    conn.commit()
+    page = client.get("/lots/90").text
+    assert "Кратко: главное в таблице" in page
+    assert client.post("/lots/90/spec-summary", headers=ORIGIN).json() == {"status": "queued"}
+    conn.execute("""UPDATE spec_summaries SET status = 'done', result =
+        '{"item": "Стол", "params": [{"name": "Материал", "value": "дуб"}], "requirements": []}'""")
+    conn.commit()
+    page = client.get("/lots/90").text
+    assert "Материал" in page and "дуб" in page
+
+
+def test_research_list_margin_falls_back_to_partial_fit(client, conn):
+    from tests.test_research import _lot
+
+    _lot(conn)
+    conn.execute("""INSERT INTO lot_research (lot_id, user_id, provider, region, status, finished_at, result)
+        SELECT 90, id, 'claude_code', 'Актобе', 'done', now(),
+        '{"items": [{"name": "Стол", "url": "https://m.kz/1", "unit_price": 50000, "fit": "частично"}]}'
+        FROM users LIMIT 1""")
+    conn.commit()
+    _login(client)
+    page = client.get("/research").text
+    assert "маржа до 50.0%" in page and "по частично подходящим" in page
