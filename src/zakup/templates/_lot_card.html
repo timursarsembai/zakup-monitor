@@ -18,10 +18,11 @@
   .countdown div { text-align: center; min-width: 44px; }
   .countdown b { display: block; font-size: 22px; font-variant-numeric: tabular-nums; }
   .countdown span { font-size: 12px; color: var(--muted); }
-  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin: 24px 0 12px; flex-wrap: wrap; }
-  .tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: 8px 12px; }
+  /* Вкладки — одной строкой; не помещаются — прокручиваются по горизонтали. */
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin: 24px 0 12px; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: thin; -webkit-overflow-scrolling: touch; }
+  .tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: 8px 12px; white-space: nowrap; flex: none; }
   .tabs button[aria-selected=true] { border-bottom-color: var(--accent); font-weight: 600; }
-  .tabs a { margin-left: auto; padding: 8px 4px; }
+  .tabs a { margin-left: auto; padding: 8px 4px; white-space: nowrap; flex: none; }
   .lot { border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin-bottom: 12px; }
   .lot-head { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
   .lot-head .name { font-weight: 600; font-size: 16px; }
@@ -39,7 +40,16 @@
   ul.files { list-style: none; padding: 0; margin: 0; }
   ul.files li { padding: 8px 0; border-bottom: 1px solid var(--line); }
   .notice { padding: 8px 12px; border-radius: 8px; background: color-mix(in srgb, #d9a400 15%, transparent); }
-  @media (max-width: 760px) { .head { grid-template-columns: 1fr; } }
+  @media (max-width: 760px) {
+    .head { grid-template-columns: 1fr; }
+    /* Телефон: всё по левому краю, отметка — во всю ширину, подписи над значениями. */
+    .lot-head { flex-direction: column; gap: 10px; }
+    .lot-sum { text-align: left; width: 100%; }
+    .lot-sum .mark-form, .lot-sum .mark-select { width: 100%; }
+    .lot-sum .mark-select { font-size: 16px; min-height: 44px; }
+    .lot dl.facts { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+    .lot dl.facts dd { margin-bottom: 8px; }
+  }
 {% endmacro %}
 
 {% macro lot_card(lot, link=true) %}

@@ -85,6 +85,8 @@ def test_sources_from_results_and_manual(conn):
     assert sources.domain_of("https://www.Zeta.kz/catalog?x=1") == "zeta.kz"
     assert sources.domain_of("Zeta.kz") == "zeta.kz" and sources.domain_of("zeta") is None
     sources.add(conn, user, "Zeta.kz", "Zeta", "мебель, оргтехника", "Алматы")
+    sources.remember(conn, {"items": [{"url": "https://x.kz/1"}]})  # без категории
+    sources.remember(conn, {"items": [{"url": "https://x.kz/2"}]})
     sources.remember(conn, {"category": "мебель", "items": [
         {"url": "https://www.mebel.kz/1", "seller": "Мебель.kz", "city": "Алматы"},
         {"url": "https://zeta.kz/2", "seller": "Zeta"},

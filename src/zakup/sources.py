@@ -39,8 +39,9 @@ def add(conn: psycopg.Connection, user_id: int, url: str, name: str = "",
            VALUES (%s, %s, %s, %s, %s, %s, false)
            ON CONFLICT (domain) DO UPDATE SET
                name = coalesce(nullif(excluded.name, ''), sources.name),
-               categories = (SELECT array_agg(DISTINCT c ORDER BY c)
-                             FROM unnest(sources.categories || excluded.categories) c),
+               categories = coalesce((SELECT array_agg(DISTINCT c ORDER BY c)
+                                      FROM unnest(sources.categories || excluded.categories) c),
+                                     '{}'),
                city = coalesce(nullif(excluded.city, ''), sources.city),
                note = coalesce(nullif(excluded.note, ''), sources.note),
                added_by = coalesce(sources.added_by, excluded.added_by),
@@ -65,8 +66,9 @@ def remember(conn: psycopg.Connection, result: dict[str, Any]) -> int:
                ON CONFLICT (domain) DO UPDATE SET
                    name = coalesce(sources.name, excluded.name),
                    city = coalesce(sources.city, excluded.city),
-                   categories = (SELECT array_agg(DISTINCT c ORDER BY c)
-                                 FROM unnest(sources.categories || excluded.categories) c),
+                   categories = coalesce((SELECT array_agg(DISTINCT c ORDER BY c)
+                                          FROM unnest(sources.categories || excluded.categories) c),
+                                         '{}'),
                    found_count = sources.found_count + 1, last_found = now()""",
             (domain, (item.get("seller") or "")[:150] or None, [category] if category else [],
              (item.get("city") or "")[:100] or None),
