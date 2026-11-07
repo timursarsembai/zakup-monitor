@@ -535,3 +535,21 @@ def test_research_list_margin_falls_back_to_partial_fit(client, conn):
     _login(client)
     page = client.get("/research").text
     assert "маржа до 50.0%" in page and "по частично подходящим" in page
+
+
+def test_old_results_stay_visible_while_searching_more(client, conn):
+    from tests.test_research import _lot
+
+    _lot(conn)
+    conn.execute("""INSERT INTO lot_research (lot_id, user_id, provider, region, status, finished_at, result)
+        SELECT 90, id, 'claude_code', 'Актобе', 'done', now(),
+        '{"items": [{"name": "Стол дубовый", "url": "https://m.kz/1", "unit_price": 50000, "fit": "полностью", "in_region": true}]}'
+        FROM users LIMIT 1""")
+    conn.commit()
+    _login(client)
+    client.post("/lots/90/research", data={"more": "1", "target": "5"}, headers=ORIGIN)
+    fragment = client.get("/lots/90/research").text
+    assert "Ищу ещё предложения" in fragment and "Стол дубовый" in fragment
+    assert "Найти ещё" not in fragment  # пока идёт поиск — кнопки нет
+    page = client.get("/research").text
+    assert "Сейчас ищем" in page and "ещё предложения" in page

@@ -13,6 +13,11 @@
   .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; border: 1px solid var(--line); }
   .badge.hot { background: color-mix(in srgb, #1e9e5a 15%, transparent); border-color: transparent; color: var(--ok); font-weight: 600; }
   @media (max-width: 640px) { .item { grid-template-columns: 1fr; } .side { text-align: left; } }
+  .running { border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--line)); border-radius: 12px; padding: 12px 16px; margin: 12px 0; }
+  .running ul { list-style: none; margin: 8px 0 0; padding: 0; }
+  .running li { padding: 4px 0; }
+  .spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin 1s linear infinite; vertical-align: -1px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
   .headline { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
   .headline .count { opacity: .8; font-weight: 400; margin-left: 4px; }
   .sheet { display: none; position: fixed; inset: 0; z-index: 50; background: var(--bg); overflow-y: auto; padding: 0 16px 24px; }
@@ -36,7 +41,16 @@
 {% block main %}
 <div class="headline"><h1>{{ _("Подбор товаров") }}</h1>
   <button type="button" class="primary" data-sources-open>⚙ {{ _("Источники") }} <span class="count">{{ sources | selectattr(7) | list | length }}</span></button></div>
-<p class="muted">{{ _("Сохранённые результаты поиска товаров с ИИ по лотам. Повторный поиск не нужен: результат хранится, пока вы сами не нажмёте «Найти заново» на странице лота.") }}{% if active %} {{ _("Сейчас в работе:") }} {{ active }}.{% endif %}</p>
+<p class="muted">{{ _("Сохранённые результаты поиска товаров с ИИ по лотам. Повторный поиск не нужен: результат хранится, пока вы сами не нажмёте «Найти заново» на странице лота.") }}</p>
+{% if running %}
+<div class="running">
+  <b>{{ _("Сейчас ищем") }}</b> <span class="muted">{{ _("— идёт в фоне, можно уходить со страницы: результат сохранится здесь.") }}</span>
+  <ul>{% for lot_id, status, more, name, name_kz, created in running %}
+    <li><span class="spinner"></span> <a href="/lots/{{ lot_id }}#research">{{ pick(name, name_kz) or lot_id }}</a>
+      <span class="muted">· {{ _("ещё предложения") if more else _("новый поиск") }} · {{ _("в работе") if status == "running" else _("в очереди") }}</span></li>
+  {% endfor %}</ul>
+</div>
+{% endif %}
 <form class="search" method="get" action="/research">
   <input name="q" value="{{ q }}" placeholder="{{ _("Название лота или номер объявления") }}" aria-label="{{ _("Поиск по подборкам") }}">
   <button class="primary">{{ _("Найти") }}</button>
@@ -91,6 +105,11 @@
   </div>
 </div>
 <script>
+  // Пока идут поиски — обновляем страницу раз в 20 секунд (если не открыто окно источников).
+  {% if running %}setTimeout(function reload() {
+    if (document.getElementById("sources").classList.contains("open")) return setTimeout(reload, 20000);
+    location.reload();
+  }, 20000);{% endif %}
   const sheet = document.getElementById("sources");
   const toggle = (open) => { sheet.classList.toggle("open", open); document.body.classList.toggle("sheet-open", open); };
   document.querySelector("[data-sources-open]").addEventListener("click", () => toggle(true));

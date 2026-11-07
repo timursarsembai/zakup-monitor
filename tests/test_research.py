@@ -123,7 +123,9 @@ def test_find_more_extends_saved_result(conn, monkeypatch):
     research.work(url, ["claude_code"], once=True)
     assert "https://a.kz/1" in calls[1] and "НЕ возвращай" in calls[1]
     result = research.latest(conn, 90)["result"]
-    assert sorted(i["url"] for i in result["items"]) == ["https://a.kz/1", "https://b.kz/2"]
+    # Прежнее — первым, новое — в конце и с пометкой.
+    assert [i["url"] for i in result["items"]] == ["https://a.kz/1", "https://b.kz/2"]
+    assert result["items"][1]["new"] and "new" not in result["items"][0]
     assert result["added"] == 1 and not result["exhausted"]
     research.enqueue(conn, user, 90, "", True, more=True)
     research.work(url, ["claude_code"], once=True)

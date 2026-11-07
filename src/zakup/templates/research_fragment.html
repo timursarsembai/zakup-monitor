@@ -1,13 +1,19 @@
 {# Результат поиска товаров под лот. Пока задача в работе — страница опрашивает этот фрагмент. #}
 <div data-research-status="{{ job.status if job else 'none' }}">
+{# Сообщение о текущем поиске — сверху; ниже всегда последний готовый результат,
+   чтобы таблица не пропадала, пока идёт «Найти ещё» или «Найти заново». #}
 {% if not job %}
   <p class="muted">{{ _("Поиск ещё не запускали.") }}</p>
 {% elif job.status in ("queued", "running") %}
-  <p><span class="spinner"></span> {% if job.status == "queued" %}{{ _("В очереди") }}{% if job.ahead %}{{ _(": впереди") }} {{ job.ahead }}{% endif %}…{% else %}{{ _("Ищу товары по спецификации — обычно 2–5 минут…") }}{% endif %}
+  <p><span class="spinner"></span> {% if job.base_id %}{{ _("Ищу ещё предложения — найденные ниже останутся, новые добавятся.") }}{% elif job.status == "queued" %}{{ _("В очереди") }}{% if job.ahead %}{{ _(": впереди") }} {{ job.ahead }}{% endif %}…{% else %}{{ _("Ищу товары по спецификации — обычно 2–5 минут…") }}{% endif %}
     <span class="muted">{{ _("· регион:") }} {{ job.region }}{% if job.whole_kz %} {{ _("и весь Казахстан") }}{% endif %}</span></p>
 {% elif job.status == "error" %}
   <p class="notice">{{ _("Поиск не удался") }}{% if is_admin %}: {{ job.error }}{% else %}{{ _(". Попробуйте ещё раз позже.") }}{% endif %}</p>
-{% else %}
+{% endif %}
+{% set shown = job if job and job.status == "done" else done %}
+{% if shown %}
+  {% set busy = job and job.status in ("queued", "running") %}
+  {% set job = shown %}
   {% set r = job.result %}
   {% set lot_price = lot_info.price if lot_info else none %}
   {% set count = lot_info["count"] if lot_info else 0 %}
@@ -22,7 +28,7 @@
     {% set margin = (lot_price - item.unit_price) if (lot_price and item.unit_price) else none %}
     <tr>
       <td class="photo">{% if item.image %}<a href="{{ item.url | safe_url }}" target="_blank" rel="noopener noreferrer"><img src="{{ item.image | safe_url }}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()"></a>{% endif %}</td>
-      <td class="product"><a href="{{ item.url | safe_url }}" target="_blank" rel="noopener noreferrer">{{ item.name }}</a>
+      <td class="product"><a href="{{ item.url | safe_url }}" target="_blank" rel="noopener noreferrer">{{ item.name }}</a>{% if item.new %} <span class="badge hot">{{ _("новое") }}</span>{% endif %}
         <div class="muted">{{ item.seller }}{% if item.city %} · {{ item.city }}{% endif %}</div>
         <div class="muted url"><a href="{{ item.url | safe_url }}" target="_blank" rel="noopener noreferrer">{{ (item.url | replace("https://", "") | replace("http://", "")) | truncate(48) }}</a></div>
         {% if item.note %}<div class="muted">{{ item.note }}</div>{% endif %}</td>
@@ -44,7 +50,7 @@
   {% if job.base_id %}
   <p class="{{ 'muted' if r.exhausted else '' }}">{% if r.exhausted %}{{ _("Больше подходящих предложений не нашлось — показано всё, что есть.") }}{% else %}{{ _("Добавлено новых предложений:") }} <b>{{ r.added }}</b>{% endif %}</p>
   {% endif %}
-  {% if r["items"] and not r.exhausted %}
+  {% if r["items"] and not r.exhausted and not busy %}
   <form class="more-form" method="post" action="/lots/{{ lot_id }}/research">
     <input type="hidden" name="more" value="1">
     <button class="primary">➕ {{ _("Найти ещё") }}</button>

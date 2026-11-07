@@ -331,15 +331,29 @@ def enqueue(conn: psycopg.Connection, user_id: int, lot_id: int, region: str,
     return job
 
 
+def latest_done(conn: psycopg.Connection, lot_id: int) -> dict[str, Any] | None:
+    """Последний готовый результат — его показываем, пока идёт новый поиск."""
+    row = conn.execute(
+        "SELECT id FROM lot_research WHERE lot_id = %s AND status = 'done' ORDER BY id DESC LIMIT 1",
+        (lot_id,),
+    ).fetchone()
+    return _job(conn, row[0]) if row else None
+
+
 def latest(conn: psycopg.Connection, lot_id: int) -> dict[str, Any] | None:
+    """Последний запуск по лоту — любой: в очереди, в работе, готовый или с ошибкой."""
+    row = conn.execute("SELECT max(id) FROM lot_research WHERE lot_id = %s", (lot_id,)).fetchone()
+    return _job(conn, row[0]) if row and row[0] else None
+
+
+def _job(conn: psycopg.Connection, job_id: int) -> dict[str, Any] | None:
     row = conn.execute(
         """SELECT r.id, r.status, r.provider, r.model, r.region, r.whole_kz, r.result, r.error,
                   r.created_at, r.finished_at, u.email, r.target, r.base_id,
                   (SELECT count(*) FROM lot_research q
                    WHERE q.status = 'queued' AND q.provider = r.provider AND q.id < r.id)
-           FROM lot_research r JOIN users u ON u.id = r.user_id
-           WHERE r.lot_id = %s ORDER BY r.id DESC LIMIT 1""",
-        (lot_id,),
+           FROM lot_research r JOIN users u ON u.id = r.user_id WHERE r.id = %s""",
+        (job_id,),
     ).fetchone()
     if row is None:
         return None
@@ -518,9 +532,9 @@ def _base_result(conn: psycopg.Connection, job: dict[str, Any]) -> dict[str, Any
 def merge(base: dict[str, Any], found: dict[str, Any]) -> dict[str, Any]:
     """«Найти ещё»: к прошлому результату — только новые ссылки. added = 0 — больше нет."""
     known = {i["url"] for i in base.get("items", [])}
-    new = [i for i in found.get("items", []) if i["url"] not in known]
-    items = sorted(base.get("items", []) + new,
-                   key=lambda i: (not i["in_region"], i["unit_price"] is None, i["unit_price"] or 0))
+    new = [{**i, "new": True} for i in found.get("items", []) if i["url"] not in known]
+    # Прежние — на своих местах, новые — в конце: не перемешиваем.
+    items = [{k: v for k, v in i.items() if k != "new"} for i in base.get("items", [])] + new
     return {**base, "items": items, "added": len(new), "exhausted": not new,
             "category": base.get("category") or found.get("category", "")}
 

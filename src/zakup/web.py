@@ -523,13 +523,14 @@ def lot_page(request: Request, user: User, lot_id: int, background: BackgroundTa
         raise HTTPException(404, "Лот удалён из объявления")
     with pool.connection() as conn:
         job = research.latest(conn, lot_id)
+        done = research.latest_done(conn, lot_id)
         lot_info = research.lot_context(conn, lot_id)
         provider = (conn.execute(
             "SELECT ai_provider FROM users WHERE role = 'admin' ORDER BY id LIMIT 1"
         ).fetchone() or ("claude_code",))[0]
     _audit(request, user, "view_lot", f"/lots/{lot_id}")
     context.update(lot=lot, others=[other for other in context["lots"] if other["id"] != lot_id],
-                   here=request.url.path, job=job, lot_info=lot_info,
+                   here=request.url.path, job=job, done=done, lot_info=lot_info,
                    region=research.default_region(lot_info) if lot_info else "",
                    provider_name=research.PROVIDERS.get(provider, provider),
                    targets=research.TARGETS,
@@ -583,11 +584,12 @@ def spec_summary(request: Request, _: User, lot_id: int):
 def research_fragment(request: Request, _: User, lot_id: int):
     with pool.connection() as conn:
         job = research.latest(conn, lot_id)
+        done = research.latest_done(conn, lot_id)
         lot_info = research.lot_context(conn, lot_id)
     return templates.TemplateResponse(
         request, "research_fragment.html",
-        {"job": job, "lot_info": lot_info, "is_admin": request.state.role == "admin",
-         "targets": research.TARGETS, "lot_id": lot_id},
+        {"job": job, "done": done, "lot_info": lot_info,
+         "is_admin": request.state.role == "admin", "targets": research.TARGETS, "lot_id": lot_id},
     )
 
 
@@ -792,9 +794,12 @@ def research_list(request: Request, user: User, q: str = "", sources_open: int =
                ORDER BY r.lot_id, r.id DESC""",
             {"q": q.strip(), "like": f"%{q.strip()}%"},
         ).fetchall()
-        active = conn.execute(
-            "SELECT count(*) FROM lot_research WHERE status IN ('queued', 'running')"
-        ).fetchone()[0]
+        running = conn.execute(
+            """SELECT r.lot_id, r.status, r.base_id IS NOT NULL, l.name_ru, l.name_kz, r.created_at
+               FROM lot_research r JOIN lots l ON l.id = r.lot_id
+               WHERE r.status IN ('queued', 'running') ORDER BY r.id"""
+        ).fetchall()
+        active = len(running)
         source_rows = sources.listing(conn)
     items = []
     for row in rows:
@@ -823,7 +828,7 @@ def research_list(request: Request, user: User, q: str = "", sources_open: int =
     items.sort(key=lambda i: i["finished_at"], reverse=True)
     return templates.TemplateResponse(
         request, "research_list.html",
-        {"items": items, "q": q, "active": active, "now": datetime.now(UTC),
+        {"items": items, "q": q, "active": active, "running": running, "now": datetime.now(UTC),
          "sources": source_rows, "sources_open": sources_open, "me": user,
          "is_admin": request.state.role == "admin"},
     )
