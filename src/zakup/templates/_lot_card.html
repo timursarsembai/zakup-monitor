@@ -77,7 +77,7 @@
     {% if spec_file(lot) %}
     {% set cached = specs.get(lot.id) %}
     {# Текст уже в базе — показываем сразу; нет — догружаем с портала из браузера. #}
-    <details class="spec" open data-src="/a/{{ a.id }}/lots/{{ lot.id }}/spec"{% if cached and cached[0] %} data-loaded="1"{% endif %}>
+    <details class="spec" data-src="/a/{{ a.id }}/lots/{{ lot.id }}/spec"{% if cached and cached[0] %} data-loaded="1"{% endif %}>
       <summary>Техническая спецификация</summary>
       <div class="spec-body">{% if cached and cached[0] %}<div class="spec-text">{{ cached[0] }}</div><p><a href="{{ spec_file(lot) | safe_url }}" target="_blank" rel="noopener">Скачать PDF спецификации</a></p>{% else %}<p class="muted">Загружаю…</p>{% endif %}</div>
     </details>
@@ -124,7 +124,6 @@
 {% endmacro %}
 
 {% macro lot_scripts() %}
-  // Спецификации грузятся сразу, по одной, чтобы не дёргать портал десятком запросов.
   // При ошибке — кнопка «Обновить»: она просит сервер не брать ошибку из кэша.
   const loadSpec = async (spec, refresh) => {
     const body = spec.querySelector(".spec-body");
@@ -141,7 +140,10 @@
     const retry = event.target.closest("[data-spec-retry]");
     if (retry) loadSpec(retry.closest("details.spec"), true);
   });
-  (async () => {
-    for (const spec of document.querySelectorAll("details.spec:not([data-loaded])")) await loadSpec(spec, false);
-  })();
+  // Спецификация свёрнута; текст из базы уже в разметке, остальное — при раскрытии.
+  for (const spec of document.querySelectorAll("details.spec")) {
+    spec.addEventListener("toggle", () => {
+      if (spec.open && !spec.dataset.loaded) { spec.dataset.loaded = "1"; loadSpec(spec, false); }
+    });
+  }
 {% endmacro %}

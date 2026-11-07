@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% block title %}Обзор{% endblock %}
+{% block style %}
+  h1 { font-size: 22px; margin: 6px 0 4px; }
+  h2 { font-size: 16px; margin: 0 0 10px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; margin-top: 14px; }
+  .card { border: 1px solid var(--line); border-radius: 12px; padding: 16px; min-width: 0; }
+  .card.wide { grid-column: span 2; }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; margin-top: 14px; }
+  .kpi { border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; color: inherit; display: block; }
+  a.kpi:hover { border-color: var(--accent); }
+  .kpi b { display: block; font-size: 26px; line-height: 1.2; font-variant-numeric: tabular-nums; }
+  .kpi span { font-size: 13px; color: var(--muted); }
+  .kpi.accent { background: color-mix(in srgb, var(--accent) 12%, transparent); border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
+  .bars { display: flex; align-items: flex-end; gap: 4px; height: 120px; margin-top: 8px; }
+  .bars div { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; min-width: 0; height: 100%; }
+  .bars i { display: block; width: 100%; background: var(--accent); border-radius: 4px 4px 0 0; min-height: 2px; }
+  .bars i.weekend { opacity: .35; }
+  .bars small { font-size: 11px; color: var(--muted); margin-top: 4px; white-space: nowrap; }
+  .hbar { display: grid; grid-template-columns: minmax(0, 150px) minmax(0, 1fr) auto; gap: 8px; align-items: center; margin: 6px 0; font-size: 14px; }
+  .hbar .track { height: 8px; background: color-mix(in srgb, var(--fg) 8%, transparent); border-radius: 4px; overflow: hidden; }
+  .hbar .track i { display: block; height: 100%; background: var(--accent); }
+  .hbar .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .list { list-style: none; padding: 0; margin: 0; }
+  .list li { padding: 8px 0; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; gap: 12px; }
+  .list li:last-child { border-bottom: 0; }
+  .num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; border: 1px solid var(--line); }
+  .badge.hot { background: color-mix(in srgb, #1e9e5a 15%, transparent); border-color: transparent; color: var(--ok); font-weight: 600; }
+  .urgent { color: var(--bad); font-weight: 600; }
+  .marks { display: flex; flex-wrap: wrap; gap: 8px; }
+  .marks a { padding: 6px 12px; border: 1px solid var(--line); border-radius: 999px; color: inherit; }
+  .marks a b { margin-left: 4px; }
+  @media (max-width: 700px) { .card.wide { grid-column: auto; } .bars small { font-size: 9px; } }
+{% endblock %}
+{% block main %}
+<h1>Обзор</h1>
+<p class="muted">Данные обновлены {{ (m.freshness[0]|local).strftime("%d.%m %H:%M") if m.freshness[0] else "—" }} · обзор рынка пересчитывается раз в 5 минут.</p>
+
+<div class="kpis">
+  <a class="kpi accent" href="/lots"><b>{{ m.default_now[0] }}</b><span>лотов под ваш фильтр сейчас (окончание {{ m.rule_day.strftime("%d.%m") }})</span></a>
+  <a class="kpi" href="/announcements?applied=1&deadline_mode=&stage=open&disable_person=&advance_min=0"><b>{{ "{:,}".format(m.open[0]).replace(",", " ") }}</b><span>открытых объявлений · {{ ((m.open[1] | float) / 1e9) | round(1) }} млрд ₸</span></a>
+  <div class="kpi"><b>{{ "{:,}".format(m.open_lots[0]).replace(",", " ") }}</b><span>открытых лотов, с авансом {{ (m.open_lots[1] / (m.open_lots[0] or 1) * 100) | round | int }}%, от 30% — {{ (m.open_lots[2] / (m.open_lots[0] or 1) * 100) | round | int }}%</span></div>
+  <div class="kpi"><b>{{ "{:,}".format(m.open_lots[3]).replace(",", " ") }}</b><span>лотов среди организаций инвалидов</span></div>
+  <div class="kpi"><b>{% if m.results[2] is not none %}{{ ((m.results[2] | float) * 100) | round(1) }}%{% else %}—{% endif %}</b><span>медианное снижение цены победителем (итоги за 30 дней, {{ m.results[0] }} лотов)</span></div>
+  <div class="kpi"><b>{% if m.lot_outcomes[0] + m.lot_outcomes[1] %}{{ (m.lot_outcomes[1] / (m.lot_outcomes[0] + m.lot_outcomes[1]) * 100) | round | int }}%{% else %}—{% endif %}</b><span>лотов не состоялись за неделю (нет или одно предложение)</span></div>
+</div>
+
+<div class="grid">
+  <section class="card">
+    <h2>Мои лоты</h2>
+    {% if p.marks %}
+    <div class="marks">
+      {% for status, label in mark_statuses.items() if p.marks.get(status) %}
+      <a href="/my?status={{ status }}">{{ label }}<b>{{ p.marks[status] }}</b></a>
+      {% endfor %}
+    </div>
+    {% else %}<p class="muted">Отметьте лоты в поиске — «Интересно», «Готовлю заявку»… — и они появятся здесь.</p>{% endif %}
+    {% if p.upcoming %}
+    <h2 style="margin-top:14px">Ближайшие сроки</h2>
+    <ul class="list">
+      {% for l in p.upcoming %}
+      {% set left = (l[4] - now).total_seconds() %}
+      <li><span><a href="/lots/{{ l[0] }}">{{ l[1] or "—" }}</a> <span class="muted">· {{ mark_statuses.get(l[5]) }}</span></span>
+        <span class="num {{ 'urgent' if left < 86400 }}">{{ time_left(l[4]) }}</span></li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <h2>Мои подписки</h2>
+    {% if p.subscriptions %}
+    <ul class="list">
+      {% for s in p.subscriptions %}
+      <li><a href="/matches?filtered=1&sub={{ s[0] }}">{{ s[1] }}</a>{% if not s[2] %} <span class="muted">выкл.</span>{% endif %}
+        <span class="num muted">за сутки <b>{{ s[3] }}</b> · за неделю {{ s[4] }}</span></li>
+      {% endfor %}
+    </ul>
+    {% else %}<p class="muted">Подписок нет. Задайте поиск и нажмите «Подписаться на этот поиск».</p>{% endif %}
+  </section>
+
+  <section class="card">
+    <h2>Сроки по вашему фильтру</h2>
+    <p class="muted">Лоты под фильтр по умолчанию — по дню окончания приёма.</p>
+    {% if m.deadlines %}
+    <ul class="list">
+      {% for d, count, total in m.deadlines %}
+      <li><span>{{ d.strftime("%d.%m") }}, {{ ["пн", "вт", "ср", "чт", "пт", "сб", "вс"][d.weekday()] }}{% if d == m.rule_day %} <span class="badge hot">через 2 рабочих дня</span>{% endif %}</span>
+        <span class="num"><a href="/lots?applied=1&deadline_mode=date&deadline_date={{ d.isoformat() }}&end_from={{ d.isoformat() }}&status=240&disable_person=only&region=75&region=19&min_sum=300000&advance_min=30">{{ count }} лот.</a> · {{ total | money }} ₸</span></li>
+      {% endfor %}
+    </ul>
+    {% else %}<p class="muted">В ближайшую неделю ничего не заканчивается.</p>{% endif %}
+  </section>
+
+  <section class="card wide">
+    <h2>Новые объявления по дням</h2>
+    <div class="bars" role="img" aria-label="Число опубликованных объявлений за 14 дней">
+      {% for d, count, total in m.days %}
+      <div title="{{ d.strftime('%d.%m') }}: {{ count }} объявлений, {{ total | money }} ₸">
+        <i class="{{ 'weekend' if d.weekday() >= 5 }}" style="height: {{ (count / m.days_max * 100) | round(1) }}%"></i>
+        <small>{{ d.strftime("%d.%m") }}</small>
+      </div>
+      {% endfor %}
+    </div>
+    <p class="muted" style="margin-top:8px">История в базе — с 30 октября; в выходные госорганы почти не публикуют.</p>
+  </section>
+
+  <section class="card">
+    <h2>Регионы: открытые лоты</h2>
+    {% for name, count, total in m.regions %}
+    <div class="hbar"><span class="name">{{ name }}</span><span class="track"><i style="width: {{ (count / m.regions_max * 100) | round(1) }}%"></i></span><span class="num muted">{{ count }}</span></div>
+    {% endfor %}
+  </section>
+
+  <section class="card">
+    <h2>Способы закупки: открытые</h2>
+    <ul class="list">
+      {% for name, count, total in m.methods %}
+      <li><span>{{ name }}</span><span class="num">{{ count }} · <span class="muted">{{ ((total | float) / 1e6) | round(1) }} млн ₸</span></span></li>
+      {% endfor %}
+    </ul>
+  </section>
+
+  <section class="card">
+    <h2>Данные</h2>
+    <ul class="list">
+      <li><span>Последнее обновление с портала</span><span class="num">{{ (m.freshness[0]|local).strftime("%d.%m %H:%M") if m.freshness[0] else "—" }}</span></li>
+      <li><span>Техспецификации открытых лотов в базе</span><span class="num">{{ m.freshness[2] }} из {{ m.freshness[1] }}</span></li>
+      <li><span>Итогов разобрано за 30 дней</span><span class="num">{{ m.results[0] + m.results[1] }}</span></li>
+    </ul>
+  </section>
+</div>
+{% endblock %}

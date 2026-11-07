@@ -417,3 +417,14 @@ def test_pagination_and_per_page(client, conn):
     second = client.get("/lots?applied=1&deadline_mode=&per_page=20&page=2").text
     assert second.count('href="/lots/60') == 5
     assert 'value="100"' in page and "Показывать по" in page
+
+
+def test_dashboard_is_home(client, conn):
+    _announcement_with_lots(conn)
+    _login(client)
+    page = client.get("/")
+    assert page.status_code == 200
+    for text in ("Обзор", "лотов под ваш фильтр", "Мои лоты", "Мои подписки", "Новые объявления по дням",
+                 "Регионы", "Способы закупки"):
+        assert text in page.text, text
+    assert client.get("/?applied=1", follow_redirects=False).headers["location"] == "/announcements?applied=1"

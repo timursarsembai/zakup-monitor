@@ -28,6 +28,7 @@ from zakup import (
     SITE_URL,
     auth,
     bot,
+    dashboard,
     details,
     marks,
     matcher,
@@ -243,9 +244,19 @@ def healthz() -> dict:
 
 
 @app.get("/")
-def home(request: Request, _: User):
-    query = f"?{request.url.query}" if request.url.query else ""
-    return RedirectResponse(f"/announcements{query}", status_code=307)
+def home(request: Request, user: User, background: BackgroundTasks):
+    # Старые ссылки вида /?applied=1&… вели на поиск — туда и отправляем.
+    if request.url.query:
+        return RedirectResponse(f"/announcements?{request.url.query}", status_code=307)
+    market, stale = dashboard.market_cached()
+    with pool.connection() as conn:
+        if market is None:
+            market = dashboard.market(conn)
+        elif stale:
+            # Показываем прежние цифры сразу, а пересчёт — после ответа.
+            background.add_task(_recount_market)
+        context = {"m": market, "p": dashboard.personal(conn, user), "now": datetime.now(UTC)}
+    return templates.TemplateResponse(request, "dashboard.html", context)
 
 
 def _user_groups(conn, user: int) -> list[tuple[str, str]]:
@@ -505,6 +516,11 @@ def research_fragment(request: Request, _: User, lot_id: int):
         request, "research_fragment.html",
         {"job": job, "lot_info": lot_info, "is_admin": request.state.role == "admin"},
     )
+
+
+def _recount_market() -> None:
+    with pool.connection() as conn:
+        dashboard.market(conn)
 
 
 _refreshing: set[int] = set()
