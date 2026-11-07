@@ -182,7 +182,10 @@ def parse_pending(conn: psycopg.Connection, limit: int) -> int:
         """SELECT id, detail FROM announcements
            WHERE status_id = 350 AND detail IS NOT NULL
              AND protocol_url IS DISTINCT FROM (
-                 SELECT f->>'filePath' FROM jsonb_array_elements(detail->'Files') f
+                 -- Files бывает null: тогда пустой список, а не ошибка.
+                 SELECT f->>'filePath' FROM jsonb_array_elements(
+                     CASE WHEN jsonb_typeof(detail->'Files') = 'array'
+                          THEN detail->'Files' ELSE '[]' END) f
                  WHERE lower(f->>'nameRu') = %s LIMIT 1)
            ORDER BY end_date DESC LIMIT %s""",
         (PROTOCOL_NAME, limit),

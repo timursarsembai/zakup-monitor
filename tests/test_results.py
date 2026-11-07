@@ -98,3 +98,10 @@ def test_refresh_saves_results_and_marks_get_outcome(conn, monkeypatch):
     assert marks.of_user(conn, user, [70, 71]) == {70: ("lost", ""), 71: ("interested", "")}
     assert any("Отметка изменена: Не выиграли" in text for text in sent)
     assert marks.announce_results(conn, pause=0) == 0
+
+
+def test_parse_pending_skips_announcements_without_files(conn):
+    db.upsert_announcement(conn, {"id": 8, "name_ru": "Без файлов", "end_date": "2020-01-01 10:00:00",
+                                  "ref_buy_status_id": 350})
+    conn.execute("""UPDATE announcements SET detail = '{"Files": null, "Lots": null}' WHERE id = 8""")
+    assert results.parse_pending(conn, 10) == 0

@@ -580,7 +580,9 @@ def my_lots(request: Request, user: User):
                       coalesce(a.customer_name_ru, l.customer_name_ru), a.end_date,
                       a.number_anno, l.lot_number,
                       (SELECT lot->'RefLotsStatus'->>'nameRu'
-                       FROM jsonb_array_elements(a.detail->'Lots') lot
+                       FROM jsonb_array_elements(
+                           CASE WHEN jsonb_typeof(a.detail->'Lots') = 'array'
+                                THEN a.detail->'Lots' ELSE '[]' END) lot
                        WHERE (lot->>'id')::bigint = l.id),
                       a.detail->'RefBuyStatus'->>'nameRu',
                       r.outcome, r.winner_name, r.winner_total, r.reason,
