@@ -175,3 +175,26 @@ def test_group_gets_each_lot_once_and_announcement_scope_sends_all_lots(conn, mo
     text = sent[0][1]
     assert text.count("Стол") == 1 and "Стул" in text and "· amir" in text
     assert conn.execute("SELECT count(*) FROM matches WHERE notified_at IS NULL").fetchone()[0] == 0
+
+
+def test_review_fixes_status_scope_seed_and_rejected_message(conn, monkeypatch):
+    _announcement(conn, 1)
+    # Статус «Завершено» есть только у объявлений: на странице лотов — пусто, а не всё подряд.
+    assert _lot_ids(conn, Filters(statuses=[350], advance_min=0)) == []
+    user = conn.execute(
+        "INSERT INTO users (email, telegram_chat_id) VALUES ('a', '42') RETURNING id").fetchone()[0]
+    sub = conn.execute(
+        """INSERT INTO subscriptions (user_id, name, query, kind, filters)
+           VALUES (%s, 'x', '', 'announcements', %s) RETURNING id""",
+        (user, db.Jsonb(Filters().to_json()))).fetchone()[0]
+    monkeypatch.setattr(matcher, "FIRST_BATCH_LIMIT", 0)
+    matcher.seed(conn, sub, Filters(), "lots", NOW)
+    assert matcher.run_filters(conn, NOW) == 0  # уже увиденные при создании
+    _announcement(conn, 2)
+    assert matcher.run_filters(conn, NOW) == 1
+
+    def reject(chat, text):
+        raise matcher.telegram.TelegramError(400, "Bad Request: message is too long")
+    monkeypatch.setattr(matcher.telegram, "send_message", reject)
+    assert matcher.deliver(conn, pause=0) == 0
+    assert conn.execute("SELECT count(*) FROM matches WHERE notified_at IS NULL").fetchone()[0] == 0

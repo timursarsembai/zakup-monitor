@@ -384,15 +384,18 @@ def work(database_url: str, providers: list[str], once: bool = False) -> None:
     """Берёт задачи по очереди. Одна за раз: подписку и ключи не нагружаем."""
     from zakup import db
 
+    first = True
     while True:
         with db.connect(database_url) as conn:
+            # На старте «running» своих провайдеров — точно мёртвые: исполнитель один.
             conn.execute(
                 f"""UPDATE lot_research SET status = 'error', finished_at = now(),
                        error = 'прервано: перезапуск службы'
                     WHERE status = 'running' AND provider = ANY(%s)
-                      AND started_at < now() - interval '{STALE_AFTER}'""",
-                (providers,),
+                      AND (%s OR started_at < now() - interval '{STALE_AFTER}')""",
+                (providers, first),
             )
+            first = False
             row = conn.execute(
                 """UPDATE lot_research SET status = 'running', started_at = now()
                    WHERE id = (SELECT id FROM lot_research
@@ -408,7 +411,7 @@ def work(database_url: str, providers: list[str], once: bool = False) -> None:
                 logger.info("research %s: lot %s via %s", job["id"], job["lot_id"], job["provider"])
                 try:
                     result, error = run_job(conn, job), None
-                except (ResearchError, httpx.HTTPError) as exc:
+                except Exception as exc:  # noqa: BLE001 — задача не должна зависнуть в running
                     conn.rollback()
                     logger.warning("research %s failed: %s", job["id"], exc)
                     result, error = None, str(exc)[:500]

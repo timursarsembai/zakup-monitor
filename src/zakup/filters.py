@@ -264,6 +264,10 @@ class Filters:
         status = "l.status_id" if lots else "a.status_id"
         parts = []
         statuses = [s for s in self.statuses if s not in (ANNOUNCEMENT_ONLY if lots else LOT_ONLY)]
+        if self.statuses and not statuses and not self.stages:
+            # Выбраны только статусы, которых у этой страницы нет (350 у лотов,
+            # 360/370 у объявлений): ничего не найдено, а не «все статусы».
+            return "false"
         if statuses:
             parts.append(f"{status} = ANY(%(statuses)s)")
             params["statuses"] = statuses
@@ -278,8 +282,14 @@ class Filters:
                 parts.append(f"(a.status_id = 350 AND {negate}{_HAS_WINNER})")
         return "(" + " OR ".join(parts) + ")" if parts else None
 
-    def where(self, now: datetime, scope: str = "lots") -> tuple[str, dict[str, Any]]:
-        """SQL-условие и параметры. scope="lots": алиасы l и a; "announcements": только a."""
+    def where(self, now: datetime, scope: str = "lots",
+              subscription: bool = False) -> tuple[str, dict[str, Any]]:
+        """SQL-условие и параметры. scope="lots": алиасы l и a; "announcements": только a.
+
+        subscription=True — для подписок: срок «через 2 рабочих дня» — окном от
+        сегодня до этого дня, а не одним днём. Иначе лот, который пришёл поздно
+        (или подробности подгрузились после полуночи), не попал бы никогда.
+        """
         lots = scope == "lots"
         clauses = ["l.trd_buy_id = a.id"] if lots else []
         params: dict[str, Any] = {"now": now}
@@ -342,7 +352,7 @@ class Filters:
             params["deadline_end"] = datetime.combine(
                 deadline + timedelta(days=1), time.min, PORTAL_TZ
             )
-            if self.deadline == DEADLINE_RULE:
+            if self.deadline == DEADLINE_RULE and not subscription:
                 clauses.append("a.end_date >= %(deadline_start)s")
                 params["deadline_start"] = datetime.combine(deadline, time.min, PORTAL_TZ)
         end_from = (

@@ -68,20 +68,46 @@ def run_filters(conn: psycopg.Connection, now: datetime | None = None) -> int:
         "SELECT id, filters, scope FROM subscriptions WHERE active AND kind = 'announcements'"
     ).fetchall()
     for sub_id, data, scope in subscriptions:
-        where, params = Filters.from_json(data).where(now, scope)
-        # Подписка с поиска объявлений присылает объявление целиком — со всеми лотами.
-        source = (
-            "lots l, announcements a" if scope == "lots"
-            else "announcements a JOIN lots l ON l.trd_buy_id = a.id"
-        )
-        found += conn.execute(
-            f"""INSERT INTO matches (subscription_id, lot_id)
-                SELECT %(sub_id)s, l.id FROM {source} WHERE {where}
-                ON CONFLICT DO NOTHING""",
-            {**params, "sub_id": sub_id},
-        ).rowcount
-    conn.commit()
+        try:
+            found += insert_matches(conn, sub_id, Filters.from_json(data), scope, now)
+            conn.commit()
+        except (psycopg.Error, KeyError, ValueError) as error:
+            # Одна сломанная подписка не должна останавливать остальные и рассылку.
+            conn.rollback()
+            logger.warning("subscription %s skipped: %s", sub_id, error)
     return found
+
+
+def insert_matches(conn: psycopg.Connection, sub_id: int, current: Filters, scope: str,
+                   now: datetime, notified: bool = False) -> int:
+    where, params = current.where(now, scope, subscription=True)
+    # Подписка с поиска объявлений присылает объявление целиком — со всеми лотами.
+    source = (
+        "lots l, announcements a" if scope == "lots"
+        else "announcements a JOIN lots l ON l.trd_buy_id = a.id"
+    )
+    return conn.execute(
+        f"""INSERT INTO matches (subscription_id, lot_id, notified_at)
+            SELECT %(sub_id)s, l.id, {"now()" if notified else "NULL"} FROM {source} WHERE {where}
+            ON CONFLICT DO NOTHING""",
+        {**params, "sub_id": sub_id},
+    ).rowcount
+
+
+# Новая подписка сразу присылает подходящее сейчас, но не больше стольких лотов;
+# если подходит больше — считаем их увиденными и шлём только новые.
+FIRST_BATCH_LIMIT = 40
+
+
+def seed(conn: psycopg.Connection, sub_id: int, current: Filters, scope: str,
+         now: datetime | None = None) -> None:
+    now = now or datetime.now(UTC)
+    where, params = current.where(now, scope, subscription=True)
+    source = ("lots l, announcements a" if scope == "lots"
+              else "announcements a JOIN lots l ON l.trd_buy_id = a.id")
+    count = conn.execute(f"SELECT count(*) FROM {source} WHERE {where}", params).fetchone()[0]
+    if count > FIRST_BATCH_LIMIT:
+        insert_matches(conn, sub_id, current, scope, now, notified=True)
 
 
 class PendingLot(NamedTuple):
@@ -140,8 +166,12 @@ def _regions(kato) -> str:
     return ", ".join(sorted({REGIONS[k[:2]] for k in kato or [] if k[:2] in REGIONS}))
 
 
+def _cut(text: str, limit: int) -> str:
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+
 def format_lot(lot: PendingLot) -> str:
-    title = html.escape(lot.lot_name or "Без названия")
+    title = html.escape(_cut(lot.lot_name or "Без названия", 150))
     if lot.lot_description and lot.lot_description != lot.lot_name:
         title += f" — {html.escape(lot.lot_description[:120])}"
     parts = [title]
@@ -159,13 +189,13 @@ def format_lot(lot: PendingLot) -> str:
 def format_block(lots: list[PendingLot]) -> str:
     """Блок одного объявления: шапка и подошедшие лоты."""
     first = lots[0]
-    lines = [f"<b>{html.escape(first.announcement_name or first.lot_name or 'Объявление')}</b>"]
+    lines = [f"<b>{html.escape(_cut(first.announcement_name or first.lot_name or 'Объявление', 200))}</b>"]
     head = [f"№ {html.escape(first.number_anno or str(first.announcement_id or ''))}"]
     if first.end_date:
         head.append(f"приём до {first.end_date.astimezone(PORTAL_TZ):%d.%m %H:%M}")
     lines.append(" · ".join(head))
     if first.customer:
-        lines.append(html.escape(first.customer))
+        lines.append(html.escape(_cut(first.customer, 150)))
     lines += [format_lot(lot) for lot in lots[:LOTS_PER_BLOCK]]
     if len(lots) > LOTS_PER_BLOCK:
         lines.append(f"…и ещё {len(lots) - LOTS_PER_BLOCK} лотов")
@@ -283,6 +313,12 @@ def deliver(conn: psycopg.Connection, pause: float = 1.1) -> int:
             try:
                 telegram.send_message(chat_id, text)
             except telegram.TelegramError as error:
+                if error.code == 400 and not error.chat_gone:
+                    # Сообщение не принято (слишком длинное, кривая разметка): иначе
+                    # оно повторялось бы каждый раз и держало всю очередь.
+                    logger.warning("message to %s rejected, skipped: %s", chat_id, error)
+                    _mark_notified(conn, batch)
+                    continue
                 if not error.chat_gone:
                     # Telegram недоступен или лимит: остальное отправим в следующий раз.
                     logger.warning("delivery stopped: %s", error)
@@ -292,8 +328,15 @@ def deliver(conn: psycopg.Connection, pause: float = 1.1) -> int:
                     "UPDATE users SET telegram_chat_id = NULL WHERE telegram_chat_id = %s",
                     (chat_id,),
                 )
+                is_group = conn.execute(
+                    "SELECT 1 FROM telegram_groups WHERE chat_id = %s", (chat_id,)
+                ).fetchone()
                 bot.unlink_group(conn, chat_id)
-                _mark_notified(conn, chat_notices)
+                if is_group:
+                    # Подписки группы теперь шлют в личку: эти лоты уйдут туда.
+                    conn.commit()
+                else:
+                    _mark_notified(conn, chat_notices)
                 break
             _remember_sent(conn, chat_id, batch)
             _mark_notified(conn, batch)

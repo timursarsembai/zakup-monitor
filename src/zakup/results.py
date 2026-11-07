@@ -75,8 +75,46 @@ def _decimal(value: str) -> str | None:
         return None
 
 
+_SINGLE_SUPPLIER = re.compile(
+    r"Информация о приглашенном потенциальном поставщике:\n[\s\S]*?УНП\n(?:Реквизиты\n)?"
+    r"(?P<name>[\s\S]+?)\n(?P<bin>\d{12})\n"
+)
+_SINGLE_PRICE = re.compile(
+    r"Дата и время предоставления ценового предложения\n([\d.]+)\n([\d.]+)\n"
+    r"(\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}:\d{2})"
+)
+
+
+def parse_single_source(text: str) -> dict[str, dict[str, Any]]:
+    """Протокол «из одного источника»: один приглашённый поставщик на лот."""
+    results: dict[str, dict[str, Any]] = {}
+    for section in re.split(r"^№ лота:\n", text, flags=re.MULTILINE)[1:]:
+        number = section.split("\n", 1)[0].strip()
+        supplier, price = _SINGLE_SUPPLIER.search(section), _SINGLE_PRICE.search(section)
+        offers = []
+        if supplier:
+            offers.append({
+                "name": " ".join(supplier.group("name").split()),
+                "bin": supplier.group("bin"),
+                "price": None,
+                "total": _decimal(price.group(2)) if price else None,
+                "applied_at": price.group(3) if price else None,
+            })
+        flat = " ".join(section.split())
+        if offers and "Решено заключить договор" in flat:
+            results[number] = {"offers": offers, "outcome": "winner",
+                               "winner_bin": offers[0]["bin"], "winner_name": offers[0]["name"],
+                               "second_bin": None, "second_name": None}
+        elif "Не допущен" in flat or "признать несостоявш" in flat.lower():
+            results[number] = {"offers": offers, "outcome": "failed",
+                               "reason": "поставщик не допущен или закупка не состоялась"}
+    return results
+
+
 def parse_protocol(text: str) -> dict[str, dict[str, Any]]:
     """{номер лота: итог}. Итог: outcome ('winner' / 'failed'), предложения, победитель."""
+    if "из одного источника" in text[:300]:
+        return parse_single_source(text)
     results: dict[str, dict[str, Any]] = {}
     for section in re.split(r"^Лот №\n", text, flags=re.MULTILINE)[1:]:
         number = section.split("\n", 1)[0].strip()
@@ -164,30 +202,37 @@ def parse_announcement(conn: psycopg.Connection, announcement_id: int, detail: d
     ).fetchone()
     if done and done[0]:
         return
+    saved = 0
     try:
-        _save_protocol(conn, detail, url)
+        saved = _save_protocol(conn, detail, url)
     except (spec.SpecError, httpx.HTTPError) as error:
         # Сетевой сбой — попробуем в следующий раз; битый файл — не будем.
         logger.warning("protocol of %s not parsed: %s", announcement_id, error)
         if isinstance(error, httpx.HTTPError):
             return
+    if not saved:
+        logger.info("protocol of %s: no lots recognised", announcement_id)
+    # protocol_lots = 0 — формат не распознан: после доработки разбора такие
+    # протоколы можно перечитать, сбросив protocol_url.
     conn.execute(
-        "UPDATE announcements SET protocol_url = %s WHERE id = %s", (url, announcement_id)
+        "UPDATE announcements SET protocol_url = %s, protocol_lots = %s WHERE id = %s",
+        (url, saved, announcement_id),
     )
 
 
 def parse_pending(conn: psycopg.Connection, limit: int) -> int:
     """Протоколы итогов завершённых объявлений, начиная с новых: для поиска по итогам."""
     rows = conn.execute(
-        """SELECT id, detail FROM announcements
-           WHERE status_id = 350 AND detail IS NOT NULL
-             AND protocol_url IS DISTINCT FROM (
-                 -- Files бывает null: тогда пустой список, а не ошибка.
-                 SELECT f->>'filePath' FROM jsonb_array_elements(
-                     CASE WHEN jsonb_typeof(detail->'Files') = 'array'
-                          THEN detail->'Files' ELSE '[]' END) f
-                 WHERE lower(f->>'nameRu') = %s LIMIT 1)
-           ORDER BY end_date DESC LIMIT %s""",
+        """SELECT a.id, a.detail FROM announcements a,
+               LATERAL (
+                   -- Files бывает null: тогда пустой список, а не ошибка.
+                   SELECT f->>'filePath' AS url FROM jsonb_array_elements(
+                       CASE WHEN jsonb_typeof(a.detail->'Files') = 'array'
+                            THEN a.detail->'Files' ELSE '[]' END) f
+                   WHERE lower(trim(f->>'nameRu')) = %s LIMIT 1) p
+           WHERE a.status_id = 350 AND a.detail IS NOT NULL
+             AND a.protocol_url IS DISTINCT FROM p.url
+           ORDER BY a.end_date DESC LIMIT %s""",
         (PROTOCOL_NAME, limit),
     ).fetchall()
     for announcement_id, detail in rows:

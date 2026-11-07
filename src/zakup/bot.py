@@ -128,6 +128,8 @@ def handle(conn: psycopg.Connection, message: dict) -> str | None:
                          (str(new_id), str(chat["id"])))
             conn.execute("UPDATE subscriptions SET chat_id = %s WHERE chat_id = %s",
                          (str(new_id), str(chat["id"])))
+            conn.execute("UPDATE chat_lots SET chat_id = %s WHERE chat_id = %s",
+                         (str(new_id), str(chat["id"])))
             conn.commit()
             return None
         if addressee and addressee.lower() != (telegram.bot_username() or "").lower():

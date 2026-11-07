@@ -295,3 +295,5 @@ CREATE INDEX IF NOT EXISTS lot_research_queue ON lot_research (status, provider,
 ALTER TABLE users ADD COLUMN IF NOT EXISTS role text NOT NULL DEFAULT 'user';
 UPDATE users SET role = 'admin'
 WHERE id = (SELECT min(id) FROM users) AND NOT EXISTS (SELECT 1 FROM users WHERE role = 'admin');
+-- Сколько лотов распознано в протоколе: 0 — формат не разобран (перечитать после доработки).
+ALTER TABLE announcements ADD COLUMN IF NOT EXISTS protocol_lots integer;

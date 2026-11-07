@@ -105,3 +105,30 @@ def test_parse_pending_skips_announcements_without_files(conn):
                                   "ref_buy_status_id": 350})
     conn.execute("""UPDATE announcements SET detail = '{"Files": null, "Lots": null}' WHERE id = 8""")
     assert results.parse_pending(conn, 10) == 0
+
+
+SINGLE = """Протокол об итогах государственных закупок способом из одного источника по несостоявшимся закупкам №1-ИОИ1
+№ лота:
+100-ОИ2
+Информация о приглашенном потенциальном поставщике:
+Наименование поставщика
+БИН (ИИН) / ИНН / УНП
+Реквизиты
+ИП Масалимова
+780316401707
+Адрес: Казахстан
+Информация о ценовом предложении потенциального поставщика:
+Выделенная сумма
+Цена поставщика
+Дата и время предоставления ценового предложения
+13000
+12000
+06.11.2026 17:22:11.370
+Решено заключить договор о закупках способом «Из одного источника» с приглашенным потенциальным поставщиком
+"""
+
+
+def test_single_source_protocol():
+    parsed = results.parse_protocol(SINGLE)["100-ОИ2"]
+    assert parsed["outcome"] == "winner" and parsed["winner_bin"] == "780316401707"
+    assert parsed["offers"][0]["total"] == "12000" and parsed["winner_name"] == "ИП Масалимова"

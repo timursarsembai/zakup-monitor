@@ -141,6 +141,12 @@ def remind(conn: psycopg.Connection, now: datetime | None = None, pause: float =
             logger.warning("reminder not sent: %s", error)
             if not error.chat_gone:
                 break
+            # Чата нет — не пытаемся снова каждые 10 минут.
+            conn.execute(
+                "UPDATE lot_marks SET reminded_hours = %s WHERE user_id = %s AND lot_id = %s",
+                (hours, user_id, lot_id),
+            )
+            conn.commit()
             continue
         conn.execute(
             "UPDATE lot_marks SET reminded_hours = %s WHERE user_id = %s AND lot_id = %s",

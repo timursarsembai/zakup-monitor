@@ -20,7 +20,19 @@ from fastapi.templating import Jinja2Templates
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
-from zakup import SITE_URL, auth, bot, details, marks, research, results, secrets_box, spec, telegram
+from zakup import (
+    SITE_URL,
+    auth,
+    bot,
+    details,
+    marks,
+    matcher,
+    research,
+    results,
+    secrets_box,
+    spec,
+    telegram,
+)
 from zakup.filters import (
     DEADLINE_RULE,
     DISABLE_PERSON,
@@ -671,11 +683,13 @@ async def create_filter_subscription(request: Request, user: User):
     name = (form.get("name") or "").strip() or current.describe()[:100] or "Мой фильтр"
     with pool.connection() as conn:
         chat_id = _own_chat(conn, user, form.get("chat_id") or "")
-        conn.execute(
+        sub_id = conn.execute(
             """INSERT INTO subscriptions (user_id, name, query, kind, filters, scope, chat_id)
-               VALUES (%s, %s, '', 'announcements', %s, %s, %s)""",
+               VALUES (%s, %s, '', 'announcements', %s, %s, %s) RETURNING id""",
             (user, name[:100], Jsonb(current.to_json()), scope, chat_id),
-        )
+        ).fetchone()[0]
+        # Если подходит слишком много — не заваливаем чат историей, шлём только новое.
+        matcher.seed(conn, sub_id, current, scope)
     return RedirectResponse("/subscriptions", status_code=303)
 
 
