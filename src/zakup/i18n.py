@@ -28,7 +28,11 @@ def language() -> str:
 
 
 def gettext(text: str, **values: Any) -> str:
-    translated = KK.get(text, text) if _current.get() == "kk" else text
+    """Перевод. Ключ «nav:Текст» — короткая подпись для меню (по-русски — сам текст)."""
+    if _current.get() == "kk":
+        translated = KK.get(text, KK.get(text.removeprefix("nav:"), text.removeprefix("nav:")))
+    else:
+        translated = text.removeprefix("nav:")
     return translated.format(**values) if values else translated
 
 
