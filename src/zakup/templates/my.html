@@ -9,10 +9,10 @@
   .item-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; }
   .item .title { font-weight: 600; }
   .side { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
-  .urgent { color: #c0392b; font-weight: 600; }
+  .urgent { color: var(--bad); font-weight: 600; }
   .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 13px; border: 1px solid var(--line); }
-  .badge.hot { background: color-mix(in srgb, #1e9e5a 15%, transparent); border-color: transparent; color: #137a43; font-weight: 600; }
-  @media (prefers-color-scheme: dark) { .badge.hot { color: #6fdc9f; } .urgent { color: #ff7b6b; } }
+  .badge.hot { background: color-mix(in srgb, #1e9e5a 15%, transparent); border-color: transparent; color: var(--ok); font-weight: 600; }
+
   @media (max-width: 640px) { .item-head { grid-template-columns: 1fr; } .side { text-align: left; } }
   details.closed summary { cursor: pointer; }
 {% endblock %}

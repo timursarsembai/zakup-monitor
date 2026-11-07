@@ -43,7 +43,8 @@ def run(conn: psycopg.Connection) -> int:
            FROM subscriptions s
            JOIN lots l ON l.seen_seq > s.matched_up_to AND l.seen_seq <= %(max_seq)s
            WHERE s.active AND s.kind = 'lots'
-             AND l.tsv @@ websearch_to_tsquery('russian', s.query)
+             AND l.tsv @@ websearch_to_tsquery(
+                 'russian', regexp_replace(s.query, '\\s+или\\s+', ' or ', 'gi'))
              AND (s.min_amount IS NULL OR l.amount >= s.min_amount)
              AND (s.max_amount IS NULL OR l.amount <= s.max_amount)
              AND (s.customer_bins IS NULL OR l.customer_bin = ANY (s.customer_bins))

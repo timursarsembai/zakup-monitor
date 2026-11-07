@@ -111,6 +111,12 @@ def test_where_applies_every_default_per_lot(conn):
     ])
     assert _lot_ids(conn, Filters()) == [10, 50, 90, 113]
     assert _lot_ids(conn, Filters(advance_only=True)) == [10, 50]
+    assert _lot_ids(conn, Filters(advance_min=30)) == [10, 50]
+    assert _lot_ids(conn, Filters(advance_min=35)) == []
+    assert _lot_ids(conn, Filters(advance_max=0)) == [90, 113]
+    assert _lot_ids(conn, Filters(q="Лот или годится")) == [10, 50, 90, 113]
+    assert Filters.from_form({"applied": ["1"], "advance_min": ["30"], "advance_max": ["500"]}
+                             ).describe().endswith("аванс 30–100%")
     assert _lot_ids(conn, Filters(deadline="")) == [10, 50, 70, 90, 113]
 
 

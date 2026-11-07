@@ -32,11 +32,34 @@
   .scope-tabs { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
   .scope-tabs a { padding: 6px 14px; border-radius: 999px; border: 1px solid var(--line); color: inherit; }
   .scope-tabs a.on { background: var(--accent); color: #fff; border-color: transparent; font-weight: 600; }
+  .range2 { position: relative; height: 28px; }
+  .range2 input[type=range] { position: absolute; left: 0; right: 0; top: 6px; width: 100%; margin: 0; pointer-events: none; background: none; -webkit-appearance: none; appearance: none; }
+  .range2 input[type=range]::-webkit-slider-runnable-track { height: 4px; background: var(--line); border-radius: 2px; }
+  .range2 input[type=range]::-moz-range-track { height: 4px; background: var(--line); border-radius: 2px; }
+  .range2 input[type=range]::-webkit-slider-thumb { pointer-events: auto; -webkit-appearance: none; width: 18px; height: 18px; margin-top: -7px; border-radius: 50%; background: var(--accent); border: 2px solid var(--bg); cursor: pointer; position: relative; z-index: 2; }
+  .range2 input[type=range]::-moz-range-thumb { pointer-events: auto; width: 16px; height: 16px; border-radius: 50%; background: var(--accent); border: 2px solid var(--bg); cursor: pointer; }
+  .range2 .fill { position: absolute; top: 12px; height: 4px; background: var(--accent); border-radius: 2px; pointer-events: none; }
+  .presets { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
+  .presets button { padding: 2px 8px; font-size: 12px; border-radius: 999px; }
+  .filter-open, .sheet-head { display: none; }
+  @media (max-width: 760px) {
+    .filter-open { display: block; width: 100%; text-align: left; margin: 10px 0; padding: 10px 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .filters-panel { display: none; }
+    .filters-panel.open { display: block; position: fixed; inset: 0; z-index: 50; margin: 0; border: 0; border-radius: 0; overflow-y: auto; background: var(--bg); padding: 0 14px 0; }
+    .sheet-head { display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 2; background: var(--bg); padding: 12px 0; border-bottom: 1px solid var(--line); margin-bottom: 12px; font-size: 17px; }
+    .sheet-head button { border: 0; font-size: 18px; }
+    .fgrid { grid-template-columns: 1fr; }
+    .multi-list { position: static; min-width: 0; box-shadow: none; max-height: none; }
+    .panel-actions { position: sticky; bottom: 0; background: var(--bg); padding: 12px 0; }
+    .panel-actions .primary { flex: 1; padding: 10px; }
+    .panel-actions .spacer { display: none; }
+    body.sheet-open { overflow: hidden; }
+  }
   .pages { display: flex; gap: 12px; align-items: center; margin: 16px 0; }
   .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 13px; white-space: nowrap; border: 1px solid var(--line); }
-  .badge.hot { background: color-mix(in srgb, #1e9e5a 15%, transparent); border-color: transparent; color: #137a43; font-weight: 600; }
+  .badge.hot { background: color-mix(in srgb, #1e9e5a 15%, transparent); border-color: transparent; color: var(--ok); font-weight: 600; }
   .badge.sub { background: color-mix(in srgb, var(--accent) 14%, transparent); border-color: transparent; }
-  @media (prefers-color-scheme: dark) { .badge.hot { color: #6fdc9f; } }
+
   table.results td { font-size: 14px; }
   table.results .title { font-weight: 500; }
 {% endmacro %}
@@ -47,11 +70,13 @@
   <a href="/lots?{{ query }}" class="{{ 'on' if lots }}">Поиск лотов</a>
   <a href="/announcements?{{ query }}" class="{{ '' if lots else 'on' }}">Поиск объявлений</a>
 </nav>
-<form method="get" action="/{{ scope }}" class="filters-panel">
+<button type="button" class="filter-open" data-filter-open>☰ Фильтр{% if f.describe() %} · <span class="muted">{{ f.describe()|truncate(60) }}</span>{% endif %}</button>
+<form method="get" action="/{{ scope }}" class="filters-panel" id="filters">
+  <div class="sheet-head"><b>Фильтр</b><button type="button" data-filter-close aria-label="Закрыть">✕</button></div>
   <input type="hidden" name="applied" value="1">
   <div class="fgrid">
     <div><label class="fl" for="f-q">{{ "Наименование или описание лота" if lots else "Наименование объявления" }}</label>
-      <input id="f-q" name="q" value="{{ f.q }}" placeholder="стол or стул"></div>
+      <input id="f-q" name="q" value="{{ f.q }}" placeholder="стол или стул -аренда"></div>
     <div><label class="fl" for="f-exclude">Исключить слова</label>
       <input id="f-exclude" name="exclude" value="{{ f.exclude }}" placeholder="аренда, ремонт"></div>
     <div><label class="fl" for="f-number">Номер объявления</label>
@@ -99,8 +124,19 @@
         <input type="date" name="end_from" value="{{ f.end_from }}" aria-label="Окончание с">
         <input type="date" name="deadline_date" value="{{ f.deadline if f.deadline and f.deadline != rule else '' }}" aria-label="Окончание по">
       </div></div>
-    {% if lots %}<div><span class="fl">Аванс</span>
-      <label class="check"><input type="checkbox" name="advance_only" value="1" {% if f.advance_only %}checked{% endif %}> Только лоты с авансом</label></div>{% endif %}
+    <div class="advance" data-advance>
+      <span class="fl">Авансовый платёж{% if not lots %} (наибольший по лотам){% endif %}: <b data-advance-label></b></span>
+      <div class="range2">
+        <input type="range" name="advance_min" min="0" max="100" step="5" value="{{ f.advance_min if not f.advance_only or f.advance_min else 5 }}" aria-label="Аванс от, %">
+        <input type="range" name="advance_max" min="0" max="100" step="5" value="{{ f.advance_max }}" aria-label="Аванс до, %">
+      </div>
+      <div class="presets">
+        <button type="button" data-preset="0,100">любой</button>
+        <button type="button" data-preset="5,100">есть аванс</button>
+        <button type="button" data-preset="30,100">от 30%</button>
+        <button type="button" data-preset="0,0">без аванса</button>
+      </div>
+    </div>
   </div>
   {% set extra = f.start_from or f.start_to or f.itogi_from or f.itogi_to or f.published_from or f.published_to or f.years or f.enstru %}
   <details class="more-fields" {% if extra %}open{% endif %}>
@@ -134,10 +170,42 @@
   </div>
 </form>
 <script>
+  // На телефоне фильтр открывается на весь экран.
+  const sheet = document.getElementById("filters");
+  document.querySelector("[data-filter-open]").addEventListener("click", () => {
+    sheet.classList.add("open"); document.body.classList.add("sheet-open");
+  });
+  document.querySelector("[data-filter-close]").addEventListener("click", () => {
+    sheet.classList.remove("open"); document.body.classList.remove("sheet-open");
+  });
   // Выпадающие списки: клик мимо — закрыть.
   document.addEventListener("click", (event) => {
     for (const d of document.querySelectorAll("details.multi[open]")) if (!d.contains(event.target)) d.open = false;
   });
+  // Аванс: два ползунка «от» и «до», между ними — закрашенная полоса.
+  for (const box of document.querySelectorAll("[data-advance]")) {
+    const [low, high] = box.querySelectorAll("input[type=range]");
+    const label = box.querySelector("[data-advance-label]");
+    const fill = document.createElement("div");
+    fill.className = "fill";
+    box.querySelector(".range2").prepend(fill);
+    const draw = (moved) => {
+      if (+low.value > +high.value) (moved === low ? high : low).value = moved.value;
+      const a = +low.value, b = +high.value;
+      label.textContent = a === 0 && b === 100 ? "любой" : b === 0 ? "без аванса" : b === 100 ? `от ${a}%` : a === 0 ? `до ${b}%` : `${a}–${b}%`;
+      fill.style.left = `calc(${a}% + ${9 - a * 0.18}px)`;
+      fill.style.width = `calc(${b - a}% - ${(b - a) * 0.18}px)`;
+    };
+    low.addEventListener("input", () => draw(low));
+    high.addEventListener("input", () => draw(high));
+    for (const preset of box.querySelectorAll("[data-preset]")) {
+      preset.addEventListener("click", () => {
+        [low.value, high.value] = preset.dataset.preset.split(",");
+        draw(low);
+      });
+    }
+    draw(low);
+  }
   const mode = document.querySelector("[name=deadline_mode]");
   const until = document.querySelector("[name=deadline_date]");
   mode.addEventListener("change", () => { if (mode.value !== "date") until.value = ""; else until.focus(); });

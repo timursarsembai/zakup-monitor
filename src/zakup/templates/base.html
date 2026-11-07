@@ -4,16 +4,24 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}Закупки{% endblock %} · zakup</title>
+<script>
+  // Тема: по умолчанию тёмная, выбор запоминается в браузере. До отрисовки, чтобы не мигало.
+  (function () {
+    var theme = "dark";
+    try { theme = localStorage.getItem("zakup-theme") || "dark"; } catch (e) {}
+    document.documentElement.dataset.theme = theme;
+  })();
+</script>
 <style>
-  :root { --bg: #fff; --fg: #1d1d1f; --muted: #6b6b70; --line: #e4e4e7; --accent: #0b6bcb; }
-  @media (prefers-color-scheme: dark) {
-    :root { --bg: #151517; --fg: #ececee; --muted: #9a9aa0; --line: #2c2c30; --accent: #5aa7ff; }
-  }
+  :root { --bg: #fff; --fg: #1d1d1f; --muted: #6b6b70; --line: #e4e4e7; --accent: #0b6bcb; --ok: #137a43; --bad: #c0392b; color-scheme: light; }
+  :root[data-theme=dark] { --bg: #151517; --fg: #ececee; --muted: #9a9aa0; --line: #2c2c30; --accent: #5aa7ff; --ok: #6fdc9f; --bad: #ff7b6b; color-scheme: dark; }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.45 system-ui, sans-serif; }
-  header, main { max-width: 1100px; margin: 0 auto; padding: 12px 16px; }
-  header { display: flex; gap: 20px; align-items: baseline; border-bottom: 1px solid var(--line); }
+  header, main { max-width: 1600px; margin: 0 auto; padding: 12px 24px; }
+  header { display: flex; gap: 18px; align-items: center; border-bottom: 1px solid var(--line); }
   header b { font-size: 17px; }
+  header nav { display: flex; gap: 18px; }
+  .theme-toggle { padding: 4px 9px; font-size: 16px; line-height: 1; }
   a { color: var(--accent); text-decoration: none; }
   form.filters, form.inline-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 12px 0; }
   input[type=text], input:not([type]) { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; }
@@ -23,9 +31,15 @@
   th { color: var(--muted); font-weight: 500; font-size: 13px; }
   td.num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
   .muted { color: var(--muted); font-size: 13px; }
-  .table-wrap { overflow-x: auto; }
-  header { flex-wrap: wrap; }
+  .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
   form.logout { margin-left: auto; display: flex; gap: 10px; align-items: center; }
+  @media (max-width: 760px) {
+    header, main { padding: 10px 12px; }
+    header { flex-wrap: wrap; gap: 8px 12px; }
+    header nav { order: 3; width: 100%; overflow-x: auto; white-space: nowrap; gap: 16px; padding-bottom: 4px; }
+    header .who { display: none; }
+    .table-wrap table { min-width: 760px; }
+  }
   {% block style %}{% endblock %}
 </style>
 </head>
@@ -33,18 +47,33 @@
 {% block header %}
 <header>
   <b>zakup</b>
-  <a href="/lots">Лоты</a>
-  <a href="/announcements">Объявления</a>
-  <a href="/my">Мои лоты</a>
-  <a href="/subscriptions">Подписки</a>
-  <a href="/matches">Совпадения</a>
-  <a href="/settings">Настройки</a>
+  <nav>
+    <a href="/lots">Лоты</a>
+    <a href="/announcements">Объявления</a>
+    <a href="/my">Мои лоты</a>
+    <a href="/subscriptions">Подписки</a>
+    <a href="/matches">Совпадения</a>
+    <a href="/settings">Настройки</a>
+  </nav>
   <form class="logout" method="post" action="/logout">
-    <span class="muted">{{ request.state.email }}</span>
+    <span class="muted who">{{ request.state.email }}</span>
+    <button type="button" class="theme-toggle" data-theme-toggle title="Светлая / тёмная тема" aria-label="Переключить тему"></button>
     <button>Выйти</button>
   </form>
 </header>
 {% endblock %}
 <main{% block main_class %}{% endblock %}>{% block main %}{% endblock %}</main>
+<script>
+  for (const button of document.querySelectorAll("[data-theme-toggle]")) {
+    const show = () => { button.textContent = document.documentElement.dataset.theme === "dark" ? "☀" : "☾"; };
+    button.addEventListener("click", () => {
+      const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+      document.documentElement.dataset.theme = next;
+      try { localStorage.setItem("zakup-theme", next); } catch (e) {}
+      show();
+    });
+    show();
+  }
+</script>
 </body>
 </html>

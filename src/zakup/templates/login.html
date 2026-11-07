@@ -17,7 +17,7 @@
   .submit:hover { filter: brightness(1.08); }
   .error { margin: 0 0 16px; padding: 10px 12px; border-radius: 8px; font-size: 14px;
            background: color-mix(in srgb, #d93025 12%, transparent); color: #d93025; }
-  @media (prefers-color-scheme: dark) { .error { color: #ff8a80; } }
+  :root[data-theme=dark] .error { color: #ff8a80; }
   .foot { margin-top: 16px; text-align: center; font-size: 13px; color: var(--muted); }
 {% endblock %}
 {% block main_class %} class="auth"{% endblock %}

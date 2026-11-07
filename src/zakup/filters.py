@@ -6,6 +6,7 @@
 (scope="announcements") всё проверяется у объявления.
 """
 
+import re
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
@@ -162,6 +163,9 @@ class Filters:
     itogi_from: str = ""
     itogi_to: str = ""
     advance_only: bool = False
+    # Размер аванса, % от суммы: 0–100 — без ограничения.
+    advance_min: int = 0
+    advance_max: int = 100
     sort: str = "advance"
 
     def deadline_date(self, today: date) -> date | None:
@@ -231,6 +235,8 @@ class Filters:
             itogi_from=_date(one("itogi_from")),
             itogi_to=_date(one("itogi_to")),
             advance_only=one("advance_only") == "1",
+            advance_min=_percent(one("advance_min"), 0),
+            advance_max=_percent(one("advance_max"), 100),
             sort=one("sort") if one("sort") in SORTS else "advance",
         )
 
@@ -332,12 +338,20 @@ class Filters:
             if end:
                 clauses.append(f"a.{column} < %({column}_to)s")
                 params[f"{column}_to"] = _day_start(end, 1)
+        prepayment = "l.prepayment" if lots else "a.prepayment_max"
         if self.advance_only:
-            clauses.append("l.prepayment > 0" if lots else "a.prepayment_max > 0")
+            clauses.append(f"{prepayment} > 0")
+        low, high = sorted((self.advance_min, self.advance_max))
+        if low > 0:
+            clauses.append(f"{prepayment} >= %(advance_min)s")
+            params["advance_min"] = low
+        if high < 100:
+            clauses.append(f"coalesce({prepayment}, 0) <= %(advance_max)s")
+            params["advance_max"] = high
         tsv = "l.tsv" if lots else "a.tsv"
         if self.q:
             clauses.append(f"{tsv} @@ websearch_to_tsquery('russian', %(q)s)")
-            params["q"] = self.q
+            params["q"] = _OR.sub(" or ", self.q)
         if words := self.exclude.replace(",", " ").split():
             # Любое из слов исключает запись.
             clauses.append(f"NOT {tsv} @@ websearch_to_tsquery('russian', %(exclude)s)")
@@ -394,6 +408,8 @@ class Filters:
                 parts.append(f"{label} {start or '…'} — {end or '…'}")
         if self.advance_only:
             parts.append("с авансом")
+        if (self.advance_min, self.advance_max) != (0, 100):
+            parts.append(f"аванс {self.advance_min}–{self.advance_max}%")
         return "; ".join(parts)
 
 
@@ -404,6 +420,14 @@ def _decimal(value: Any) -> Decimal | None:
         return Decimal(str(value).replace(" ", "").replace(" ", "").replace(",", "."))
     except InvalidOperation:
         return None
+
+
+# «стол или стул» — то же, что «стол or стул» в синтаксисе websearch_to_tsquery.
+_OR = re.compile(r"\s+или\s+", re.IGNORECASE)
+
+
+def _percent(value: str, default: int) -> int:
+    return min(max(int(value), 0), 100) if value.isdigit() else default
 
 
 def _date(value: str) -> str:
