@@ -676,7 +676,8 @@ def delete_subscription(user: User, sub_id: int):
 
 @app.get("/matches")
 def matches(request: Request, user: User):
-    chosen = [int(v) for v in parse_qs(request.url.query).get("sub", []) if v.isdigit()]
+    query = parse_qs(request.url.query)
+    chosen = [int(v) for v in query.get("sub", []) if v.isdigit()]
     with pool.connection() as conn:
         subs = conn.execute(
             """SELECT s.id, s.name, s.active,
@@ -684,6 +685,9 @@ def matches(request: Request, user: User):
                FROM subscriptions s WHERE s.user_id = %s ORDER BY s.id""",
             (user,),
         ).fetchall()
+        # Первый заход — первая подписка; сняты все галочки — пусто.
+        if "filtered" not in query and not chosen and subs:
+            chosen = [subs[0][0]]
         rows = conn.execute(
             """SELECT m.matched_at, s.name, l.trd_buy_id, l.name_ru, l.amount,
                       coalesce(a.customer_name_ru, l.customer_name_ru), a.end_date, l.prepayment,
@@ -693,7 +697,7 @@ def matches(request: Request, user: User):
                JOIN lots l ON l.id = m.lot_id
                LEFT JOIN announcements a ON a.id = l.trd_buy_id
                WHERE s.user_id = %(user)s
-                 AND (cardinality(%(chosen)s::bigint[]) = 0 OR s.id = ANY(%(chosen)s))
+                 AND s.id = ANY(%(chosen)s)
                ORDER BY m.matched_at DESC, a.end_date, l.trd_buy_id, l.id LIMIT 300""",
             {"user": user, "chosen": chosen},
         ).fetchall()

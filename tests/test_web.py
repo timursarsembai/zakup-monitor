@@ -247,6 +247,8 @@ def test_subscribe_only_without_fixed_dates_and_matches_filter(client, conn):
     sub = conn.execute("SELECT id FROM subscriptions").fetchone()[0]
     matches = client.get(f"/matches?sub={sub}").text
     assert 'value="%d" checked' % sub in matches
+    assert 'value="%d" checked' % sub in client.get("/matches").text  # первая по умолчанию
+    assert "Отметьте подписки" in client.get("/matches?filtered=1").text
 
 
 def test_my_lots_filter_by_mark(client, conn):
