@@ -7,11 +7,13 @@
   <tr>
     <td class="muted">{{ (r[0]|local).strftime("%d.%m %H:%M") }}</td>
     <td>{{ r[1] }}</td>
-    <td>{% if r[2] %}<a href="{{ announcement_url(r[2]) }}" target="_blank" rel="noopener">{{ r[3] or "—" }}</a>{% else %}{{ r[3] or "—" }}{% endif %}</td>
+    <td>{% if r[2] %}<a href="{{ announcement_url(r[2]) }}">{{ r[3] or "—" }}</a>{% else %}{{ r[3] or "—" }}{% endif %}
+      {% if r[8] and r[8] != r[3] %}<div class="muted">{{ r[8][:140] }}</div>{% endif %}
+      {% if r[9] %}<div class="muted">№ {{ r[9] }}</div>{% endif %}</td>
     <td>{{ r[5] or "" }}</td>
     <td class="num">{{ r[4] | money }}</td>
     <td>{{ ('%g'|format(r[7]) ~ '%') if r[7] else '' }}</td>
-    <td>{{ (r[6]|local).strftime("%d.%m.%Y") if r[6] else "" }}</td>
+    <td>{{ (r[6]|local).strftime("%d.%m.%Y %H:%M") if r[6] else "" }}</td>
   </tr>
   {% else %}
   <tr><td colspan="7" class="muted">Совпадений пока нет.</td></tr>

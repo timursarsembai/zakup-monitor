@@ -18,6 +18,13 @@
   .badge.hot { background: color-mix(in srgb, #1e9e5a 15%, transparent); border-color: transparent; color: #137a43; font-weight: 600; }
   @media (prefers-color-scheme: dark) { .badge.hot { color: #6fdc9f; } }
   .title { font-weight: 500; }
+  .card { border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin: 12px 0; }
+  .card-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 8px; }
+  .card-head .title { font-size: 16px; }
+  .deadline { text-align: right; white-space: nowrap; }
+  table.lots th, table.lots td { padding: 6px; }
+  .more { margin: 8px 0 0; }
+  @media (max-width: 640px) { .card-head { flex-direction: column; } .deadline { text-align: left; } }
   .summary { margin: 8px 0; }
   select, input[type=date] { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; font: inherit; }
 {% endblock %}
@@ -71,25 +78,39 @@
   </div>
 </form>
 
-<p class="summary">Найдено: <b>{{ total }}</b>{% if deadline_date %} · окончание по {{ deadline_date.strftime("%d.%m.%Y") }} включительно{% endif %}</p>
+<p class="summary">Найдено: <b>{{ totals[0] }}</b> {{ "объявление" if totals[0] % 10 == 1 and totals[0] % 100 != 11 else "объявлений" }}, подходящих лотов: <b>{{ totals[1] }}</b>{% if deadline_date %} · окончание по {{ deadline_date.strftime("%d.%m.%Y") }} включительно{% endif %}</p>
 <p class="muted">Открытых объявлений в базе: {{ stats[0] }}{% if stats[1] %}, ещё {{ stats[1] }} ждут загрузки подробностей (признаки, место, аванс) — пока не попадают в фильтр{% endif %}{% if stats[2] %}. Обновлено {{ (stats[2]|local).strftime("%d.%m %H:%M") }}{% endif %}.</p>
 
-<div class="table-wrap"><table>
-  <tr><th>Объявление</th><th>Сумма, ₸</th><th>Аванс</th><th>Окончание приема</th><th>Место поставки</th><th>Заказчик</th></tr>
-  {% for r in rows %}
-  <tr>
-    <td><a class="title" href="{{ announcement_url(r[0]) }}" target="_blank" rel="noopener">{{ r[2] or "Без названия" }}</a>
-      <div class="muted">№ {{ r[1] or r[0] }}{% if r[9] %} · лотов: {{ r[9] }}{% endif %}</div></td>
-    <td class="num">{{ r[3] | money }}</td>
-    <td>{% if r[5] %}<span class="badge {% if r[5] >= 30 %}hot{% endif %}">{{ '%g'|format(r[5]) }}%</span>{% else %}<span class="muted">нет</span>{% endif %}</td>
-    <td>{{ (r[4]|local).strftime("%d.%m.%Y %H:%M") if r[4] else "" }}<div class="muted">{{ time_left(r[4]) }}</div></td>
-    <td>{{ region_names(r[6]) | join(", ") }}</td>
-    <td>{{ r[7] or "" }}</td>
-  </tr>
-  {% else %}
-  <tr><td colspan="6" class="muted">Под фильтр ничего не подходит.</td></tr>
-  {% endfor %}
-</table></div>
+{% for g in groups %}
+<article class="card">
+  <header class="card-head">
+    <div>
+      <a class="title" href="{{ announcement_url(g[0]) }}">{{ g[2] or "Без названия" }}</a>
+      <div class="muted">№ {{ g[1] or g[0] }} · {{ g[4] or "" }}</div>
+    </div>
+    <div class="deadline">
+      <div>до {{ (g[3]|local).strftime("%d.%m %H:%M") if g[3] else "" }}</div>
+      <div class="muted">{{ time_left(g[3]) }}</div>
+    </div>
+  </header>
+  <div class="table-wrap"><table class="lots">
+    <tr><th>Лот</th><th>Кол-во</th><th>Цена за ед., ₸</th><th>Сумма, ₸</th><th>Аванс</th><th>Место</th></tr>
+    {% for l in lots.get(g[0], []) %}
+    <tr>
+      <td><span class="title">{{ l[3] or "—" }}</span>{% if l[4] and l[4] != l[3] %}<div class="muted">{{ l[4][:160] }}</div>{% endif %}<div class="muted">№ {{ l[2] or l[1] }}</div></td>
+      <td class="num">{% if l[5] is not none %}{{ '%g'|format(l[5]) }}{% endif %} {{ (l[6] or "")|lower }}</td>
+      <td class="num">{{ l[7] | money }}</td>
+      <td class="num">{{ l[8] | money }}</td>
+      <td>{% if l[9] %}<span class="badge {% if l[9] >= 30 %}hot{% endif %}">{{ '%g'|format(l[9]) }}%</span>{% else %}<span class="muted">нет</span>{% endif %}</td>
+      <td>{{ region_names(l[10]) | join(", ") }}</td>
+    </tr>
+    {% endfor %}
+  </table></div>
+  {% if g[8] and g[8] > g[5] %}<p class="muted more">Ещё лотов в объявлении, не подходящих под фильтр: {{ g[8] - g[5] }} — <a href="{{ announcement_url(g[0]) }}">все лоты</a></p>{% endif %}
+</article>
+{% else %}
+<p class="muted">Под фильтр ничего не подходит.</p>
+{% endfor %}
 <p>
   {% if page > 1 %}<a href="/?{{ query }}&page={{ page - 1 }}">← назад</a>{% endif %}
   {% if has_next %}<a href="/?{{ query }}&page={{ page + 1 }}">дальше →</a>{% endif %}

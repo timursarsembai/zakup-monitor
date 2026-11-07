@@ -4,7 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg_pool import ConnectionPool
 
-from zakup import auth, web
+from zakup import auth, db, details, web
 
 ORIGIN = {"origin": "https://testserver"}
 
@@ -86,3 +86,33 @@ def test_settings_link_redirects_to_bot(client, monkeypatch):
     assert "Подключить Telegram" in client.get("/settings").text
     response = client.post("/settings/telegram/link", headers=ORIGIN, follow_redirects=False)
     assert response.headers["location"].startswith("https://t.me/test_bot?start=")
+
+
+def test_announcement_page_shows_lots_and_loads_spec(client, conn, monkeypatch):
+    db.upsert_announcement(conn, {"id": 77, "name_ru": "Столик", "end_date": "2099-01-01 09:00:00"})
+    details.save(conn, {
+        "id": 77, "numberAnno": "77-1", "nameRu": "Приобретение столика", "totalSum": 689655.16,
+        "endDate": "2099-01-01 09:00:00", "disablePersonId": 1,
+        "RefBuyStatus": {"nameRu": "Опубликовано (прием ценовых предложений)"},
+        "Organizer": {"bin": "870240000026", "nameRu": "Школа №5",
+                      "Address": [{"address": "г. Конаев, мкр 5"}]},
+        "Files": [{"id": 1, "nameRu": "Проект договора", "filePath": "https://ows.goszakup.gov.kz/download/1"}],
+        "Lots": [{"id": 5, "trdBuyId": 77, "lotNumber": "88448423-ЗЦП1", "nameRu": "Стол",
+                  "amount": 689655.16, "count": 4,
+                  "Files": [{"id": 2, "nameRu": "Техническая спецификация",
+                             "filePath": "https://ows.goszakup.gov.kz/download/2"}],
+                  "Plans": [{"prepayment": 30, "price": 172413.79, "RefUnits": {"nameRu": "Штука"},
+                             "PlansKato": [{"refKatoCode": "191010000",
+                                            "fullDeliveryPlaceNameRu": "г.Қонаев, мкр.5"}]}]}],
+    })
+    conn.commit()
+    _login(client)
+    page = client.get("/a/77")
+    assert page.status_code == 200
+    for text in ("Приобретение столика", "88448423-ЗЦП1", "аванс 30%", "г.Қонаев, мкр.5",
+                 "Проект договора", "Техническая спецификация", "data-end="):
+        assert text in page.text
+    monkeypatch.setattr(web.spec, "get", lambda conn, lot_id, url: ("Столик, дерево", None))
+    fragment = client.get("/a/77/lots/5/spec")
+    assert "Столик, дерево" in fragment.text
+    assert client.get("/a/404404").status_code == 404

@@ -36,6 +36,8 @@ ALTER TABLE announcements ADD COLUMN IF NOT EXISTS subject_type_id integer;
 ALTER TABLE announcements ADD COLUMN IF NOT EXISTS details_fetched_at timestamptz;
 -- last_update_date, при котором читали подробности: изменилось — перечитать.
 ALTER TABLE announcements ADD COLUMN IF NOT EXISTS details_update_date timestamptz;
+-- Полный ответ GraphQL (справочники, организатор, лоты, файлы) для страницы объявления.
+ALTER TABLE announcements ADD COLUMN IF NOT EXISTS detail jsonb;
 CREATE INDEX IF NOT EXISTS announcements_status_end ON announcements (status_id, end_date);
 CREATE INDEX IF NOT EXISTS announcements_end_date ON announcements (end_date);
 CREATE INDEX IF NOT EXISTS announcements_customer_bin ON announcements (customer_bin);
@@ -67,8 +69,23 @@ CREATE TABLE IF NOT EXISTS lots (
 ALTER TABLE lots ADD COLUMN IF NOT EXISTS seen_seq bigint GENERATED ALWAYS AS IDENTITY;
 CREATE UNIQUE INDEX IF NOT EXISTS lots_seen_seq ON lots (seen_seq);
 CREATE INDEX IF NOT EXISTS lots_tsv ON lots USING gin (tsv);
+-- Из пунктов плана (zakup.details): аванс в %, места поставки, цена за единицу,
+-- единица измерения, доп. характеристика, срок поставки.
 ALTER TABLE lots ADD COLUMN IF NOT EXISTS prepayment numeric(6, 2);
 ALTER TABLE lots ADD COLUMN IF NOT EXISTS kato text[];
+ALTER TABLE lots ADD COLUMN IF NOT EXISTS price numeric(20, 2);
+ALTER TABLE lots ADD COLUMN IF NOT EXISTS unit_name text;
+ALTER TABLE lots ADD COLUMN IF NOT EXISTS extra_desc text;
+ALTER TABLE lots ADD COLUMN IF NOT EXISTS supply_date text;
+
+-- Текст технической спецификации лота из PDF, для показа на странице.
+CREATE TABLE IF NOT EXISTS lot_specs (
+    lot_id     bigint PRIMARY KEY,
+    file_url   text NOT NULL,
+    text       text,
+    error      text,
+    fetched_at timestamptz NOT NULL DEFAULT now()
+);
 CREATE INDEX IF NOT EXISTS lots_trd_buy_id ON lots (trd_buy_id);
 CREATE INDEX IF NOT EXISTS lots_customer_bin ON lots (customer_bin);
 
@@ -147,15 +164,6 @@ CREATE TABLE IF NOT EXISTS subscriptions (
 ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS kind text NOT NULL DEFAULT 'lots';
 ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS filters jsonb;
 
--- Объявления, уже отправленные по подписке-фильтру.
-CREATE TABLE IF NOT EXISTS announcement_matches (
-    subscription_id bigint NOT NULL REFERENCES subscriptions (id) ON DELETE CASCADE,
-    announcement_id bigint NOT NULL REFERENCES announcements (id) ON DELETE CASCADE,
-    matched_at      timestamptz NOT NULL DEFAULT now(),
-    notified_at     timestamptz,
-    PRIMARY KEY (subscription_id, announcement_id)
-);
-
 -- Какие лоты уже отправлены по подписке: повторно не шлём.
 CREATE TABLE IF NOT EXISTS matches (
     subscription_id bigint NOT NULL REFERENCES subscriptions (id) ON DELETE CASCADE,
@@ -164,3 +172,16 @@ CREATE TABLE IF NOT EXISTS matches (
     notified_at     timestamptz,
     PRIMARY KEY (subscription_id, lot_id)
 );
+
+-- 2026-11-07: подписки-фильтры перешли с объявлений на лоты (таблица matches).
+-- Лоты уже отправленных объявлений считаем отправленными, чтобы не прислать их снова.
+DO $$
+BEGIN
+    IF to_regclass('announcement_matches') IS NOT NULL THEN
+        INSERT INTO matches (subscription_id, lot_id, matched_at, notified_at)
+        SELECT am.subscription_id, l.id, am.matched_at, am.notified_at
+        FROM announcement_matches am JOIN lots l ON l.trd_buy_id = am.announcement_id
+        ON CONFLICT DO NOTHING;
+        DROP TABLE announcement_matches;
+    END IF;
+END $$;

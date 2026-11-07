@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 from decimal import Decimal, InvalidOperation
 from importlib.resources import files
 from typing import Annotated
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from urllib.parse import parse_qs, quote, urlencode, urlsplit
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
@@ -18,9 +18,17 @@ from fastapi.templating import Jinja2Templates
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
-from zakup import auth, bot, telegram
-from zakup.filters import DEADLINE_RULE, ORDER_BY, REGIONS, STATUSES, Filters, deadline_by_rule
-from zakup.goszakup import PORTAL_TZ
+from zakup import auth, bot, details, spec, telegram
+from zakup.filters import (
+    DEADLINE_RULE,
+    GROUP_ORDER_BY,
+    LOT_ORDER_BY,
+    REGIONS,
+    STATUSES,
+    Filters,
+    deadline_by_rule,
+)
+from zakup.goszakup import PORTAL_TZ, Client, GoszakupError, parse_date
 from zakup.matcher import PORTAL_ANNOUNCEMENT_URL
 
 PAGE_SIZE = 50
@@ -28,7 +36,7 @@ SESSION_COOKIE = "zakup_session"
 
 pool = ConnectionPool(os.environ.get("DATABASE_URL", ""), min_size=1, max_size=5, open=False)
 templates = Jinja2Templates(directory=str(files("zakup").joinpath("templates")))
-templates.env.globals["announcement_url"] = PORTAL_ANNOUNCEMENT_URL.format
+templates.env.globals["announcement_url"] = "/a/{}".format
 templates.env.filters["money"] = lambda v: "" if v is None else f"{v:,.2f}".replace(",", " ")
 templates.env.filters["local"] = lambda v: v.astimezone(PORTAL_TZ) if v else v
 templates.env.globals["region_names"] = lambda kato: sorted(
@@ -171,16 +179,30 @@ def search(request: Request, _: User, page: int = 1):
     now = datetime.now(UTC)
     where, params = current.where(now)
     with pool.connection() as conn:
-        rows = conn.execute(
-            f"""SELECT a.id, a.number_anno, a.name_ru, a.total_sum, a.end_date,
-                       a.prepayment_max, a.kato, coalesce(a.customer_name_ru, a.org_name_ru),
-                       a.status_id, a.count_lots
-                FROM announcements a WHERE {where}
-                ORDER BY {ORDER_BY}
+        groups = conn.execute(
+            f"""SELECT a.id, a.number_anno, a.name_ru, a.end_date,
+                       coalesce(a.customer_name_ru, a.org_name_ru), count(*), sum(l.amount),
+                       max(l.prepayment), a.count_lots
+                FROM lots l, announcements a WHERE {where}
+                GROUP BY a.id ORDER BY {GROUP_ORDER_BY}
                 LIMIT {PAGE_SIZE + 1} OFFSET {(page - 1) * PAGE_SIZE}""",
             params,
         ).fetchall()
-        total = conn.execute(f"SELECT count(*) FROM announcements a WHERE {where}", params).fetchone()[0]
+        ids = [g[0] for g in groups[:PAGE_SIZE]]
+        lots: dict[int, list] = {}
+        for row in conn.execute(
+            f"""SELECT l.trd_buy_id, l.id, l.lot_number, l.name_ru,
+                       coalesce(l.extra_desc, l.description_ru), l.count, l.unit_name, l.price,
+                       l.amount, l.prepayment, coalesce(nullif(l.kato, '{{}}'), a.kato)
+                FROM lots l, announcements a WHERE {where} AND a.id = ANY(%(ids)s)
+                ORDER BY {LOT_ORDER_BY}""",
+            {**params, "ids": ids},
+        ):
+            lots.setdefault(row[0], []).append(row)
+        totals = conn.execute(
+            f"SELECT count(DISTINCT a.id), count(*) FROM lots l, announcements a WHERE {where}",
+            params,
+        ).fetchone()
         stats = conn.execute(
             """SELECT (SELECT count(*) FROM announcements WHERE end_date > now()),
                       (SELECT count(*) FROM announcements
@@ -189,24 +211,129 @@ def search(request: Request, _: User, page: int = 1):
         ).fetchone()
     query = {k: v for k, v in form.items() if k != "page"}
     query["applied"] = ["1"]
+    today = now.astimezone(PORTAL_TZ).date()
     return templates.TemplateResponse(
         request,
         "search.html",
         {
-            "rows": rows[:PAGE_SIZE],
-            "has_next": len(rows) > PAGE_SIZE,
+            "groups": groups[:PAGE_SIZE],
+            "lots": lots,
+            "has_next": len(groups) > PAGE_SIZE,
             "page": page,
             "f": current,
-            "total": total,
-            "deadline_date": current.deadline_date(now.astimezone(PORTAL_TZ).date()),
-            "rule_date": deadline_by_rule(now.astimezone(PORTAL_TZ).date()),
+            "totals": totals,
+            "deadline_date": current.deadline_date(today),
+            "rule_date": deadline_by_rule(today),
             "statuses": STATUSES,
             "regions": REGIONS,
             "rule": DEADLINE_RULE,
             "query": urlencode(query, doseq=True),
             "stats": stats,
-            "now": now,
         },
+    )
+
+
+DETAIL_TTL = timedelta(minutes=15)
+_client: Client | None = None
+
+
+def _goszakup() -> Client:
+    global _client
+    if _client is None:
+        _client = Client(os.environ.get("GOSZAKUP_TOKEN", ""), delay=0)
+    return _client
+
+
+@app.get("/a/{announcement_id}")
+def announcement(request: Request, user: User, announcement_id: int):
+    with pool.connection() as conn:
+        row = conn.execute(
+            "SELECT detail, details_fetched_at, end_date FROM announcements WHERE id = %s",
+            (announcement_id,),
+        ).fetchone()
+        if row is None:
+            raise HTTPException(404, "Такого объявления нет в базе")
+        detail, fetched_at, end_date = row
+        now = datetime.now(UTC)
+        stale = fetched_at is None or now - fetched_at > (
+            DETAIL_TTL if end_date and end_date > now else timedelta(days=1)
+        )
+        refresh_error = None
+        if detail is None or stale:
+            try:
+                details.fetch_one(conn, _goszakup(), announcement_id)
+                detail, fetched_at = conn.execute(
+                    "SELECT detail, details_fetched_at FROM announcements WHERE id = %s",
+                    (announcement_id,),
+                ).fetchone()
+            except GoszakupError:
+                conn.rollback()
+                refresh_error = "Портал сейчас не отвечает, показаны сохранённые данные."
+        if detail is None:
+            raise HTTPException(502, "Не удалось получить объявление с портала")
+        subscribed = {
+            r[0]: r[1]
+            for r in conn.execute(
+                """SELECT m.lot_id, string_agg(s.name, ', ') FROM matches m
+                   JOIN subscriptions s ON s.id = m.subscription_id
+                   JOIN lots l ON l.id = m.lot_id
+                   WHERE s.user_id = %s AND l.trd_buy_id = %s GROUP BY m.lot_id""",
+                (user, announcement_id),
+            )
+        }
+    files, seen = [], set()
+    for file in (detail.get("Files") or []) + [
+        f for lot in detail.get("Lots") or [] for f in lot.get("Files") or []
+    ]:
+        if file.get("id") not in seen and file.get("filePath"):
+            seen.add(file.get("id"))
+            files.append(file)
+    for file in detail.get("GeneralFiles") or []:
+        if file.get("filePathRu"):
+            files.append({"nameRu": file.get("nameRu"), "filePath": file["filePathRu"],
+                          "originalName": None})
+    protocols = [f for f in files if "протокол" in (f.get("nameRu") or "").lower()]
+    documents = [f for f in files if f not in protocols]
+    lots = [lot for lot in detail.get("Lots") or [] if not lot.get("isDeleted")]
+    info = {lot["id"]: details.parse_lot(lot) for lot in lots}
+    # Сначала лоты с авансом побольше, дальше по номеру.
+    lots.sort(key=lambda lot: (-(info[lot["id"]]["prepayment"] or 0), lot.get("lotNumber") or ""))
+    return templates.TemplateResponse(
+        request,
+        "announcement.html",
+        {
+            "a": detail,
+            "lots": lots,
+            "info": info,
+            "subscribed": subscribed,
+            "documents": documents,
+            "protocols": protocols,
+            "end": parse_date(detail.get("endDate")),
+            "dt": parse_date,
+            "fetched_at": fetched_at,
+            "refresh_error": refresh_error,
+            "spec_file": spec.spec_file,
+            "portal_url": PORTAL_ANNOUNCEMENT_URL.format(announcement_id),
+        },
+    )
+
+
+@app.get("/a/{announcement_id}/lots/{lot_id}/spec")
+def lot_spec(request: Request, _: User, announcement_id: int, lot_id: int):
+    with pool.connection() as conn:
+        row = conn.execute(
+            "SELECT detail FROM announcements WHERE id = %s", (announcement_id,)
+        ).fetchone()
+        lot = next(
+            (l for l in ((row[0] or {}).get("Lots") or []) if l.get("id") == lot_id), None
+        ) if row else None
+        url = spec.spec_file(lot) if lot else None
+        if url is None:
+            text, error = None, "У лота нет файла технической спецификации."
+        else:
+            text, error = spec.get(conn, lot_id, url)
+    return templates.TemplateResponse(
+        request, "spec_fragment.html", {"text": text, "error": error, "url": url}
     )
 
 
@@ -230,9 +357,7 @@ def subscriptions(request: Request, user: User):
     with pool.connection() as conn:
         rows = conn.execute(
             """SELECT s.id, s.name, s.query, s.min_amount, s.max_amount, s.active,
-                      (SELECT count(*) FROM matches m WHERE m.subscription_id = s.id)
-                      + (SELECT count(*) FROM announcement_matches m
-                         WHERE m.subscription_id = s.id),
+                      (SELECT count(*) FROM matches m WHERE m.subscription_id = s.id),
                       s.kind, s.filters
                FROM subscriptions s WHERE s.user_id = %s ORDER BY s.id""",
             (user,),
@@ -285,23 +410,15 @@ def delete_subscription(user: User, sub_id: int):
 def matches(request: Request, user: User):
     with pool.connection() as conn:
         rows = conn.execute(
-            """SELECT * FROM (
-                   SELECT m.matched_at, s.name, l.trd_buy_id, l.name_ru, l.amount,
-                          l.customer_name_ru, a.end_date, l.prepayment
-                   FROM matches m
-                   JOIN subscriptions s ON s.id = m.subscription_id
-                   JOIN lots l ON l.id = m.lot_id
-                   LEFT JOIN announcements a ON a.id = l.trd_buy_id
-                   WHERE s.user_id = %(user)s
-                   UNION ALL
-                   SELECT m.matched_at, s.name, a.id, a.name_ru, a.total_sum,
-                          coalesce(a.customer_name_ru, a.org_name_ru), a.end_date,
-                          a.prepayment_max
-                   FROM announcement_matches m
-                   JOIN subscriptions s ON s.id = m.subscription_id
-                   JOIN announcements a ON a.id = m.announcement_id
-                   WHERE s.user_id = %(user)s
-               ) found ORDER BY matched_at DESC, trd_buy_id DESC LIMIT 200""",
+            """SELECT m.matched_at, s.name, l.trd_buy_id, l.name_ru, l.amount,
+                      coalesce(a.customer_name_ru, l.customer_name_ru), a.end_date, l.prepayment,
+                      coalesce(l.extra_desc, l.description_ru), a.number_anno
+               FROM matches m
+               JOIN subscriptions s ON s.id = m.subscription_id
+               JOIN lots l ON l.id = m.lot_id
+               LEFT JOIN announcements a ON a.id = l.trd_buy_id
+               WHERE s.user_id = %(user)s
+               ORDER BY m.matched_at DESC, a.end_date, l.trd_buy_id, l.id LIMIT 300""",
             {"user": user},
         ).fetchall()
     return templates.TemplateResponse(request, "matches.html", {"rows": rows})

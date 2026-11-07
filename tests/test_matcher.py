@@ -1,10 +1,13 @@
+from datetime import UTC, datetime, timedelta
+from decimal import Decimal
+
 import pytest
 
 from zakup import db, matcher, telegram
 
 
-def _lot(conn, lot_id, name, amount):
-    db.upsert_lot(conn, {"id": lot_id, "trd_buy_id": 1, "name_ru": name, "amount": amount})
+def _lot(conn, lot_id, name, amount, trd_buy_id=1):
+    db.upsert_lot(conn, {"id": lot_id, "trd_buy_id": trd_buy_id, "name_ru": name, "amount": amount})
 
 
 def _subscription(conn, query, min_amount=None, matched_up_to=0, chat_id=None):
@@ -16,7 +19,7 @@ def _subscription(conn, query, min_amount=None, matched_up_to=0, chat_id=None):
     ).fetchone()[0]
     return conn.execute(
         """INSERT INTO subscriptions (user_id, name, query, min_amount, matched_up_to)
-           VALUES (%s, 'тест', %s, %s, %s) RETURNING id""",
+           VALUES (%s, 'Картриджи', %s, %s, %s) RETURNING id""",
         (user, query, min_amount, matched_up_to),
     ).fetchone()[0]
 
@@ -46,59 +49,69 @@ def test_late_published_lot_with_low_id_still_matches(conn):
     assert [m.lot_id for m in matcher.pending(conn)] == [7]
 
 
-def test_subscription_skips_lots_before_its_watermark(conn):
-    _lot(conn, 1, "Картриджи", 5000)
-    _lot(conn, 2, "Картриджи", 5000)
-    _subscription(conn, "картридж", matched_up_to=1)
-    assert matcher.run(conn) == 1
-    assert [m.lot_id for m in matcher.pending(conn)] == [2]
-
-
-def test_format_match_escapes_html():
-    text = matcher.format_match(
-        matcher.Match(1, "<b>", None, 5, 77, "Бумага A4 <офисная>", 1234567.5, "ТОО «Ромашка»")
+def _pending(**overrides):
+    base = dict(
+        subscription_id=1, subscription_name="Фильтр <1>", chat_id="42", lot_id=5,
+        lot_name="Стол", lot_description="Журнальный столик <дуб>", amount=Decimal("689655.16"),
+        count=Decimal("4.000"), unit_name="Штука", prepayment=Decimal("30.00"),
+        lot_kato=["191010000"], announcement_id=77, number_anno="77-1",
+        announcement_name="Приобретение столика", end_date=datetime(2026, 11, 9, 4, tzinfo=UTC),
+        customer="Школа №5", announcement_kato=["191010000"],
     )
-    assert "&lt;офисная&gt;" in text
-    assert "1 234 567.50 ₸" in text
-    assert text.endswith("/announce/index/77")
+    return matcher.PendingLot(**{**base, **overrides})
+
+
+def test_block_lists_lots_and_links_to_our_site():
+    text = matcher.format_block([_pending(), _pending(lot_id=6, prepayment=None, lot_kato=[])])
+    assert "&lt;дуб&gt;" in text
+    assert "4 штука · 689 655.16 ₸ · <b>аванс 30%</b> · Алматинская область" in text
+    assert "приём до 09.11 09:00" in text
+    assert text.endswith("https://zakup.sarsembai.com/a/77")
+    assert "goszakup.gov.kz" not in text
+    assert text.count("• ") == 2
+
+
+def test_lots_of_one_announcement_become_one_block():
+    found = matcher.notices([_pending(lot_id=1), _pending(lot_id=2), _pending(lot_id=3, announcement_id=78)])
+    assert [len(n.keys) for n in found] == [2, 1]
 
 
 @pytest.fixture
 def outbox(monkeypatch):
-    sent = []
+    sent, errors = [], []
 
     def fake_send(chat_id, text):
-        if outbox_error:
-            raise outbox_error[0]
+        if errors:
+            raise errors[0]
         sent.append((chat_id, text))
 
-    outbox_error = []
     monkeypatch.setattr(telegram, "send_message", fake_send)
-    return sent, outbox_error
+    return sent, errors
 
 
-def test_deliver_sends_digests_and_respects_message_limit(conn, outbox, monkeypatch):
+def test_deliver_respects_message_limit_and_names_subscription(conn, outbox, monkeypatch):
     sent, _ = outbox
-    monkeypatch.setattr(telegram, "MESSAGE_LIMIT", 300)
+    monkeypatch.setattr(telegram, "MESSAGE_LIMIT", 400)
     _subscription(conn, "картридж", chat_id="42")
     for i in range(1, 8):
-        _lot(conn, i, f"Картриджи партия {i}", 1000 + i)
+        _lot(conn, i, f"Картриджи партия {i}", 1000 + i, trd_buy_id=i)
     assert matcher.run(conn) == 7
     assert matcher.deliver(conn, pause=0) == 7
-    assert len(sent) > 1 and all(len(text) <= 300 for _, text in sent)
-    assert sum(text.count("Картриджи партия") for _, text in sent) == 7
+    assert len(sent) > 1
+    assert all(text.startswith("🔔 <b>Картриджи</b>") for _, text in sent)
+    assert sum(text.count("• Картриджи партия") for _, text in sent) == 7
     assert matcher.pending(conn) == []
 
 
 def test_blocked_chat_is_unlinked_and_temporary_failure_retries(conn, outbox):
-    sent, error = outbox
+    _, errors = outbox
     _subscription(conn, "картридж", chat_id="42")
     _lot(conn, 1, "Картриджи", 1000)
     matcher.run(conn)
-    error.append(telegram.TelegramError(500, "Internal Server Error"))
+    errors.append(telegram.TelegramError(500, "Internal Server Error"))
     assert matcher.deliver(conn, pause=0) == 0
     assert len(matcher.pending(conn)) == 1
-    error[0] = telegram.TelegramError(403, "Forbidden: bot was blocked by the user")
+    errors[0] = telegram.TelegramError(403, "Forbidden: bot was blocked by the user")
     assert matcher.deliver(conn, pause=0) == 0
     assert matcher.pending(conn) == []
     assert conn.execute("SELECT telegram_chat_id FROM users").fetchone()[0] is None

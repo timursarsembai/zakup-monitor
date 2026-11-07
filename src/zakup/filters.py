@@ -1,4 +1,8 @@
-"""Фильтр объявлений: одна логика для страницы поиска и для подписок."""
+"""Фильтр лотов: одна логика для страницы поиска и для подписок.
+
+Заявку подают по лоту, поэтому сумма, аванс и место поставки проверяются у
+лота; статус, признак «среди организаций инвалидов» и срок — у объявления.
+"""
 
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, time, timedelta
@@ -92,8 +96,8 @@ class Filters:
         )
 
     def where(self, now: datetime) -> tuple[str, dict[str, Any]]:
-        """SQL-условие по таблице announcements (алиас a) и параметры к нему."""
-        clauses = ["a.end_date > %(now)s"]
+        """SQL-условие по лотам (алиас l) с их объявлениями (алиас a) и параметры."""
+        clauses = ["a.end_date > %(now)s", "l.trd_buy_id = a.id"]
         params: dict[str, Any] = {"now": now}
         if self.statuses:
             clauses.append("a.status_id = ANY(%(statuses)s)")
@@ -101,15 +105,17 @@ class Filters:
         if self.disable_person:
             clauses.append("a.disable_person")
         if self.regions:
+            # Место поставки лота; если у лота его нет — объявления.
             clauses.append(
-                "EXISTS (SELECT 1 FROM unnest(a.kato) k WHERE left(k, 2) = ANY(%(regions)s))"
+                """EXISTS (SELECT 1 FROM unnest(coalesce(nullif(l.kato, '{}'), a.kato)) k
+                           WHERE left(k, 2) = ANY(%(regions)s))"""
             )
             params["regions"] = self.regions
         if self.min_sum is not None:
-            clauses.append("a.total_sum >= %(min_sum)s")
+            clauses.append("l.amount >= %(min_sum)s")
             params["min_sum"] = self.min_sum
         if self.max_sum is not None:
-            clauses.append("a.total_sum <= %(max_sum)s")
+            clauses.append("l.amount <= %(max_sum)s")
             params["max_sum"] = self.max_sum
         if (deadline := self.deadline_date(now.astimezone(PORTAL_TZ).date())) is not None:
             # «По» включительно: до конца этого дня по времени Астаны.
@@ -118,12 +124,9 @@ class Filters:
                 deadline + timedelta(days=1), time.min, PORTAL_TZ
             )
         if self.advance_only:
-            clauses.append("a.prepayment_max > 0")
+            clauses.append("l.prepayment > 0")
         if self.q:
-            clauses.append(
-                """EXISTS (SELECT 1 FROM lots l WHERE l.trd_buy_id = a.id
-                           AND l.tsv @@ websearch_to_tsquery('russian', %(q)s))"""
-            )
+            clauses.append("l.tsv @@ websearch_to_tsquery('russian', %(q)s)")
             params["q"] = self.q
         return " AND ".join(clauses), params
 
@@ -138,9 +141,9 @@ class Filters:
         if self.regions:
             parts.append(", ".join(REGIONS[r] for r in self.regions if r in REGIONS))
         if self.min_sum is not None:
-            parts.append(f"от {self.min_sum:,.0f} ₸".replace(",", " "))
+            parts.append(f"лот от {self.min_sum:,.0f} ₸".replace(",", " "))
         if self.max_sum is not None:
-            parts.append(f"до {self.max_sum:,.0f} ₸".replace(",", " "))
+            parts.append(f"лот до {self.max_sum:,.0f} ₸".replace(",", " "))
         if self.deadline == DEADLINE_RULE:
             parts.append("окончание через 2 дня (в выходные — по вторник)")
         elif self.deadline:
@@ -150,8 +153,10 @@ class Filters:
         return "; ".join(parts)
 
 
-# Аванс в приоритете: сначала с наибольшим авансом, потом кто раньше заканчивается.
-ORDER_BY = "a.prepayment_max DESC NULLS LAST, a.end_date"
+# Аванс в приоритете: сначала объявления с наибольшим авансом среди подошедших
+# лотов, потом кто раньше заканчивается. Внутри объявления — лоты с авансом выше.
+GROUP_ORDER_BY = "max(l.prepayment) DESC NULLS LAST, a.end_date, a.id"
+LOT_ORDER_BY = "l.prepayment DESC NULLS LAST, l.lot_number, l.id"
 
 
 def _decimal(value: Any) -> Decimal | None:

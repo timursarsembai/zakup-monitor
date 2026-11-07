@@ -12,13 +12,13 @@ from datetime import timedelta
 
 import psycopg
 
-from zakup import db, telegram
+from zakup import SITE_URL, db, telegram
 
 logger = logging.getLogger(__name__)
 
 LINK_TTL = timedelta(minutes=30)
 OFFSET_KEY = "telegram:offset"
-SITE_URL = "https://zakup.sarsembai.com"
+
 
 HELP = (
     "Это бот сервиса zakup — мониторинга госзакупок.\n\n"

@@ -1,7 +1,8 @@
-"""Подробности открытых объявлений из GraphQL: признаки, места поставки, аванс.
+"""Подробности объявлений из GraphQL: справочники, организатор, лоты, файлы.
 
-В REST-списке их нет, а фильтры на сайте и подписки на них опираются. Берём
-пачками по 50 объявлений: GraphQL принимает список id.
+В REST-списке этого нет, а фильтры, подписки и страница объявления на них
+опираются. Шаг `zakup details` берёт открытые объявления пачками по 50,
+страница объявления перечитывает своё при просмотре (fetch_one).
 """
 
 import json
@@ -9,17 +10,35 @@ import logging
 from typing import Any
 
 import psycopg
+from psycopg.types.json import Jsonb
 
-from zakup.goszakup import Client, parse_date
+from zakup import db
+from zakup.goszakup import Client, normalize, parse_date
 
 logger = logging.getLogger(__name__)
 
 BATCH = 50
-QUERY = """{ TrdBuy(limit: %(limit)d, filter: {id: %(ids)s}) {
-  id kato disablePersonId refTypeTradeId refSubjectTypeId countLots customerBin customerNameRu
-  lastUpdateDate
-  Lots { id plnPointKatoList Plans { prepayment PlansKato { refKatoCode } } }
-} }"""
+FIELDS = """
+  id numberAnno nameRu totalSum countLots publishDate startDate endDate lastUpdateDate
+  refBuyStatusId refTradeMethodsId kato disablePersonId refTypeTradeId refSubjectTypeId
+  customerBin customerNameRu orgBin orgNameRu
+  RefBuyStatus { nameRu } RefTradeMethods { nameRu } RefTypeTrade { nameRu }
+  RefSubjectType { nameRu }
+  Organizer { bin nameRu Address { address katoCode } }
+  Files { id nameRu originalName filePath }
+  GeneralFiles { nameRu filePathRu }
+  Lots {
+    id lotNumber nameRu descriptionRu amount count trdBuyId trdBuyNumberAnno refLotStatusId
+    refTradeMethodsId customerBin customerNameRu plnPointKatoList lastUpdateDate isDeleted
+    RefLotsStatus { nameRu }
+    Files { id nameRu originalName filePath }
+    Plans {
+      price count amount sum1 sum2 sum3 prepayment supplyDateRu extraDescRu
+      RefUnits { nameRu } PlansKato { refKatoCode fullDeliveryPlaceNameRu }
+    }
+  }
+"""
+BATCH_QUERY = "{ TrdBuy(limit: %(limit)d, filter: {id: %(ids)s}) { " + FIELDS + " } }"
 
 
 def _number(value: Any) -> float | None:
@@ -29,26 +48,46 @@ def _number(value: Any) -> float | None:
         return None
 
 
-def parse(item: dict[str, Any]) -> tuple[dict[str, Any], list[tuple[int, float | None, list[str]]]]:
-    """Разбирает объявление из GraphQL: поля объявления и (id, аванс, КАТО) по лотам."""
-    kato: set[str] = set(item.get("kato") or [])
-    lots = []
-    for lot in item.get("Lots") or []:
-        lot_kato = set(lot.get("plnPointKatoList") or [])
-        prepayments = []
-        for plan in lot.get("Plans") or []:
-            if (value := _number(plan.get("prepayment"))) is not None:
-                prepayments.append(value)
-            lot_kato.update(k["refKatoCode"] for k in plan.get("PlansKato") or [] if k.get("refKatoCode"))
-        lot_kato.discard("")
-        kato |= lot_kato
-        lots.append((int(lot["id"]), max(prepayments) if prepayments else None, sorted(lot_kato)))
-    prepayment_values = [p for _, p, _ in lots if p is not None]
+def parse_lot(lot: dict[str, Any]) -> dict[str, Any]:
+    kato = set(lot.get("plnPointKatoList") or [])
+    prepayments, prices, units, extra, supply = [], [], [], [], []
+    for plan in lot.get("Plans") or []:
+        if (value := _number(plan.get("prepayment"))) is not None:
+            prepayments.append(value)
+        if (value := _number(plan.get("price"))) is not None:
+            prices.append(value)
+        if unit := (plan.get("RefUnits") or {}).get("nameRu"):
+            units.append(unit)
+        if plan.get("extraDescRu"):
+            extra.append(plan["extraDescRu"].strip())
+        if plan.get("supplyDateRu"):
+            supply.append(plan["supplyDateRu"].strip())
+        kato.update(k["refKatoCode"] for k in plan.get("PlansKato") or [] if k.get("refKatoCode"))
+    kato.discard("")
+    return {
+        "id": int(lot["id"]),
+        "prepayment": max(prepayments) if prepayments else None,
+        "kato": sorted(kato),
+        # Пунктов плана в лоте бывает несколько с одной ценой; разные — цену не показываем.
+        "price": prices[0] if len(set(prices)) == 1 else None,
+        "unit_name": units[0] if units else None,
+        "extra_desc": "; ".join(dict.fromkeys(extra)) or None,
+        "supply_date": "; ".join(dict.fromkeys(supply)) or None,
+    }
+
+
+def parse(item: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Разбирает объявление из GraphQL: поля объявления и поля его лотов."""
+    lots = [parse_lot(lot) for lot in item.get("Lots") or [] if not lot.get("isDeleted")]
+    kato = set(item.get("kato") or [])
+    for lot in lots:
+        kato.update(lot["kato"])
+    prepayments = [lot["prepayment"] for lot in lots if lot["prepayment"] is not None]
     fields = {
         "id": int(item["id"]),
         "disable_person": item.get("disablePersonId") == 1,
         "kato": sorted(k for k in kato if k),
-        "prepayment_max": max(prepayment_values) if prepayment_values else None,
+        "prepayment_max": max(prepayments) if prepayments else None,
         "type_trade_id": item.get("refTypeTradeId"),
         "subject_type_id": item.get("refSubjectTypeId"),
         "count_lots": item.get("countLots"),
@@ -59,7 +98,8 @@ def parse(item: dict[str, Any]) -> tuple[dict[str, Any], list[tuple[int, float |
     return fields, lots
 
 
-def save(conn: psycopg.Connection, fields: dict[str, Any], lots: list) -> None:
+def save(conn: psycopg.Connection, item: dict[str, Any]) -> None:
+    fields, lots = parse(item)
     conn.execute(
         """UPDATE announcements SET
                disable_person = %(disable_person)s, kato = %(kato)s,
@@ -68,25 +108,42 @@ def save(conn: psycopg.Connection, fields: dict[str, Any], lots: list) -> None:
                count_lots = coalesce(%(count_lots)s, count_lots),
                customer_bin = coalesce(%(customer_bin)s, customer_bin),
                customer_name_ru = coalesce(%(customer_name_ru)s, customer_name_ru),
-               details_fetched_at = now(),
+               detail = %(detail)s, details_fetched_at = now(),
                details_update_date = coalesce(%(last_update_date)s, last_update_date)
            WHERE id = %(id)s""",
-        fields,
+        {**fields, "detail": Jsonb(item)},
     )
-    for lot_id, prepayment, kato in lots:
+    raw_lots = {int(lot["id"]): lot for lot in item.get("Lots") or []}
+    for lot in lots:
+        raw = {k: v for k, v in raw_lots[lot["id"]].items() if not k[:1].isupper()}
+        # Лот мог ещё не дойти через REST: заводим его отсюда, REST потом дополнит.
+        db.upsert_lot(conn, normalize(raw))
         conn.execute(
-            "UPDATE lots SET prepayment = %s, kato = %s WHERE id = %s", (prepayment, kato, lot_id)
+            """UPDATE lots SET prepayment = %(prepayment)s, kato = %(kato)s, price = %(price)s,
+                   unit_name = %(unit_name)s, extra_desc = %(extra_desc)s,
+                   supply_date = %(supply_date)s
+               WHERE id = %(id)s""",
+            lot,
         )
 
 
+def fetch_one(conn: psycopg.Connection, client: Client, announcement_id: int) -> bool:
+    data = client.graphql(BATCH_QUERY % {"limit": 1, "ids": json.dumps([announcement_id])})
+    found = data.get("TrdBuy") or []
+    for item in found:
+        save(conn, item)
+    conn.commit()
+    return bool(found)
+
+
 def refresh(conn: psycopg.Connection, client: Client, limit: int) -> int:
-    """Дочитывает подробности открытых объявлений: новых и изменившихся."""
+    """Дочитывает подробности открытых объявлений: новых, изменившихся и раз в сутки."""
     ids = [
         row[0]
         for row in conn.execute(
             """SELECT id FROM announcements
                WHERE end_date > now()
-                 AND (details_fetched_at IS NULL
+                 AND (details_fetched_at IS NULL OR detail IS NULL
                       OR last_update_date > details_update_date
                       OR details_fetched_at < now() - interval '1 day')
                ORDER BY details_fetched_at NULLS FIRST, end_date
@@ -97,10 +154,10 @@ def refresh(conn: psycopg.Connection, client: Client, limit: int) -> int:
     done = 0
     for start in range(0, len(ids), BATCH):
         batch = ids[start : start + BATCH]
-        data = client.graphql(QUERY % {"limit": len(batch), "ids": json.dumps(batch)})
+        data = client.graphql(BATCH_QUERY % {"limit": len(batch), "ids": json.dumps(batch)})
         found = data.get("TrdBuy") or []
         for item in found:
-            save(conn, *parse(item))
+            save(conn, item)
         # Объявления, которых GraphQL не вернул, не перечитываем по кругу до завтра.
         missing = set(batch) - {int(item["id"]) for item in found}
         if missing:

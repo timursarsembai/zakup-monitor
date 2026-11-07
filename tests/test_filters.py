@@ -42,41 +42,53 @@ def test_form_parsing():
     assert Filters.from_form({"applied": ["1"], "deadline_mode": [""]}).deadline == ""
 
 
-def test_details_parse_collects_kato_and_prepayment():
+def test_details_parse_lot_fields():
     fields, lots = details.parse({
         "id": 5, "kato": ["191010000"], "disablePersonId": 1, "countLots": 2,
         "Lots": [
             {"id": 1, "plnPointKatoList": ["751410000"],
-             "Plans": [{"prepayment": 30, "PlansKato": [{"refKatoCode": "751110000"}]}]},
-            {"id": 2, "plnPointKatoList": [""], "Plans": [{"prepayment": 0, "PlansKato": []}]},
+             "Plans": [{"prepayment": 30, "price": 10.5, "RefUnits": {"nameRu": "Штука"},
+                        "extraDescRu": " дуб ", "supplyDateRu": "16 дней",
+                        "PlansKato": [{"refKatoCode": "751110000"}]}]},
+            {"id": 2, "plnPointKatoList": [""], "Plans": [{"prepayment": 0, "price": 1},
+                                                          {"prepayment": 0, "price": 2}]},
+            {"id": 3, "isDeleted": 1, "Plans": [{"prepayment": 90}]},
         ],
     })
     assert fields["disable_person"] and fields["prepayment_max"] == 30
     assert fields["kato"] == ["191010000", "751110000", "751410000"]
-    assert lots == [(1, 30.0, ["751110000", "751410000"]), (2, 0.0, [])]
+    assert lots[0] == {"id": 1, "prepayment": 30.0, "kato": ["751110000", "751410000"],
+                       "price": 10.5, "unit_name": "Штука", "extra_desc": "дуб",
+                       "supply_date": "16 дней"}
+    assert lots[1]["price"] is None and lots[1]["kato"] == []
+    assert len(lots) == 2
 
 
 NOW = datetime(2026, 11, 7, 6, 0, tzinfo=UTC)  # суббота, 11:00 в Алматы
 
 
 def _announcement(conn, ident, *, status=240, disable=True, kato=("751410000",), total=500000,
-                  ends_in_days=2, prepayment=30):
+                  ends_in_days=2, prepayment=30, lots=None):
+    end = (NOW + timedelta(days=ends_in_days)).astimezone(PORTAL_TZ).strftime("%Y-%m-%d %H:%M:%S")
     db.upsert_announcement(conn, {"id": ident, "name_ru": f"Закупка {ident}", "total_sum": total,
-                                  "ref_buy_status_id": status,
-                                  "end_date": (NOW + timedelta(days=ends_in_days)).astimezone(PORTAL_TZ)
-                                  .strftime("%Y-%m-%d %H:%M:%S")})
-    details.save(conn, {"id": ident, "disable_person": disable, "kato": list(kato),
-                        "prepayment_max": prepayment, "type_trade_id": None,
-                        "subject_type_id": None, "count_lots": None, "customer_bin": None,
-                        "customer_name_ru": "Школа", "last_update_date": None}, [])
+                                  "ref_buy_status_id": status, "end_date": end})
+    lots = lots or [{"id": ident * 10, "amount": total, "prepayment": prepayment,
+                     "kato": list(kato), "name": f"Лот {ident}"}]
+    item = {"id": ident, "disablePersonId": 1 if disable else 0, "kato": [], "Lots": [
+        {"id": lot["id"], "trdBuyId": ident, "nameRu": lot["name"], "amount": lot["amount"],
+         "plnPointKatoList": lot["kato"], "Plans": [{"prepayment": lot["prepayment"]}]}
+        for lot in lots
+    ]}
+    details.save(conn, item)
 
 
-def _ids(conn, f):
+def _lot_ids(conn, f):
     where, params = f.where(NOW)
-    return sorted(r[0] for r in conn.execute(f"SELECT a.id FROM announcements a WHERE {where}", params))
+    return sorted(r[0] for r in conn.execute(
+        f"SELECT l.id FROM lots l, announcements a WHERE {where}", params))
 
 
-def test_where_applies_every_default(conn):
+def test_where_applies_every_default_per_lot(conn):
     _announcement(conn, 1)
     _announcement(conn, 2, status=220)
     _announcement(conn, 3, disable=False)
@@ -86,12 +98,18 @@ def test_where_applies_every_default(conn):
     _announcement(conn, 7, ends_in_days=4)           # после вторника
     _announcement(conn, 8, ends_in_days=-1)          # уже закончилось
     _announcement(conn, 9, prepayment=0)
-    assert _ids(conn, Filters()) == [1, 5, 9]
-    assert _ids(conn, Filters(advance_only=True)) == [1, 5]
-    assert _ids(conn, Filters(deadline="")) == [1, 5, 7, 9]
+    # Объявление на 1 млн, но лоты мелкие или в другом регионе — подходит только один.
+    _announcement(conn, 11, total=1_000_000, lots=[
+        {"id": 111, "amount": 100_000, "prepayment": 30, "kato": ["751410000"], "name": "мелкий"},
+        {"id": 112, "amount": 400_000, "prepayment": 30, "kato": ["711410000"], "name": "Астана"},
+        {"id": 113, "amount": 500_000, "prepayment": 0, "kato": ["191010000"], "name": "годится"},
+    ])
+    assert _lot_ids(conn, Filters()) == [10, 50, 90, 113]
+    assert _lot_ids(conn, Filters(advance_only=True)) == [10, 50]
+    assert _lot_ids(conn, Filters(deadline="")) == [10, 50, 70, 90, 113]
 
 
-def test_filter_subscription_notifies_each_announcement_once(conn, monkeypatch):
+def test_filter_subscription_sends_lots_grouped_by_announcement(conn, monkeypatch):
     sent = []
     monkeypatch.setattr(matcher.telegram, "send_message", lambda chat, text: sent.append(text))
     user = conn.execute(
@@ -102,12 +120,14 @@ def test_filter_subscription_notifies_each_announcement_once(conn, monkeypatch):
            VALUES (%s, 'Алматы', '', 'announcements', %s)""",
         (user, db.Jsonb(Filters().to_json())),
     )
-    _announcement(conn, 1)
-    _announcement(conn, 2, prepayment=0)
+    _announcement(conn, 1, lots=[
+        {"id": 11, "amount": 400_000, "prepayment": 30, "kato": ["751410000"], "name": "Стол"},
+        {"id": 12, "amount": 400_000, "prepayment": 0, "kato": ["751410000"], "name": "Стул"},
+    ])
     assert matcher.run_filters(conn, NOW) == 2
     assert matcher.run_filters(conn, NOW) == 0
     assert matcher.deliver(conn, pause=0) == 2
+    assert len(sent) == 1
     text = sent[0]
-    # С авансом — первым.
-    assert text.index("Закупка 1") < text.index("Закупка 2")
-    assert "аванс 30%" in text and "г. Алматы" in text and "/announce/index/1" in text
+    assert text.index("Стол") < text.index("Стул")  # с авансом — первым
+    assert "аванс 30%" in text and "/a/1" in text

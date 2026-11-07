@@ -44,7 +44,10 @@ class Client:
         self._http = httpx.Client(
             base_url=base_url,
             headers={"Authorization": f"Bearer {token}"},
-            timeout=60,
+            # Из Docker-контейнера подключение к порталу иногда висит ~20 с (портал
+            # отбрасывает первый SYN с переиспользованного NAT-порта). Новая
+            # попытка идёт с другого порта и проходит сразу, поэтому ждём недолго.
+            timeout=httpx.Timeout(60, connect=2),
         )
 
     def close(self) -> None:
@@ -83,6 +86,9 @@ class Client:
             self._last_request = time.monotonic()
             try:
                 response = self._http.request(method, path, **kwargs)
+            except httpx.ConnectTimeout:
+                logger.info("goszakup %s: connect timeout, retry %d", path, attempt)
+                continue
             except httpx.TransportError as error:
                 logger.warning("goszakup %s: %s, retry %d", path, type(error).__name__, attempt)
                 time.sleep(2**attempt * 5)
