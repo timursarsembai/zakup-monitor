@@ -1,38 +1,51 @@
 {% extends "base.html" %}
-{% block title %}Настройки<script>
-  // Текст подтверждения — из data-атрибута: логин не попадает в код JS.
-  for (const form of document.querySelectorAll("form[data-confirm]")) {
-    form.addEventListener("submit", (event) => { if (!confirm(form.dataset.confirm)) event.preventDefault(); });
-  }
-</script>
-{% endblock %}
+{% block title %}Настройки{% endblock %}
 {% block style %}
-  .panel { max-width: 560px; border: 1px solid var(--line); border-radius: 12px; padding: 20px; margin-top: 12px; }
+  .tabs { display: flex; gap: 4px; flex-wrap: wrap; border-bottom: 1px solid var(--line); margin: 8px 0 16px; }
+  .tabs a { padding: 8px 14px; border-bottom: 2px solid transparent; color: var(--muted); }
+  .tabs a[aria-selected=true] { color: var(--fg); border-bottom-color: var(--accent); font-weight: 600; }
+  .panel { max-width: 640px; border: 1px solid var(--line); border-radius: 12px; padding: 20px; margin-bottom: 14px; }
+  .panel.wide { max-width: 860px; }
   .panel h2 { font-size: 17px; margin: 0 0 6px; }
   .panel p { margin: 0 0 14px; }
   .status { display: inline-flex; align-items: center; gap: 8px; font-weight: 500; margin-bottom: 14px; }
   .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
   .dot.on { background: #1e9e5a; }
-  .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
   .actions form { margin: 0; }
   .primary { background: var(--accent); color: var(--on-accent); border-color: transparent; font-weight: 600; }
   .note { margin-top: 14px; font-size: 14px; }
-  .flash { max-width: 760px; padding: 12px 16px; border-radius: 10px; background: color-mix(in srgb, #1e9e5a 18%, transparent); font-weight: 500; user-select: all; }
+  .flash { max-width: 860px; padding: 12px 16px; border-radius: 10px; background: color-mix(in srgb, #1e9e5a 18%, transparent); font-weight: 500; user-select: all; }
   .flash.bad { background: color-mix(in srgb, #c0392b 20%, transparent); user-select: auto; }
-  .panel#users { max-width: 760px; }
-  form.pw { display: grid; gap: 8px; max-width: 360px; }
-  form.pw input, .actions input[name=login] { padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; font: inherit; }
-  .actions input { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; font: inherit; }
-<script>
-  // Текст подтверждения — из data-атрибута: логин не попадает в код JS.
-  for (const form of document.querySelectorAll("form[data-confirm]")) {
-    form.addEventListener("submit", (event) => { if (!confirm(form.dataset.confirm)) event.preventDefault(); });
+  .field { display: grid; gap: 4px; margin-bottom: 12px; max-width: 420px; }
+  .field span { font-size: 13px; color: var(--muted); }
+  .field input, .field select, .actions input { padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); font: inherit; }
+  .providers { display: grid; gap: 8px; margin-bottom: 16px; }
+  .provider { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; cursor: pointer; }
+  .provider:has(input:checked) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+  .provider b { display: block; }
+  [data-tab-panel][hidden], [data-provider-fields][hidden] { display: none; }
+  @media (max-width: 760px) {
+    .tabs { flex-wrap: nowrap; overflow-x: auto; }
+    .tabs a { white-space: nowrap; padding: 10px 12px; }
+    .field input, .field select, .actions input { font-size: 16px; min-height: 44px; }
   }
-</script>
 {% endblock %}
 {% block main %}
 {% if notice %}<p class="flash">{{ notice }}</p>{% endif %}
 {% if error %}<p class="flash bad">{{ error }}</p>{% endif %}
+
+<nav class="tabs" role="tablist">
+  <a href="#notify" role="tab" data-tab="notify">Уведомления</a>
+  <a href="#account" role="tab" data-tab="account">Аккаунт</a>
+  {% if is_admin %}
+  <a href="#ai" role="tab" data-tab="ai">Искусственный интеллект</a>
+  <a href="#company" role="tab" data-tab="company">Организация</a>
+  <a href="#users" role="tab" data-tab="users">Пользователи</a>
+  {% endif %}
+</nav>
+
+<div data-tab-panel="notify">
 <section class="panel">
   <h2>Уведомления в Telegram</h2>
   <p class="muted">Новые лоты по вашим подпискам приходят сводкой раз в 10 минут.</p>
@@ -57,7 +70,7 @@
 {% if is_admin %}
 <section class="panel">
   <h2>Telegram-группы</h2>
-  <p class="muted">Результаты подписок можно присылать в общую группу — например, с партнёрами. Каждый участник подключает группу у себя, потом в подписке выбирает «в группу». Если лот подошёл под подписки нескольких человек, в группу он придёт один раз, с названием подписки и логином.</p>
+  <p class="muted">Результаты подписок можно присылать в общую группу, например с партнёрами: в подписке выберите «в группу». Если лот подошёл под несколько подписок, в группу он придёт один раз — с названием подписки и логином.</p>
   {% for chat_id, title in groups %}
   <div class="status"><span class="dot on"></span>{{ title }}
     <form method="post" action="/settings/groups/remove" style="display:inline"><input type="hidden" name="chat_id" value="{{ chat_id }}"><button>Отключить</button></form></div>
@@ -67,33 +80,67 @@
   <p class="note muted">Откроется Telegram: выберите группу — бот @{{ bot_username }} добавится в неё и подтвердит подключение. Ссылка одноразовая, действует 30 минут. Потом обновите эту страницу.</p>
   {% endif %}
 </section>
-<section class="panel" id="ai">
-  <h2>Искусственный интеллект</h2>
-  <p class="muted">Кто ищет товары под лоты по техспецификации. По умолчанию — Claude Code на этом сервере по подписке владельца, ключи не нужны. Если выбрать OpenAI или Anthropic, поиск пойдёт только через их API с вашим ключом.</p>
-  <form method="post" action="/settings/ai">
-    {% for key, name in providers.items() %}
-    <label class="status" style="margin-bottom:6px"><input type="radio" name="provider" value="{{ key }}" {% if ai_provider == key %}checked{% endif %}> {{ name }}{% if key in ai_keys %} <span class="muted">· ключ сохранён</span>{% endif %}</label>
-    {% endfor %}
-    <div class="actions" style="margin-top:8px">
-      <input name="api_key" type="password" autocomplete="off" placeholder="API-ключ (для OpenAI / Anthropic)" style="flex:1; min-width:220px">
-      <input name="model" value="{{ ai_model }}" placeholder="модель (необязательно)" style="width:200px">
-      <button class="primary">Сохранить</button>
+{% endif %}
+</div>
+
+<div data-tab-panel="account" hidden>
+<section class="panel">
+  <h2>Мой пароль</h2>
+  <form method="post" action="/settings/password">
+    <label class="field"><span>Текущий пароль</span><input type="password" name="current" autocomplete="current-password" required></label>
+    <label class="field"><span>Новый пароль, от {{ min_password }} символов</span><input type="password" name="password" autocomplete="new-password" minlength="{{ min_password }}" required></label>
+    <label class="field"><span>Новый пароль ещё раз</span><input type="password" name="repeat" autocomplete="new-password" minlength="{{ min_password }}" required></label>
+    <button class="primary">Сменить пароль</button>
+  </form>
+  <p class="note muted">После смены пароля нужно войти заново — на всех устройствах.</p>
+</section>
+</div>
+
+{% if is_admin %}
+<div data-tab-panel="ai" hidden>
+<section class="panel">
+  <h2>Кто ищет товары под лоты</h2>
+  <p class="muted">Настройка общая для всех пользователей. Выбранный способ — единственный: если включён API, Claude Code на сервере не используется.</p>
+  <form method="post" action="/settings/ai" data-ai-form>
+    <div class="providers">
+      {% for key, name in providers.items() %}
+      <label class="provider"><input type="radio" name="provider" value="{{ key }}" {% if ai_provider == key %}checked{% endif %}>
+        <span><b>{{ name }}</b>
+        <span class="muted">{% if key == "claude_code" %}Без ключей: работает по подписке владельца на этом сервере.{% elif key in ai_keys %}Ключ сохранён.{% else %}Нужен API-ключ.{% endif %}</span></span></label>
+      {% endfor %}
     </div>
-    <p class="note muted">Модели по умолчанию: {% for key, model in default_models.items() %}{{ providers[key].split(" (")[0] }} — {{ model }}{% if not loop.last %}; {% endif %}{% endfor %}. Ключ хранится зашифрованным и на страницу не выводится.</p>
+    {% for key in ("anthropic", "openai") %}
+    <div data-provider-fields="{{ key }}" {% if ai_provider != key %}hidden{% endif %}>
+      <label class="field"><span>API-ключ {{ "Anthropic" if key == "anthropic" else "OpenAI" }}{% if key in ai_keys %} — сохранён; введите новый, чтобы заменить{% endif %}</span>
+        <input name="api_key" type="password" autocomplete="off" placeholder="{{ 'sk-ant-…' if key == 'anthropic' else 'sk-…' }}" {% if ai_provider != key %}disabled{% endif %}></label>
+      <label class="field"><span>Модель</span>
+        <select name="model" data-models="{{ key }}" {% if ai_provider != key %}disabled{% endif %}>
+          {% for model_id, label in models[key] %}<option value="{{ model_id }}" {% if ai_provider == key and ai_model == model_id %}selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select></label>
+      {% if key in ai_keys %}<p class="muted" data-models-status="{{ key }}"></p>{% endif %}
+    </div>
+    {% endfor %}
+    <button class="primary">Сохранить</button>
   </form>
   {% if saved == "ai" %}<p class="note">Сохранено.</p>{% endif %}
+  <p class="note muted">Ключ хранится зашифрованным и на страницу не выводится.</p>
 </section>
+</div>
+
+<div data-tab-panel="company" hidden>
 <section class="panel">
   <h2>Ваша организация</h2>
   <p class="muted">БИН или ИИН, под которым вы подаёте ценовые предложения. По нему в итогах отмечаются ваши предложения, а отмеченные лоты сами получают «Выиграли» или «Не выиграли».</p>
   <form class="actions" method="post" action="/settings/company">
-    <input name="company_bin" value="{{ company_bin or '' }}" placeholder="12 цифр" inputmode="numeric" maxlength="12" pattern="\d{12}">
+    <input name="company_bin" value="{{ company_bin or '' }}" placeholder="12 цифр" inputmode="numeric" maxlength="12" pattern="\d{12}" aria-label="БИН или ИИН">
     <button class="primary">Сохранить</button>
   </form>
   {% if saved == "bin" %}<p class="note">Сохранено.</p>{% endif %}
 </section>
+</div>
 
-<section class="panel" id="users">
+<div data-tab-panel="users" hidden>
+<section class="panel wide">
   <h2>Пользователи</h2>
   <p class="muted">Администратор заводит пользователей и сбрасывает им пароли. Новый пароль показывается один раз — передайте его человеку.</p>
   <div class="table-wrap"><table>
@@ -109,23 +156,52 @@
     {% endfor %}
   </table></div>
   <form class="actions" method="post" action="/settings/users" style="margin-top:12px">
-    <input name="login" placeholder="логин нового пользователя" required autocapitalize="none" spellcheck="false">
+    <input name="login" placeholder="логин нового пользователя" required autocapitalize="none" spellcheck="false" aria-label="Логин">
     <button class="primary">Добавить</button>
   </form>
 </section>
+</div>
 {% endif %}
 
-<section class="panel">
-  <h2>Мой пароль</h2>
-  <form method="post" action="/settings/password" class="pw">
-    <input type="password" name="current" placeholder="текущий пароль" autocomplete="current-password" required>
-    <input type="password" name="password" placeholder="новый пароль, от {{ min_password }} символов" autocomplete="new-password" minlength="{{ min_password }}" required>
-    <input type="password" name="repeat" placeholder="новый пароль ещё раз" autocomplete="new-password" minlength="{{ min_password }}" required>
-    <button class="primary">Сменить пароль</button>
-  </form>
-  <p class="note muted">После смены пароля нужно войти заново — на всех устройствах.</p>
-</section>
 <script>
+  // Вкладки: выбор в адресе (#ai), чтобы после сохранения вернуться туда же.
+  const tabs = [...document.querySelectorAll("[data-tab]")];
+  const showTab = (name) => {
+    if (!tabs.some((t) => t.dataset.tab === name)) name = tabs[0].dataset.tab;
+    for (const t of tabs) t.setAttribute("aria-selected", String(t.dataset.tab === name));
+    for (const p of document.querySelectorAll("[data-tab-panel]")) p.hidden = p.dataset.tabPanel !== name;
+  };
+  for (const t of tabs) t.addEventListener("click", (event) => {
+    event.preventDefault(); history.replaceState(null, "", "#" + t.dataset.tab); showTab(t.dataset.tab);
+  });
+  showTab({{ tab|tojson }} || location.hash.slice(1));
+
+  // ИИ: поля ключа и модели — только у выбранного API; у Claude Code полей нет.
+  const aiForm = document.querySelector("[data-ai-form]");
+  if (aiForm) {
+    const sync = () => {
+      const chosen = aiForm.querySelector("input[name=provider]:checked")?.value;
+      for (const box of aiForm.querySelectorAll("[data-provider-fields]")) {
+        const on = box.dataset.providerFields === chosen;
+        box.hidden = !on;
+        for (const field of box.querySelectorAll("input, select")) field.disabled = !on;
+      }
+    };
+    aiForm.addEventListener("change", sync);
+    sync();
+    // Если ключ сохранён — подтягиваем актуальный список моделей у провайдера.
+    for (const status of aiForm.querySelectorAll("[data-models-status]")) {
+      const provider = status.dataset.modelsStatus;
+      const select = aiForm.querySelector(`[data-models="${provider}"]`);
+      fetch(`/settings/ai/models?provider=${provider}`).then((r) => r.ok ? r.json() : null).then((models) => {
+        if (!models || !models.length) return;
+        const current = select.value;
+        select.replaceChildren(...models.map(([id, label]) => new Option(label, id, false, id === current)));
+        status.textContent = `Список моделей загружен у провайдера: ${models.length}.`;
+      }).catch(() => {});
+    }
+  }
+
   // Текст подтверждения — из data-атрибута: логин не попадает в код JS.
   for (const form of document.querySelectorAll("form[data-confirm]")) {
     form.addEventListener("submit", (event) => { if (!confirm(form.dataset.confirm)) event.preventDefault(); });

@@ -339,3 +339,26 @@ def test_roles_users_and_passwords(client, conn):
     _login(client)
     reset = client.post(f"/settings/users/{amir}/reset", headers=ORIGIN).text
     assert "Новый пароль для amir" in reset
+
+
+def test_settings_tabs_and_ai_models(client, conn, monkeypatch):
+    from cryptography.fernet import Fernet
+
+    _login(client)
+    page = client.get("/settings").text
+    assert "<title>Настройки · Zakup</title>" in page
+    for tab in ("Уведомления", "Аккаунт", "Искусственный интеллект", "Организация", "Пользователи"):
+        assert f'role="tab" data-tab' in page and tab in page
+    assert 'value="claude-sonnet-5-5"' in page
+    monkeypatch.setenv("ZAKUP_SECRET_KEY", Fernet.generate_key().decode())
+    saved = client.post("/settings/ai", data={"provider": "anthropic", "api_key": "sk-ant-x",
+                                               "model": "claude-opus-5-5"},
+                        headers=ORIGIN, follow_redirects=False)
+    assert saved.headers["location"] == "/settings?saved=ai#ai"
+    assert conn.execute("SELECT ai_provider, ai_model FROM users WHERE role = 'admin'").fetchone() == (
+        "anthropic", "claude-opus-5-5")
+    monkeypatch.setattr(web.research, "provider_models",
+                        lambda provider, key: [("claude-x", "Claude X")] if key == "sk-ant-x" else [])
+    assert client.get("/settings/ai/models?provider=anthropic").json() == [["claude-x", "Claude X"]]
+    client.post("/settings/ai", data={"provider": "claude_code", "model": "ignored"}, headers=ORIGIN)
+    assert conn.execute("SELECT ai_model FROM users WHERE role = 'admin'").fetchone()[0] is None

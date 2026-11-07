@@ -6,6 +6,7 @@
 
 import io
 import os
+import time
 from contextlib import asynccontextmanager
 from decimal import Decimal, InvalidOperation
 from importlib.resources import files
@@ -13,6 +14,7 @@ from typing import Annotated
 from datetime import UTC, datetime, timedelta
 from urllib.parse import parse_qs, quote, urlencode, urlsplit
 
+import httpx
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -239,7 +241,7 @@ def healthz() -> dict:
 @app.get("/")
 def home(request: Request, _: User):
     query = f"?{request.url.query}" if request.url.query else ""
-    return RedirectResponse(f"/lots{query}", status_code=307)
+    return RedirectResponse(f"/announcements{query}", status_code=307)
 
 
 def _user_groups(conn, user: int) -> list[tuple[str, str]]:
@@ -806,7 +808,8 @@ def settings(request: Request, user: User, sent: str = "", saved: str = ""):
 
 
 def _settings_page(request: Request, user: int, *, sent: str = "", saved: str = "",
-                   notice: str | None = None, error: str | None = None, status_code: int = 200):
+                   notice: str | None = None, error: str | None = None, status_code: int = 200,
+                   tab: str | None = None):
     is_admin = request.state.role == "admin"
     with pool.connection() as conn:
         chat_id, company_bin = conn.execute(
@@ -839,6 +842,8 @@ def _settings_page(request: Request, user: int, *, sent: str = "", saved: str = 
             "ai_keys": ai_keys,
             "providers": research.PROVIDERS,
             "default_models": research.DEFAULT_MODELS,
+            "models": research.MODELS,
+            "tab": tab or {"ai": "ai", "bin": "company"}.get(saved),
             "users": users,
             "me": user,
             "min_password": auth.MIN_PASSWORD_LENGTH,
@@ -866,7 +871,7 @@ def change_password(
             error = None
             auth.set_password(conn, request.state.email, password)
     if error:
-        return _settings_page(request, user, error=error, status_code=422)
+        return _settings_page(request, user, error=error, status_code=422, tab="account")
     # Смена пароля сбрасывает все сессии, в том числе эту: входим заново.
     return RedirectResponse("/login", status_code=303)
 
@@ -876,15 +881,15 @@ def add_user(request: Request, admin: Admin, login: Annotated[str, Form()]):
     login = auth.normalize_email(login)
     if not login or len(login) > 100 or any(c.isspace() for c in login):
         return _settings_page(request, admin, error="Логин — без пробелов, до 100 символов.",
-                              status_code=422)
+                              status_code=422, tab="users")
     with pool.connection() as conn:
         if conn.execute("SELECT 1 FROM users WHERE email = %s", (login,)).fetchone():
             return _settings_page(request, admin, error=f"Пользователь {login} уже есть.",
-                                  status_code=422)
+                                  status_code=422, tab="users")
         password = auth.generate_password()
         auth.set_password(conn, login, password)
     return _settings_page(request, admin, notice=f"Создан пользователь {login}. Пароль: {password} "
-                          "— передайте его, больше он нигде не показывается.")
+                          "— передайте его, больше он нигде не показывается.", tab="users")
 
 
 @app.post("/settings/users/{user_id}/reset", dependencies=[Depends(same_origin)])
@@ -898,11 +903,13 @@ def reset_password(request: Request, admin: Admin, user_id: int):
     if user_id == admin:
         return RedirectResponse("/login", status_code=303)
     return _settings_page(request, admin, notice=f"Новый пароль для {row[0]}: {password} — "
-                          "передайте его, больше он нигде не показывается. Старые входы сброшены.")
+                          "передайте его, больше он нигде не показывается. Старые входы сброшены.",
+                          tab="users")
 
 
 @app.post("/settings/ai", dependencies=[Depends(same_origin)])
 def save_ai(
+    request: Request,
     user: Admin,
     provider: Annotated[str, Form()],
     model: Annotated[str, Form()] = "",
@@ -917,12 +924,38 @@ def save_ai(
             except secrets_box.NoSecretKey:
                 raise HTTPException(503, "На сервере не настроено шифрование ключей") from None
         if provider != "claude_code" and provider not in secrets_box.saved_providers(conn, user):
-            raise HTTPException(422, "Для этого провайдера нужен API-ключ")
+            conn.rollback()
+            return _settings_page(request, user, error="Для этого способа нужен API-ключ.",
+                                  status_code=422, tab="ai")
+        # У Claude Code модель не выбирается: берётся модель по умолчанию.
+        chosen = None if provider == "claude_code" else (model.strip()[:100] or None)
         conn.execute(
             "UPDATE users SET ai_provider = %s, ai_model = %s WHERE id = %s",
-            (provider, model.strip()[:100] or None, user),
+            (provider, chosen, user),
         )
-    return RedirectResponse("/settings?saved=ai", status_code=303)
+    return RedirectResponse("/settings?saved=ai#ai", status_code=303)
+
+
+_models_cache: dict[tuple[int, str], tuple[float, list]] = {}
+
+
+@app.get("/settings/ai/models")
+def ai_models(user: Admin, provider: str):
+    if provider not in research.MODELS:
+        raise HTTPException(404, "нет такого провайдера")
+    cached = _models_cache.get((user, provider))
+    if cached and cached[0] > time.monotonic():
+        return cached[1]
+    with pool.connection() as conn:
+        key = secrets_box.user_key(conn, user, provider)
+    if not key:
+        return []
+    try:
+        models = research.provider_models(provider, key)
+    except (httpx.HTTPError, KeyError, ValueError):
+        return []
+    _models_cache[(user, provider)] = (time.monotonic() + 3600, models)
+    return models
 
 
 @app.post("/settings/company", dependencies=[Depends(same_origin)])
@@ -934,7 +967,7 @@ def save_company(user: Admin, company_bin: Annotated[str, Form()] = ""):
         conn.execute(
             "UPDATE users SET company_bin = %s WHERE id = %s", (company_bin or None, user)
         )
-    return RedirectResponse("/settings?saved=bin", status_code=303)
+    return RedirectResponse("/settings?saved=bin#company", status_code=303)
 
 
 @app.post("/settings/telegram/link", dependencies=[Depends(same_origin)])

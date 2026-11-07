@@ -35,6 +35,30 @@ PROVIDERS = {
     "openai": "OpenAI API (свой ключ)",
 }
 DEFAULT_MODELS = {"claude_code": "sonnet", "anthropic": "claude-sonnet-5-5", "openai": "gpt-5"}
+# Список в настройках, пока ключа нет; с ключом — список подтягивается у провайдера.
+MODELS = {
+    "anthropic": [("claude-sonnet-5-5", "Claude Sonnet 5.5 — оптимально"),
+                  ("claude-opus-5-5", "Claude Opus 5.5 — точнее, дороже"),
+                  ("claude-haiku-5-5", "Claude Haiku 5.5 — быстрее, дешевле")],
+    "openai": [("gpt-5", "GPT-5"), ("gpt-5-mini", "GPT-5 mini — дешевле")],
+}
+
+
+def provider_models(provider: str, key: str) -> list[tuple[str, str]]:
+    """Модели, доступные по ключу: GET /v1/models у Anthropic или OpenAI."""
+    with httpx.Client(timeout=httpx.Timeout(15, connect=5)) as http:
+        if provider == "anthropic":
+            response = http.get("https://api.anthropic.com/v1/models", params={"limit": 100},
+                                headers={"x-api-key": key, "anthropic-version": "2023-06-01"})
+            response.raise_for_status()
+            return [(m["id"], m.get("display_name") or m["id"]) for m in response.json().get("data", [])]
+        response = http.get("https://api.openai.com/v1/models",
+                            headers={"Authorization": f"Bearer {key}"})
+        response.raise_for_status()
+        ids = sorted((m["id"] for m in response.json().get("data", [])
+                      if m["id"].startswith(("gpt-", "o")) and "audio" not in m["id"]
+                      and "realtime" not in m["id"] and "tts" not in m["id"]), reverse=True)
+        return [(i, i) for i in ids]
 SPEC_LIMIT = 8000
 CLAUDE_TIMEOUT = 15 * 60
 STALE_AFTER = "30 minutes"

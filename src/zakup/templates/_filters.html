@@ -108,8 +108,8 @@
 {% macro filter_form() %}
 {% set lots = scope == "lots" %}
 <nav class="scope-tabs">
-  <a href="/lots?{{ query }}" class="{{ 'on' if lots }}">Поиск лотов</a>
   <a href="/announcements?{{ query }}" class="{{ '' if lots else 'on' }}">Поиск объявлений</a>
+  <a href="/lots?{{ query }}" class="{{ 'on' if lots }}">Поиск лотов</a>
 </nav>
 <button type="button" class="filter-open" data-filter-open><span class="filter-title">⚙ Фильтр и подписка</span>{% if f.describe() %}<span class="filter-sum">{{ f.describe()|truncate(90) }}</span>{% endif %}</button>
 <form method="get" action="/{{ scope }}" class="filters-panel" id="filters" aria-label="Фильтр">
