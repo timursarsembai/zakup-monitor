@@ -287,3 +287,13 @@ def test_lot_page_research_section_and_start(client, conn, monkeypatch):
     monkeypatch.setenv("ZAKUP_SECRET_KEY", "")
     bad = client.post("/settings/ai", data={"provider": "openai"}, headers=ORIGIN)
     assert bad.status_code == 422
+
+
+def test_links_keep_default_filter(client):
+    _login(client)
+    page = client.get("/lots").text
+    # Ссылка на поиск объявлений несёт значения по умолчанию, а не пустой фильтр.
+    link = page.split('href="/announcements?', 1)[1].split('"', 1)[0].replace("&amp;", "&")
+    assert "status=240" in link and "advance_min=30" in link and "deadline_mode=rule" in link
+    announcements = client.get("/announcements?" + link).text
+    assert 'value="240" checked' in announcements and 'value="75" checked' in announcements

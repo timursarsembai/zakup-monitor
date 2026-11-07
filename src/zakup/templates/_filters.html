@@ -15,7 +15,7 @@
   .filters-panel { border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin: 12px 0; }
   .fgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px 20px; }
   .fl { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
-  .fgrid input:not([type=checkbox]), .fgrid select { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); font: inherit; font-size: 14px; width: 100%; min-width: 0; }
+  .fgrid input:not([type=checkbox]):not([type=range]), .fgrid select { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); font: inherit; font-size: 14px; width: 100%; min-width: 0; }
   .pair { display: flex; gap: 6px; }
   .check { display: flex; gap: 8px; align-items: flex-start; margin: 4px 0; color: var(--fg); font-size: 14px; }
   details.multi { position: relative; }
@@ -47,7 +47,7 @@
   .sortbar { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; margin: 14px 0 8px; }
   .sortbar select { padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); font: inherit; }
   @media (max-width: 1100px) {
-    .flayout { grid-template-columns: 1fr; }
+    .flayout { grid-template-columns: minmax(0, 1fr); }
     .subscribe { padding: 14px 0 0; border-left: 0; border-top: 1px solid var(--line); }
   }
   .filter-open, .sheet-head { display: none; }
@@ -59,7 +59,32 @@
     .filters-panel.open { display: block; position: fixed; inset: 0; z-index: 50; margin: 0; border: 0; border-radius: 0; overflow-y: auto; background: var(--bg); padding: 0 14px 0; }
     .sheet-head { display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 2; background: var(--bg); padding: 12px 0; border-bottom: 1px solid var(--line); margin-bottom: 12px; font-size: 17px; }
     .sheet-head button { border: 0; font-size: 18px; }
-    .fgrid { grid-template-columns: 1fr; }
+    .fgrid { grid-template-columns: minmax(0, 1fr); gap: 18px; }
+    .filters-panel.open { overflow-x: hidden; }
+    .pair > * { flex: 1 1 0; min-width: 0; }
+    .fl { font-size: 15px; margin-bottom: 6px; }
+    /* 16px и выше: iPhone не увеличивает страницу при фокусе на поле. */
+    .fgrid input:not([type=checkbox]):not([type=range]), .fgrid select, details.multi summary,
+    .subscribe input, .subscribe select { font-size: 17px; min-height: 48px; padding: 10px 12px; border-radius: 10px; }
+    details.multi summary { padding-right: 34px; line-height: 26px; }
+    details.multi summary::after { top: 12px; right: 12px; }
+    .pair { gap: 10px; }
+    .check { font-size: 17px; padding: 6px 0; gap: 12px; }
+    .check input { width: 22px; height: 22px; }
+    .multi-list { padding: 4px 12px; }
+    .multi-list h4 { font-size: 14px; margin: 12px 0 4px; }
+    .range2 { height: 40px; }
+    .range2 input[type=range] { top: 12px; }
+    .range2 .fill { top: 18px; }
+    .presets { gap: 8px; margin-top: 6px; }
+    .presets button { font-size: 15px; padding: 8px 14px; }
+    .panel-actions { gap: 12px; padding: 14px 0 calc(14px + env(safe-area-inset-bottom)); }
+    .panel-actions .primary, .panel-actions button, .subscribe .primary { min-height: 50px; font-size: 17px; border-radius: 10px; }
+    .panel-actions a { font-size: 17px; padding: 0 6px; }
+    .subscribe { gap: 12px; padding-bottom: 24px; }
+    .subscribe b { font-size: 18px; }
+    .sheet-head { font-size: 20px; padding: 14px 0; }
+    .sheet-head button { font-size: 24px; min-width: 44px; min-height: 44px; }
     .multi-list { position: static; min-width: 0; box-shadow: none; max-height: none; }
     .panel-actions { position: sticky; bottom: 0; background: var(--bg); padding: 12px 0; }
     .panel-actions .primary { flex: 1; padding: 10px; }
@@ -241,10 +266,9 @@
 </div>
 <script>
   document.querySelector("[data-sort]").addEventListener("change", (event) => {
-    const url = new URL(location.href);
+    const url = new URL(location.pathname + "?{{ query }}", location.origin);
     url.searchParams.set("sort", event.target.value);
-    url.searchParams.set("applied", "1");
-    url.searchParams.delete("page");
+    {% if hidden %}url.searchParams.set("hidden", "1");{% endif %}
     location.href = url;
   });
 </script>

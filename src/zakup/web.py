@@ -204,8 +204,6 @@ def _user_groups(conn, user: int) -> list[tuple[str, str]]:
 
 def _search_context(request: Request, current: Filters, scope: str, total: int, page: int,
                     form: dict, now: datetime) -> dict:
-    query = {k: v for k, v in form.items() if k not in ("page", "hidden")}
-    query["applied"] = ["1"]
     today = now.astimezone(PORTAL_TZ).date()
     return {
         "scope": scope,
@@ -226,7 +224,9 @@ def _search_context(request: Request, current: Filters, scope: str, total: int, 
         "years": fin_years(today),
         "sorts": SORTS,
         "disable_options": DISABLE_PERSON,
-        "query": urlencode(query, doseq=True),
+        # Ссылки на другую страницу поиска, сортировку и страницы — из самого фильтра,
+        # а не из адреса: на первом заходе адрес пустой, а действуют значения по умолчанию.
+        "query": urlsplit(current.to_query(scope)).query,
         "here": request.url.path + (f"?{request.url.query}" if request.url.query else ""),
     }
 
