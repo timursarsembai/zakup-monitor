@@ -1,11 +1,12 @@
 import argparse
+import getpass
 import json
 import logging
 import os
 import sys
 from datetime import date, datetime, time, timedelta
 
-from zakup import db, matcher, notify, sync
+from zakup import auth, db, matcher, notify, sync
 from zakup.goszakup import ENTITIES, PORTAL_TZ, Client
 
 # Сколько истории грузить, если start-from не запускали.
@@ -26,6 +27,8 @@ def main() -> int:
     again.add_argument("--max-pages", type=int, default=20)
     refresh = sub.add_parser("refresh", help="дочитать карточки открытых объявлений (заказчик)")
     refresh.add_argument("--limit", type=int, default=500)
+    passwd = sub.add_parser("set-password", help="задать пароль (создаст пользователя, если нет)")
+    passwd.add_argument("email")
     user = sub.add_parser("add-user", help="завести пользователя")
     user.add_argument("email")
     user.add_argument("--telegram-chat-id")
@@ -38,6 +41,8 @@ def main() -> int:
         with db.connect(os.environ["DATABASE_URL"]) as conn:
             db.migrate(conn)
         return 0
+    if args.command == "set-password":
+        return _set_password(args.email)
     if args.command == "add-user":
         with db.connect(os.environ["DATABASE_URL"]) as conn:
             row = conn.execute(
@@ -71,6 +76,24 @@ def main() -> int:
             return _sync(conn, client, args.max_pages)
     finally:
         client.close()
+
+
+def _set_password(email: str) -> int:
+    if sys.stdin.isatty():
+        password = getpass.getpass("Пароль: ")
+        if password != getpass.getpass("Ещё раз: "):
+            print("Пароли не совпали.", file=sys.stderr)
+            return 1
+    else:
+        # Из скрипта: пароль первой строкой stdin, не аргументом (виден в ps).
+        password = sys.stdin.readline().rstrip("\n")
+    if len(password) < auth.MIN_PASSWORD_LENGTH:
+        print(f"Нужно не меньше {auth.MIN_PASSWORD_LENGTH} символов.", file=sys.stderr)
+        return 1
+    with db.connect(os.environ["DATABASE_URL"]) as conn:
+        user_id = auth.set_password(conn, email, password)
+    print(f"Пароль задан, пользователь {user_id}. Старые сессии закрыты.")
+    return 0
 
 
 def _probe(client: Client) -> int:

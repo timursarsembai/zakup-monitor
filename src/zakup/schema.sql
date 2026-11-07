@@ -78,6 +78,30 @@ CREATE TABLE IF NOT EXISTS users (
     created_at       timestamptz NOT NULL DEFAULT now()
 );
 
+ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash text;
+
+-- Сессии входа. В cookie лежит случайный токен, в базе — только его sha256:
+-- утечка дампа не даёт войти под пользователем.
+CREATE TABLE IF NOT EXISTS sessions (
+    token_hash bytea PRIMARY KEY,
+    user_id    bigint NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    expires_at timestamptz NOT NULL,
+    user_agent text
+);
+CREATE INDEX IF NOT EXISTS sessions_user_id ON sessions (user_id);
+
+-- Попытки входа, для ограничения подбора пароля.
+CREATE TABLE IF NOT EXISTS login_attempts (
+    id         bigserial PRIMARY KEY,
+    email      text NOT NULL,
+    ip         text,
+    ok         boolean NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS login_attempts_email ON login_attempts (email, created_at);
+CREATE INDEX IF NOT EXISTS login_attempts_ip ON login_attempts (ip, created_at);
+
 CREATE TABLE IF NOT EXISTS subscriptions (
     id            bigserial PRIMARY KEY,
     user_id       bigint NOT NULL REFERENCES users (id) ON DELETE CASCADE,

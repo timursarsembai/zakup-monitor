@@ -24,15 +24,24 @@
   td.num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
   .muted { color: var(--muted); font-size: 13px; }
   .table-wrap { overflow-x: auto; }
+  header { flex-wrap: wrap; }
+  form.logout { margin-left: auto; display: flex; gap: 10px; align-items: center; }
+  {% block style %}{% endblock %}
 </style>
 </head>
 <body>
+{% block header %}
 <header>
   <b>zakup</b>
   <a href="/">Поиск</a>
   <a href="/subscriptions">Подписки</a>
   <a href="/matches">Совпадения</a>
+  <form class="logout" method="post" action="/logout">
+    <span class="muted">{{ request.state.email }}</span>
+    <button>Выйти</button>
+  </form>
 </header>
-<main>{% block main %}{% endblock %}</main>
+{% endblock %}
+<main{% block main_class %}{% endblock %}>{% block main %}{% endblock %}</main>
 </body>
 </html>

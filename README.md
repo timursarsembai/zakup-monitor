@@ -13,8 +13,9 @@
   подписки и отправляет совпадения в Telegram. Заодно перечитывает открытые
   объявления, чтобы обновлять статусы и сроки.
 - **web** — FastAPI с серверными шаблонами: поиск по лотам (полнотекстовый,
-  русская морфология), подписки и найденные совпадения. Вход по HTTP Basic,
-  пока пользователь один.
+  русская морфология), подписки и найденные совпадения. Вход по e-mail и
+  паролю (scrypt), сессия в cookie на 30 дней, подбор пароля ограничен.
+  Регистрации нет: пользователей заводит `zakup set-password <email>`.
 - **postgres** — всё хранится здесь. Запись из API целиком лежит в `raw jsonb`,
   а нужные поля разложены по колонкам. Поэтому новые поля можно добавить без
   повторной загрузки.
@@ -31,21 +32,21 @@
 в `~/.config/infisical/zakup.env`.
 
 ```bash
-cp .env.example .env              # пароль Postgres, вход в веб
+cp .env.example .env              # пароль Postgres
 ./scripts/fetch-secrets.sh        # GOSZAKUP_TOKEN и прочее из Infisical
 docker compose build
 docker compose run --rm --entrypoint zakup worker probe          # токен работает? какие поля?
 docker compose run --rm --entrypoint zakup worker migrate
 docker compose run --rm --entrypoint zakup worker start-from 2026-10-01   # необязательно
 docker compose up -d
+docker compose exec -it worker zakup set-password you@mail    # спросит пароль
 ```
 
 Веб-интерфейс открывается на `127.0.0.1:8096`. Наружу его выставлять через Nginx
 Proxy Manager.
 
 Telegram: в `.env` указать бота, затем завести себя командой
-`zakup add-user you@mail --telegram-chat-id 123`. E-mail должен совпадать с
-`ZAKUP_WEB_USER`.
+`zakup add-user you@mail --telegram-chat-id 123` (тот же e-mail, что для входа).
 
 ## Подписки
 

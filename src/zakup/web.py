@@ -1,26 +1,26 @@
 """Веб-интерфейс: поиск по лотам, подписки, совпадения.
 
-Пока один владелец за HTTP Basic. Для сервиса на многих пользователей сюда встанет
-нормальный вход (ссылка на почту или Telegram), таблица users уже готова.
+Вход по e-mail и паролю, сессия в cookie. Регистрации пока нет: пользователей
+заводит `zakup set-password`.
 """
 
 import os
-import secrets
 from contextlib import asynccontextmanager
 from decimal import Decimal, InvalidOperation
 from importlib.resources import files
 from typing import Annotated
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
 from psycopg_pool import ConnectionPool
 
+from zakup import auth
 from zakup.matcher import PORTAL_ANNOUNCEMENT_URL
 
 PAGE_SIZE = 50
+SESSION_COOKIE = "zakup_session"
 
 pool = ConnectionPool(os.environ.get("DATABASE_URL", ""), min_size=1, max_size=5, open=False)
 templates = Jinja2Templates(directory=str(files("zakup").joinpath("templates")))
@@ -36,35 +36,95 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
-security = HTTPBasic()
 
 
-def current_user(credentials: Annotated[HTTPBasicCredentials, Depends(security)]) -> int:
-    user = os.environ.get("ZAKUP_WEB_USER", "")
-    password = os.environ.get("ZAKUP_WEB_PASSWORD", "")
-    user_ok = secrets.compare_digest(credentials.username.encode(), user.encode())
-    password_ok = secrets.compare_digest(credentials.password.encode(), password.encode())
-    if not (password and user_ok and password_ok):
-        raise HTTPException(401, headers={"WWW-Authenticate": "Basic"})
+class LoginRequired(Exception):
+    pass
+
+
+@app.exception_handler(LoginRequired)
+def _to_login(request: Request, _: LoginRequired):
+    target = request.url.path + (f"?{request.url.query}" if request.url.query else "")
+    return RedirectResponse(f"/login?next={quote(target)}", status_code=303)
+
+
+def current_user(request: Request) -> int:
     with pool.connection() as conn:
-        row = conn.execute(
-            "SELECT id FROM users WHERE email = %s", (user,)
-        ).fetchone() or conn.execute(
-            """INSERT INTO users (email) VALUES (%s)
-               ON CONFLICT (email) DO UPDATE SET email = excluded.email RETURNING id""",
-            (user,),
-        ).fetchone()
-    return row[0]
+        user = auth.user_by_session(conn, request.cookies.get(SESSION_COOKIE))
+    if user is None:
+        raise LoginRequired()
+    request.state.email = user[1]
+    return user[0]
 
 
 User = Annotated[int, Depends(current_user)]
 
 
 def same_origin(request: Request) -> None:
-    # Браузер сам подставляет Basic-пароль, поэтому чужой сайт мог бы отправить форму за нас.
+    # SameSite=Lax уже не пускает cookie с чужих сайтов, это второй рубеж.
     origin = request.headers.get("origin") or request.headers.get("referer")
     if not origin or urlsplit(origin).netloc != request.headers.get("host"):
         raise HTTPException(403, "cross-origin request")
+
+
+def _safe_next(target: str | None) -> str:
+    # Только пути этого сайта: иначе ссылка на вход уводила бы на чужой домен.
+    if not target or not target.startswith("/") or target.startswith("//") or "\\" in target:
+        return "/"
+    return target
+
+
+@app.get("/login")
+def login_page(request: Request, next: str = "/"):
+    with pool.connection() as conn:
+        if auth.user_by_session(conn, request.cookies.get(SESSION_COOKIE)):
+            return RedirectResponse(_safe_next(next), status_code=303)
+    return templates.TemplateResponse(
+        request, "login.html", {"next": _safe_next(next), "email": "", "error": None}
+    )
+
+
+@app.post("/login", dependencies=[Depends(same_origin)])
+def login(
+    request: Request,
+    email: Annotated[str, Form()],
+    password: Annotated[str, Form()],
+    next: Annotated[str, Form()] = "/",
+):
+    ip = request.client.host if request.client else None
+    email_norm = auth.normalize_email(email)
+    with pool.connection() as conn:
+        if auth.too_many_failures(conn, email_norm, ip):
+            error, token = "Слишком много неудачных попыток. Попробуйте через 15 минут.", None
+        else:
+            token = auth.login(conn, email_norm, password, ip, request.headers.get("user-agent"))
+            error = None if token else "Неверный e-mail или пароль."
+    if token is None:
+        return templates.TemplateResponse(
+            request,
+            "login.html",
+            {"next": _safe_next(next), "email": email, "error": error},
+            status_code=429 if error.startswith("Слишком") else 401,
+        )
+    response = RedirectResponse(_safe_next(next), status_code=303)
+    response.set_cookie(
+        SESSION_COOKIE,
+        token,
+        max_age=int(auth.SESSION_TTL.total_seconds()),
+        httponly=True,
+        secure=True,
+        samesite="lax",
+    )
+    return response
+
+
+@app.post("/logout", dependencies=[Depends(same_origin)])
+def logout(request: Request):
+    with pool.connection() as conn:
+        auth.logout(conn, request.cookies.get(SESSION_COOKIE))
+    response = RedirectResponse("/login", status_code=303)
+    response.delete_cookie(SESSION_COOKIE, httponly=True, secure=True, samesite="lax")
+    return response
 
 
 def _amount(value: str | None) -> Decimal | None:
