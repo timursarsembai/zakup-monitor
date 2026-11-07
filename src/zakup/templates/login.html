@@ -4,7 +4,8 @@
 {% block style %}
   body { min-height: 100vh; display: grid; place-items: center; }
   main.auth { width: 100%; max-width: 380px; padding: 24px 16px; }
-  .brand { font-size: 22px; font-weight: 600; margin: 0 0 4px; }
+  .brand { display: flex; align-items: center; gap: 10px; font-size: 26px; font-weight: 800; letter-spacing: -0.02em; margin: 0 0 4px; }
+  .brand img { width: 40px; height: 40px; }
   .lead { color: var(--muted); margin: 0 0 24px; }
   .card { border: 1px solid var(--line); border-radius: 12px; padding: 24px; }
   .field { display: grid; gap: 6px; margin-bottom: 16px; }
@@ -22,7 +23,7 @@
 {% endblock %}
 {% block main_class %} class="auth"{% endblock %}
 {% block main %}
-<p class="brand">zakup</p>
+<p class="brand"><img src="/static/logo-mark.png" alt="">Zakup</p>
 <p class="lead">Мониторинг госзакупок Казахстана</p>
 <form class="card" method="post" action="/login">
   {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}

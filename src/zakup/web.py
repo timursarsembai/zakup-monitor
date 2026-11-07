@@ -15,6 +15,7 @@ from urllib.parse import parse_qs, quote, urlencode, urlsplit
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
@@ -71,6 +72,7 @@ def _time_left(end: datetime | None) -> str:
 
 templates.env.globals["time_left"] = _time_left
 templates.env.globals["mark_statuses"] = marks.STATUSES
+templates.env.globals["site_url"] = SITE_URL
 
 
 @asynccontextmanager
@@ -81,6 +83,7 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+app.mount("/static", StaticFiles(directory=str(files("zakup").joinpath("static"))), name="static")
 
 
 class LoginRequired(Exception):

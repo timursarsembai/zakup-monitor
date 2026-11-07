@@ -1,8 +1,10 @@
 {% extends "base.html" %}
 {% from "_lot_card.html" import lot_styles, lot_card, lot_winners, lot_scripts with context %}
+{% from "_share.html" import share_buttons, share_styles, share_script with context %}
 {% block title %}№ {{ a.numberAnno or a.id }}{% endblock %}
 {% block style %}
 {{ lot_styles() }}
+{{ share_styles() }}
 {% endblock %}
 {% block main %}
 {% if refresh_error %}<p class="notice">{{ refresh_error }}</p>{% endif %}
@@ -14,6 +16,7 @@
 </div>
 <div class="muted">Объявление № {{ a.numberAnno or a.id }}</div>
 <h1>{{ a.nameRu }}</h1>
+{{ share_buttons("/a/" ~ a.id, portal_url, a.nameRu) }}
 
 <div class="head">
   <dl class="facts">
@@ -130,6 +133,7 @@
     link.addEventListener("click", () => showTab(link.dataset.goto));
   }
 {{ lot_scripts() }}
+{{ share_script() }}
   const cd = document.querySelector(".countdown");
   if (cd) {
     const end = new Date(cd.dataset.end);

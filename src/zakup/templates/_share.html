@@ -1,0 +1,27 @@
+{# Кнопки «Поделиться»: ссылка на наш сайт и на источник — портал госзакупок. #}
+{% macro share_buttons(path, portal_url, title) %}
+<div class="share">
+  <button type="button" data-share="{{ site_url }}{{ path }}" data-share-title="{{ title }}">↗ Поделиться</button>
+  <button type="button" data-share="{{ portal_url }}" data-share-title="{{ title }}">↗ Ссылка на портал</button>
+  <span class="muted" data-share-done hidden>Ссылка скопирована</span>
+</div>
+{% endmacro %}
+
+{% macro share_styles() %}
+  .share { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0; }
+{% endmacro %}
+
+{% macro share_script() %}
+  // На телефоне — системное меню «Поделиться», на компьютере — копирование ссылки.
+  for (const button of document.querySelectorAll("[data-share]")) {
+    button.addEventListener("click", async () => {
+      const url = button.dataset.share, title = button.dataset.shareTitle;
+      if (navigator.share) {
+        try { await navigator.share({ title, url }); return; } catch (e) { if (e.name === "AbortError") return; }
+      }
+      try { await navigator.clipboard.writeText(url); } catch (e) { prompt("Скопируйте ссылку:", url); return; }
+      const done = button.parentElement.querySelector("[data-share-done]");
+      done.hidden = false; setTimeout(() => { done.hidden = true; }, 2500);
+    });
+  }
+{% endmacro %}

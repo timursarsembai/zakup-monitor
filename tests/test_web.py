@@ -297,3 +297,16 @@ def test_links_keep_default_filter(client):
     assert "status=240" in link and "advance_min=30" in link and "deadline_mode=rule" in link
     announcements = client.get("/announcements?" + link).text
     assert 'value="240" checked' in announcements and 'value="75" checked' in announcements
+
+
+def test_logo_and_share_buttons(client, conn):
+    assert client.get("/static/logo-mark.png").status_code == 200
+    db.upsert_announcement(conn, {"id": 501, "name_ru": "Стулья", "end_date": "2099-01-01 09:00:00"})
+    details.save(conn, {"id": 501, "nameRu": "Стулья", "endDate": "2099-01-01 09:00:00",
+                        "Lots": [{"id": 5011, "trdBuyId": 501, "nameRu": "Стул", "amount": 1}]})
+    conn.commit()
+    _login(client)
+    page = client.get("/a/501").text
+    assert 'data-share="https://zakup.sarsembai.com/a/501"' in page
+    assert 'data-share="https://goszakup.gov.kz/ru/announce/index/501"' in page
+    assert 'data-share="https://zakup.sarsembai.com/lots/5011"' in client.get("/lots/5011").text
