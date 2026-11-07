@@ -31,13 +31,17 @@
   .scope-tabs { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
   .scope-tabs a { padding: 6px 14px; border-radius: 999px; border: 1px solid var(--line); color: inherit; }
   .scope-tabs a.on { background: var(--accent); color: #fff; border-color: transparent; font-weight: 600; }
-  .range2 { position: relative; height: 28px; }
-  .range2 input[type=range] { position: absolute; left: 0; right: 0; top: 6px; width: 100%; margin: 0; pointer-events: none; background: none; -webkit-appearance: none; appearance: none; }
-  .range2 input[type=range]::-webkit-slider-runnable-track { height: 4px; background: var(--line); border-radius: 2px; }
-  .range2 input[type=range]::-moz-range-track { height: 4px; background: var(--line); border-radius: 2px; }
-  .range2 input[type=range]::-webkit-slider-thumb { pointer-events: auto; -webkit-appearance: none; width: 18px; height: 18px; margin-top: -7px; border-radius: 50%; background: var(--accent); border: 2px solid var(--bg); cursor: pointer; position: relative; z-index: 2; }
+  /* Два ползунка поверх одной дорожки. Дорожку и закрашенный отрезок рисуем сами,
+     по центру по высоте: у браузеров своя дорожка сидит на разной высоте. */
+  .range2 { --thumb: 18; position: relative; height: 32px; }
+  .range2::before, .range2 .fill { content: ""; position: absolute; top: 50%; height: 4px; margin-top: -2px; border-radius: 2px; pointer-events: none; }
+  .range2::before { left: 9px; right: 9px; background: var(--line); }
+  .range2 .fill { background: var(--accent); }
+  .range2 input[type=range] { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; padding: 0; border: 0; pointer-events: none; background: none; -webkit-appearance: none; appearance: none; }
+  .range2 input[type=range]::-webkit-slider-runnable-track { height: 4px; background: transparent; border: 0; }
+  .range2 input[type=range]::-moz-range-track { height: 4px; background: transparent; border: 0; }
+  .range2 input[type=range]::-webkit-slider-thumb { pointer-events: auto; -webkit-appearance: none; width: 18px; height: 18px; margin-top: -7px; border-radius: 50%; background: var(--accent); border: 2px solid var(--bg); box-shadow: 0 1px 3px rgb(0 0 0 / 30%); cursor: pointer; position: relative; z-index: 2; }
   .range2 input[type=range]::-moz-range-thumb { pointer-events: auto; width: 16px; height: 16px; border-radius: 50%; background: var(--accent); border: 2px solid var(--bg); cursor: pointer; }
-  .range2 .fill { position: absolute; top: 12px; height: 4px; background: var(--accent); border-radius: 2px; pointer-events: none; }
   .presets { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
   .presets button { padding: 2px 8px; font-size: 12px; border-radius: 999px; }
   .flayout { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 20px; }
@@ -73,9 +77,10 @@
     .check input { width: 22px; height: 22px; }
     .multi-list { padding: 4px 12px; }
     .multi-list h4 { font-size: 14px; margin: 12px 0 4px; }
-    .range2 { height: 40px; }
-    .range2 input[type=range] { top: 12px; }
-    .range2 .fill { top: 18px; }
+    .range2 { --thumb: 26; height: 44px; }
+    .range2 input[type=range]::-webkit-slider-thumb { width: 26px; height: 26px; margin-top: -11px; }
+    .range2 input[type=range]::-moz-range-thumb { width: 22px; height: 22px; }
+    .range2::before { left: 13px; right: 13px; }
     .presets { gap: 8px; margin-top: 6px; }
     .presets button { font-size: 15px; padding: 8px 14px; }
     .panel-actions { gap: 12px; padding: 14px 0 calc(14px + env(safe-area-inset-bottom)); }
@@ -236,8 +241,10 @@
       if (+low.value > +high.value) (moved === low ? high : low).value = moved.value;
       const a = +low.value, b = +high.value;
       label.textContent = a === 0 && b === 100 ? "любой" : b === 0 ? "без аванса" : b === 100 ? `от ${a}%` : a === 0 ? `до ${b}%` : `${a}–${b}%`;
-      fill.style.left = `calc(${a}% + ${9 - a * 0.18}px)`;
-      fill.style.width = `calc(${b - a}% - ${(b - a) * 0.18}px)`;
+      // Центр бегунка: a% ширины + полбегунка − a% от ширины бегунка.
+      const thumb = parseFloat(getComputedStyle(box.querySelector(".range2")).getPropertyValue("--thumb")) || 18;
+      fill.style.left = `calc(${a}% + ${thumb / 2 - a * thumb / 100}px)`;
+      fill.style.width = `calc(${b - a}% - ${(b - a) * thumb / 100}px)`;
     };
     low.addEventListener("input", () => draw(low));
     high.addEventListener("input", () => draw(high));
