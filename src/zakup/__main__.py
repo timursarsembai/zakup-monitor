@@ -5,7 +5,8 @@ import logging
 import os
 import sys
 import time
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, timedelta
+from datetime import time as day_time
 
 from zakup import auth, bot, db, details, marks, matcher, notify, results, sync
 from zakup.goszakup import ENTITIES, PORTAL_TZ, Client
@@ -30,6 +31,8 @@ def main() -> int:
         "details", help="дочитать подробности открытых объявлений и итоги отмеченных лотов"
     )
     more.add_argument("--limit", type=int, default=2000)
+    more.add_argument("--part", choices=["open", "finished", "all"], default="all",
+                      help="open — открытые (быстрый круг), finished — завершённые и протоколы")
     sub.add_parser("bot", help="Telegram-бот: привязка чатов (работает постоянно)")
     specs_cmd = sub.add_parser("specs", help="заранее разобрать техспецификации открытых лотов")
     specs_cmd.add_argument("--limit", type=int, default=200)
@@ -93,7 +96,7 @@ def main() -> int:
             if args.command == "rescan":
                 return _rescan(conn, client, args.days, args.max_pages)
             if args.command == "details":
-                return _details(conn, client, args.limit)
+                return _details(conn, client, args.limit, args.part)
             return _sync(conn, client, args.max_pages)
     finally:
         client.close()
@@ -141,7 +144,7 @@ def _probe(client: Client) -> int:
 
 
 def _start_from(conn, client: Client, since: date) -> int:
-    since_at = datetime.combine(since, time.min, PORTAL_TZ)
+    since_at = datetime.combine(since, day_time.min, PORTAL_TZ)
     first_announcement = sync.find_start(client, "announcements", sync.published_since(since_at))
     if first_announcement is None:
         print("Объявлений после этой даты нет.", file=sys.stderr)
@@ -177,6 +180,9 @@ def _sync(conn, client: Client, max_pages: int) -> int:
     return 0
 
 
+RESCAN_LOCK = 7_401
+
+
 def _rescan(conn, client: Client, days: int, max_pages: int) -> int:
     # Граница по id: самое старое объявление, опубликованное за эти дни. Черновики,
     # созданные раньше и опубликованные позже, сюда не попадут, но таких единицы.
@@ -190,6 +196,10 @@ def _rescan(conn, client: Client, days: int, max_pages: int) -> int:
     lot_floor = conn.execute(
         "SELECT min(id) FROM lots WHERE trd_buy_id >= %s", (floor,)
     ).fetchone()[0]
+    # Быстрый и медленный круги перечитывают одно и то же: по очереди, не вместе.
+    if not conn.execute("SELECT pg_try_advisory_lock(%s)", (RESCAN_LOCK,)).fetchone()[0]:
+        print("rescan: уже идёт в другом процессе")
+        return 0
     try:
         saved = sync.rescan(conn, client, "announcements", floor, max_pages)
         print(f"announcements rescanned: {saved}")
@@ -207,14 +217,16 @@ def _rescan(conn, client: Client, days: int, max_pages: int) -> int:
 PROTOCOLS_PER_RUN = 300
 
 
-def _details(conn, client: Client, limit: int) -> int:
+def _details(conn, client: Client, limit: int, part: str = "all") -> int:
     try:
-        print(f"details: {details.refresh(conn, client, limit)}, "
-              f"results checked: {results.follow(conn, client)}, "
-              f"announced: {marks.announce_results(conn)}")
-        print(f"finished details: {details.refresh_finished(conn, client, limit)}, "
-              f"protocols: {results.parse_pending(conn, PROTOCOLS_PER_RUN)}")
-        _match_and_deliver(conn)
+        if part in ("open", "all"):
+            print(f"details: {details.refresh(conn, client, limit)}, "
+                  f"results checked: {results.follow(conn, client)}, "
+                  f"announced: {marks.announce_results(conn)}")
+            _match_and_deliver(conn)
+        if part in ("finished", "all"):
+            print(f"finished details: {details.refresh_finished(conn, client, limit)}, "
+                  f"protocols: {results.parse_pending(conn, PROTOCOLS_PER_RUN)}")
     except Exception as error:
         # Only the type: database errors can quote the connection string.
         notify.send(f"zakup: подробности объявлений упали с ошибкой {type(error).__name__}.")

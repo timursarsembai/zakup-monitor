@@ -44,13 +44,29 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    # Каждые 10 минут: новое сверху, кусок повторного прохода по 30 дням
-    # (поздние публикации и статусы), подробности открытых объявлений
-    # (признаки, места поставки, аванс), подписки и рассылка.
     entrypoint:
       - sh
       - -c
-      - zakup migrate; while true; do zakup sync; zakup rescan; zakup details; sleep 600; done
+      # Быстрый круг — раз в 2 минуты: новые объявления, их подробности (без них не
+      # работают фильтры), совпадения и рассылка. Тяжёлое — в сервисе archive.
+      - zakup migrate; while true; do zakup sync; zakup rescan --days 3 --max-pages 4; zakup details --part open --limit 500; sleep 120; done
+    environment: *app-env
+    mem_limit: 256m
+    logging: *logging
+
+  # Медленный круг — раз в 15 минут: перечитать месяц (поздние публикации,
+  # смена статусов), подробности завершённых и протоколы итогов.
+  archive:
+    image: zakup
+    container_name: zakup-archive
+    restart: unless-stopped
+    init: true
+    depends_on:
+      worker:
+        condition: service_started
+    entrypoint: ["sh", "-c"]
+    command:
+      - while true; do zakup rescan; zakup details --part finished; sleep 900; done
     environment: *app-env
     mem_limit: 256m
     logging: *logging

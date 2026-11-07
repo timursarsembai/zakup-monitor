@@ -404,3 +404,16 @@ def test_spec_shown_from_database_without_portal(client, conn, monkeypatch):
     _login(client)
     page = client.get("/lots/5001").text
     assert "Бумага офисная А4, 80 г/м2" in page and 'data-loaded="1"' in page
+
+
+def test_pagination_and_per_page(client, conn):
+    db.upsert_announcement(conn, {"id": 600, "name_ru": "Много лотов", "end_date": "2099-01-01 09:00:00"})
+    for i in range(25):
+        db.upsert_lot(conn, {"id": 6000 + i, "trd_buy_id": 600, "name_ru": f"Лот {i}", "amount": 1})
+    conn.commit()
+    _login(client)
+    page = client.get("/lots?applied=1&deadline_mode=&per_page=20").text
+    assert 'aria-current="page">1<' in page and "page=2" in page and "per_page=20" in page
+    second = client.get("/lots?applied=1&deadline_mode=&per_page=20&page=2").text
+    assert second.count('href="/lots/60') == 5
+    assert 'value="100"' in page and "Показывать по" in page

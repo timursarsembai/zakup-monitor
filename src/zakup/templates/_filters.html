@@ -96,7 +96,10 @@
     .panel-actions .spacer { display: none; }
     body.sheet-open { overflow: hidden; }
   }
-  .pages { display: flex; gap: 12px; align-items: center; margin: 16px 0; }
+  .pages { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin: 16px 0; }
+  .pages .page { min-width: 34px; padding: 4px 8px; text-align: center; border: 1px solid var(--line); border-radius: 6px; }
+  .pages .page.on { background: var(--accent); color: var(--on-accent); border-color: transparent; font-weight: 600; }
+  .sortbar-controls { display: flex; flex-wrap: wrap; gap: 8px 16px; }
   .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 13px; white-space: nowrap; border: 1px solid var(--line); }
   .badge.hot { background: color-mix(in srgb, #1e9e5a 15%, transparent); border-color: transparent; color: var(--ok); font-weight: 600; }
   .badge.sub { background: color-mix(in srgb, var(--accent) 14%, transparent); border-color: transparent; }
@@ -116,6 +119,7 @@
   <div class="sheet-head"><b>Фильтр</b><button type="button" data-filter-close aria-label="Закрыть">✕</button></div>
   <input type="hidden" name="applied" value="1">
   <input type="hidden" name="sort" value="{{ f.sort }}">
+  {% if per_page != 50 %}<input type="hidden" name="per_page" value="{{ per_page }}">{% endif %}
   <div class="flayout">
   <div class="fmain">
   <div class="fgrid">
@@ -283,27 +287,39 @@
 {% macro sort_bar(found) %}
 <div class="sortbar">
   <div>{{ found }}</div>
-  <label class="muted">Сортировка
-    <select data-sort aria-label="Сортировка">
-      {% for key, name in sorts.items() %}<option value="{{ key }}" {% if f.sort == key %}selected{% endif %}>{{ name }}</option>{% endfor %}
-    </select></label>
+  <div class="sortbar-controls">
+    <label class="muted">Сортировка
+      <select data-param="sort" aria-label="Сортировка">
+        {% for key, name in sorts.items() %}<option value="{{ key }}" {% if f.sort == key %}selected{% endif %}>{{ name }}</option>{% endfor %}
+      </select></label>
+    <label class="muted">Показывать по
+      <select data-param="per_page" aria-label="Сколько строк на странице">
+        {% for n in per_page_options %}<option value="{{ n }}" {% if per_page == n %}selected{% endif %}>{{ n }}</option>{% endfor %}
+      </select></label>
+  </div>
 </div>
 <script>
-  document.querySelector("[data-sort]").addEventListener("change", (event) => {
-    const url = new URL(location.pathname + "?" + {{ query|tojson }}, location.origin);
-    url.searchParams.set("sort", event.target.value);
-    {% if hidden %}url.searchParams.set("hidden", "1");{% endif %}
-    location.href = url;
-  });
+  for (const select of document.querySelectorAll(".sortbar [data-param]")) {
+    select.addEventListener("change", () => {
+      const url = new URL(location.pathname + "?" + {{ query|tojson }}, location.origin);
+      url.searchParams.set(select.dataset.param, select.value);
+      {% if hidden %}url.searchParams.set("hidden", "1");{% endif %}
+      location.href = url;
+    });
+  }
 </script>
 {% endmacro %}
 
 {% macro pager() %}
 {% if pages > 1 %}
-<nav class="pages">
-  {% if page > 1 %}<a href="?{{ query }}&page={{ page - 1 }}{% if hidden %}&hidden=1{% endif %}">← назад</a>{% endif %}
-  <span class="muted">страница {{ page }} из {{ pages }}</span>
-  {% if page < pages %}<a href="?{{ query }}&page={{ page + 1 }}{% if hidden %}&hidden=1{% endif %}">дальше →</a>{% endif %}
+{% set extra = "&hidden=1" if hidden else "" %}
+<nav class="pages" aria-label="Страницы">
+  {% if page > 1 %}<a href="?{{ query }}&page={{ page - 1 }}{{ extra }}" rel="prev">← назад</a>{% endif %}
+  {% for p in range(1, pages + 1) if p == 1 or p == pages or (p - page)|abs <= 2 %}
+    {% if loop.previtem is defined and p - loop.previtem > 1 %}<span class="muted">…</span>{% endif %}
+    {% if p == page %}<span class="page on" aria-current="page">{{ p }}</span>{% else %}<a class="page" href="?{{ query }}&page={{ p }}{{ extra }}">{{ p }}</a>{% endif %}
+  {% endfor %}
+  {% if page < pages %}<a href="?{{ query }}&page={{ page + 1 }}{{ extra }}" rel="next">дальше →</a>{% endif %}
 </nav>
 {% endif %}
 {% endmacro %}

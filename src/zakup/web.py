@@ -258,15 +258,24 @@ def _user_groups(conn, user: int) -> list[tuple[str, str]]:
     ).fetchall()
 
 
+PER_PAGE_OPTIONS = (20, 50, 100)
+
+
+def _per_page(value: int) -> int:
+    return value if value in PER_PAGE_OPTIONS else PAGE_SIZE
+
+
 def _search_context(request: Request, current: Filters, scope: str, total: int, page: int,
-                    form: dict, now: datetime) -> dict:
+                    form: dict, now: datetime, per_page: int = PAGE_SIZE) -> dict:
     today = now.astimezone(PORTAL_TZ).date()
     return {
         "scope": scope,
         "f": current,
         "total": total,
         "page": page,
-        "pages": max((total + PAGE_SIZE - 1) // PAGE_SIZE, 1),
+        "pages": max((total + per_page - 1) // per_page, 1),
+        "per_page": per_page,
+        "per_page_options": PER_PAGE_OPTIONS,
         "deadline_date": current.deadline_date(today),
         "rule_date": deadline_by_rule(today),
         "today": today,
@@ -282,16 +291,19 @@ def _search_context(request: Request, current: Filters, scope: str, total: int, 
         "disable_options": DISABLE_PERSON,
         # Ссылки на другую страницу поиска, сортировку и страницы — из самого фильтра,
         # а не из адреса: на первом заходе адрес пустой, а действуют значения по умолчанию.
-        "query": urlsplit(current.to_query(scope)).query,
+        "query": urlsplit(current.to_query(scope)).query
+        + (f"&per_page={per_page}" if per_page != PAGE_SIZE else ""),
         "here": request.url.path + (f"?{request.url.query}" if request.url.query else ""),
     }
 
 
 @app.get("/lots")
-def lots_search(request: Request, user: User, page: int = 1, hidden: int = 0):
+def lots_search(request: Request, user: User, page: int = 1, hidden: int = 0,
+                per_page: int = PAGE_SIZE):
     form = parse_qs(request.url.query)
     current = Filters.from_form(form)
     page = max(page, 1)
+    per_page = _per_page(per_page)
     now = datetime.now(UTC)
     where, params = current.where(now, "lots")
     params["user"] = user
@@ -312,7 +324,7 @@ def lots_search(request: Request, user: User, page: int = 1, hidden: int = 0):
                 FROM lots l JOIN announcements a ON true
                 LEFT JOIN lot_results r ON r.lot_id = l.id
                 WHERE {where} ORDER BY {current.order_by("lots")}
-                LIMIT {PAGE_SIZE} OFFSET {(page - 1) * PAGE_SIZE}""",
+                LIMIT {per_page} OFFSET {(page - 1) * per_page}""",
             params,
         ).fetchall()
         total = conn.execute(
@@ -332,17 +344,18 @@ def lots_search(request: Request, user: User, page: int = 1, hidden: int = 0):
                       (SELECT max(updated_at) FROM sync_state)"""
         ).fetchone()
         groups = _user_groups(conn, user)
-    context = _search_context(request, current, "lots", total, page, form, now)
+    context = _search_context(request, current, "lots", total, page, form, now, per_page)
     context.update(rows=rows, marks=lot_marks, hidden=hidden, hidden_count=hidden_count,
                    stats=stats, groups=groups)
     return templates.TemplateResponse(request, "lots.html", context)
 
 
 @app.get("/announcements")
-def announcements_search(request: Request, user: User, page: int = 1):
+def announcements_search(request: Request, user: User, page: int = 1, per_page: int = PAGE_SIZE):
     form = parse_qs(request.url.query)
     current = Filters.from_form(form)
     page = max(page, 1)
+    per_page = _per_page(per_page)
     now = datetime.now(UTC)
     where, params = current.where(now, "announcements")
     with pool.connection() as conn:
@@ -358,14 +371,15 @@ def announcements_search(request: Request, user: User, page: int = 1):
                        (SELECT array_agg(DISTINCT coalesce(p.prepayment, 0) ORDER BY coalesce(p.prepayment, 0))
                         FROM lots p WHERE p.trd_buy_id = a.id)
                 FROM announcements a WHERE {where} ORDER BY {current.order_by("announcements")}
-                LIMIT {PAGE_SIZE} OFFSET {(page - 1) * PAGE_SIZE}""",
+                LIMIT {per_page} OFFSET {(page - 1) * per_page}""",
             params,
         ).fetchall()
         total = conn.execute(
             f"SELECT count(*) FROM announcements a WHERE {where}", params
         ).fetchone()[0]
         groups = _user_groups(conn, user)
-    context = _search_context(request, current, "announcements", total, page, form, now)
+    context = _search_context(request, current, "announcements", total, page, form, now,
+                              per_page)
     context.update(rows=rows, groups=groups)
     return templates.TemplateResponse(request, "announcements.html", context)
 
