@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_filters.html" import filter_form, filter_styles, pager with context %}
+{% from "_filters.html" import filter_form, filter_styles, pager, sort_bar with context %}
 {% block title %}Объявления{% endblock %}
 {% block style %}
 {{ filter_styles() }}
@@ -7,7 +7,8 @@
 {% block main %}
 {{ filter_form() }}
 
-<p>Найдено объявлений: <b>{{ total }}</b>{% if deadline_date %} · окончание по {{ deadline_date.strftime("%d.%m.%Y") }} включительно{% endif %}</p>
+{% set found %}Найдено объявлений: <b>{{ total }}</b>{% if deadline_date %} · окончание {{ "" if f.deadline == rule else "по " }}{{ deadline_date.strftime("%d.%m.%Y") }}{% endif %}{% endset %}
+{{ sort_bar(found) }}
 
 <div class="table-wrap"><table class="results">
   <tr><th>№</th><th>Наименование объявления</th><th>Способ</th><th>Начало приема заявок</th><th>Окончание приема заявок</th><th>Сумма, ₸</th><th>Статус</th></tr>

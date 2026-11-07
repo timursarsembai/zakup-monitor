@@ -123,6 +123,8 @@ _ANNOUNCEMENT_ORDER = {
     "published": "a.publish_date DESC NULLS LAST, a.id DESC",
 }
 DEADLINE_RULE = "rule"
+# «Окончание с» = сегодня: сдвигается каждый день, как и правило срока.
+TODAY = "today"
 
 
 def deadline_by_rule(today: date) -> date:
@@ -161,7 +163,7 @@ class Filters:
     # Окончание приёма. DEADLINE_RULE — ровно в день по правилу выше (каждый день
     # сдвигается сам — для подписок), ГГГГ-ММ-ДД — «по» эту дату, "" — без ограничения.
     deadline: str = DEADLINE_RULE
-    end_from: str = ""
+    end_from: str = TODAY
     start_from: str = ""
     start_to: str = ""
     published_from: str = ""
@@ -170,7 +172,7 @@ class Filters:
     itogi_to: str = ""
     advance_only: bool = False
     # Размер аванса, % от суммы: 0–100 — без ограничения.
-    advance_min: int = 0
+    advance_min: int = 30
     advance_max: int = 100
     sort: str = "advance"
 
@@ -195,6 +197,9 @@ class Filters:
         for key in ("min_sum", "max_sum"):
             if key in known:
                 known[key] = _decimal(known[key])
+        # Сохранённые до 2026-11-08 подписки: аванс не ограничивали.
+        known.setdefault("advance_min", 0)
+        known.setdefault("end_from", "")
         # До 2026-11-08 признак был галочкой.
         if isinstance(known.get("disable_person"), bool):
             known["disable_person"] = "only" if known["disable_person"] else ""
@@ -233,7 +238,9 @@ class Filters:
             # Заполненная дата «по» важнее выбранного режима.
             deadline=_date(one("deadline_date"))
             or (DEADLINE_RULE if one("deadline_mode") == "rule" else ""),
-            end_from=_date(one("end_from")),
+            # Сегодняшняя дата в поле «с» — это «с сегодня», а не зафиксированный день.
+            end_from=TODAY if one("end_from") in (TODAY, _today().isoformat())
+            else _date(one("end_from")),
             start_from=_date(one("start_from")),
             start_to=_date(one("start_to")),
             published_from=_date(one("published_from")),
@@ -338,7 +345,10 @@ class Filters:
             if self.deadline == DEADLINE_RULE:
                 clauses.append("a.end_date >= %(deadline_start)s")
                 params["deadline_start"] = datetime.combine(deadline, time.min, PORTAL_TZ)
-        for column, start, end in (("end_date", self.end_from, ""),
+        end_from = (
+            now.astimezone(PORTAL_TZ).date().isoformat() if self.end_from == TODAY else self.end_from
+        )
+        for column, start, end in (("end_date", end_from, ""),
                                    ("start_date", self.start_from, self.start_to),
                                    ("publish_date", self.published_from, self.published_to),
                                    ("itogi_date", self.itogi_from, self.itogi_to)):
@@ -372,7 +382,8 @@ class Filters:
         """Нет зафиксированных дат: фильтр сам сдвигается со временем — на него
         можно подписаться."""
         return not (
-            (self.deadline and self.deadline != DEADLINE_RULE) or self.end_from
+            (self.deadline and self.deadline != DEADLINE_RULE)
+            or self.end_from not in ("", TODAY)
             or self.start_from or self.start_to or self.published_from or self.published_to
             or self.itogi_from or self.itogi_to
         )
@@ -438,7 +449,7 @@ class Filters:
             parts.append("окончание через 2 рабочих дня")
         elif self.deadline:
             parts.append(f"окончание по {self.deadline}")
-        for label, start, end in (("окончание", self.end_from, ""),
+        for label, start, end in (("окончание", "" if self.end_from == TODAY else self.end_from, ""),
                                   ("начало приёма", self.start_from, self.start_to),
                                   ("опубликовано", self.published_from, self.published_to),
                                   ("протокол итогов", self.itogi_from, self.itogi_to)):
@@ -466,6 +477,10 @@ _OR = re.compile(r"\s+или\s+", re.IGNORECASE)
 
 def _percent(value: str, default: int) -> int:
     return min(max(int(value), 0), 100) if value.isdigit() else default
+
+
+def _today() -> date:
+    return datetime.now(PORTAL_TZ).date()
 
 
 def _date(value: str) -> str:

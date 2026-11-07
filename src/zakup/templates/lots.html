@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_filters.html" import filter_form, filter_styles, pager with context %}
+{% from "_filters.html" import filter_form, filter_styles, pager, sort_bar with context %}
 {% from "_marks.html" import mark_control, mark_styles %}
 {% block title %}Лоты{% endblock %}
 {% block style %}
@@ -9,7 +9,8 @@
 {% block main %}
 {{ filter_form() }}
 
-<p>Найдено лотов: <b>{{ total }}</b>{% if deadline_date %} · окончание по {{ deadline_date.strftime("%d.%m.%Y") }} включительно{% endif %}</p>
+{% set found %}Найдено лотов: <b>{{ total }}</b>{% if deadline_date %} · окончание {{ "" if f.deadline == rule else "по " }}{{ deadline_date.strftime("%d.%m.%Y") }}{% endif %}{% endset %}
+{{ sort_bar(found) }}
 <p class="muted">Открытых объявлений в базе: {{ stats[0] }}{% if stats[1] %}, ещё {{ stats[1] }} ждут загрузки подробностей — пока не попадают в фильтр{% endif %}{% if stats[2] %}. Обновлено {{ (stats[2]|local).strftime("%d.%m %H:%M") }}{% endif %}.
 {% if hidden_count %}{% if hidden %}Показаны и скрытые — <a href="?{{ query }}">скрыть «Не подходит» ({{ hidden_count }})</a>{% else %}Скрыто с отметкой «Не подходит»: {{ hidden_count }} — <a href="?{{ query }}&hidden=1">показать</a>{% endif %}.{% endif %}</p>
 

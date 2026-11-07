@@ -28,7 +28,6 @@
   .panel-actions select, .panel-actions input { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; font: inherit; }
   .primary { background: var(--accent); color: #fff; border-color: transparent; font-weight: 600; }
   .spacer { flex: 1; }
-  .more-fields > summary { cursor: pointer; color: var(--accent); margin-top: 12px; font-size: 14px; }
   .scope-tabs { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
   .scope-tabs a { padding: 6px 14px; border-radius: 999px; border: 1px solid var(--line); color: inherit; }
   .scope-tabs a.on { background: var(--accent); color: #fff; border-color: transparent; font-weight: 600; }
@@ -41,9 +40,16 @@
   .range2 .fill { position: absolute; top: 12px; height: 4px; background: var(--accent); border-radius: 2px; pointer-events: none; }
   .presets { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
   .presets button { padding: 2px 8px; font-size: 12px; border-radius: 999px; }
-  .subscribe { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
-  .subscribe input, .subscribe select { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); font: inherit; }
-  .subscribe input { min-width: 240px; }
+  .flayout { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 20px; }
+  .subscribe { display: flex; flex-direction: column; gap: 8px; padding-left: 20px; border-left: 1px solid var(--line); }
+  .subscribe input, .subscribe select { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); font: inherit; width: 100%; }
+  .subscribe .primary { padding: 8px; }
+  .sortbar { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; margin: 14px 0 8px; }
+  .sortbar select { padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); font: inherit; }
+  @media (max-width: 1100px) {
+    .flayout { grid-template-columns: 1fr; }
+    .subscribe { padding: 14px 0 0; border-left: 0; border-top: 1px solid var(--line); }
+  }
   .filter-open, .sheet-head { display: none; }
   @media (max-width: 760px) {
     .filter-open { display: block; width: 100%; text-align: left; margin: 10px 0; padding: 10px 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -77,6 +83,9 @@
 <form method="get" action="/{{ scope }}" class="filters-panel" id="filters">
   <div class="sheet-head"><b>Фильтр</b><button type="button" data-filter-close aria-label="Закрыть">✕</button></div>
   <input type="hidden" name="applied" value="1">
+  <input type="hidden" name="sort" value="{{ f.sort }}">
+  <div class="flayout">
+  <div class="fmain">
   <div class="fgrid">
     <div><label class="fl" for="f-q">{{ "Наименование или описание лота" if lots else "Наименование объявления" }}</label>
       <input id="f-q" name="q" value="{{ f.q }}" placeholder="стол или стул -аренда"></div>
@@ -124,7 +133,7 @@
       </select></div>
     <div><span class="fl">Окончание приема заявок с — по</span>
       <div class="pair">
-        <input type="date" name="end_from" value="{{ f.end_from }}" aria-label="Окончание с">
+        <input type="date" name="end_from" value="{{ today.isoformat() if f.end_from == 'today' else f.end_from }}" aria-label="Окончание с">
         <input type="date" name="deadline_date" value="{{ f.deadline if f.deadline and f.deadline != rule else '' }}" aria-label="Окончание по">
       </div></div>
     <div class="advance" data-advance>
@@ -140,33 +149,27 @@
         <button type="button" data-preset="0,0">без аванса</button>
       </div>
     </div>
+
+    <div><span class="fl">Начало приема заявок с — по</span>
+      <div class="pair"><input type="date" name="start_from" value="{{ f.start_from }}" aria-label="Начало с"><input type="date" name="start_to" value="{{ f.start_to }}" aria-label="Начало по"></div></div>
+    <div><span class="fl">Протокол итогов с — по</span>
+      <div class="pair"><input type="date" name="itogi_from" value="{{ f.itogi_from }}" aria-label="Протокол итогов с"><input type="date" name="itogi_to" value="{{ f.itogi_to }}" aria-label="Протокол итогов по"></div></div>
+    <div><span class="fl">Дата публикации с — по</span>
+      <div class="pair"><input type="date" name="published_from" value="{{ f.published_from }}" aria-label="Публикация с"><input type="date" name="published_to" value="{{ f.published_to }}" aria-label="Публикация по"></div></div>
+    <div><span class="fl">Финансовый год</span>
+      {% set year_labels = {} %}{% for y in years %}{% set _ = year_labels.update({y: y|string}) %}{% endfor %}
+      {{ multi("year", year_labels, f.years, "Любой") }}</div>
+    {% if lots %}<div><label class="fl" for="f-enstru">ЕНС ТРУ</label>
+      <input id="f-enstru" name="enstru" value="{{ f.enstru }}" placeholder="код или его начало"></div>{% endif %}
   </div>
-  {% set extra = f.start_from or f.start_to or f.itogi_from or f.itogi_to or f.published_from or f.published_to or f.years or f.enstru %}
-  <details class="more-fields" {% if extra %}open{% endif %}>
-    <summary>Ещё поля: начало приёма, протокол итогов, публикация, финансовый год{% if lots %}, ЕНС ТРУ{% endif %}</summary>
-    <div class="fgrid" style="margin-top:10px">
-      <div><span class="fl">Начало приема заявок с — по</span>
-        <div class="pair"><input type="date" name="start_from" value="{{ f.start_from }}" aria-label="Начало с"><input type="date" name="start_to" value="{{ f.start_to }}" aria-label="Начало по"></div></div>
-      <div><span class="fl">Протокол итогов с — по</span>
-        <div class="pair"><input type="date" name="itogi_from" value="{{ f.itogi_from }}" aria-label="Протокол итогов с"><input type="date" name="itogi_to" value="{{ f.itogi_to }}" aria-label="Протокол итогов по"></div></div>
-      <div><span class="fl">Дата публикации с — по</span>
-        <div class="pair"><input type="date" name="published_from" value="{{ f.published_from }}" aria-label="Публикация с"><input type="date" name="published_to" value="{{ f.published_to }}" aria-label="Публикация по"></div></div>
-      <div><span class="fl">Финансовый год</span>
-        {% set year_labels = {} %}{% for y in years %}{% set _ = year_labels.update({y: y|string}) %}{% endfor %}
-        {{ multi("year", year_labels, f.years, "Любой") }}</div>
-      {% if lots %}<div><label class="fl" for="f-enstru">ЕНС ТРУ</label>
-        <input id="f-enstru" name="enstru" value="{{ f.enstru }}" placeholder="код или его начало"></div>{% endif %}
-    </div>
-  </details>
   <div class="panel-actions">
     <button class="primary">Найти</button>
     <a href="/{{ scope }}">Сбросить</a>
-    <label class="muted">Сортировка <select name="sort" onchange="this.form.submit()">
-      {% for key, name in sorts.items() %}<option value="{{ key }}" {% if f.sort == key %}selected{% endif %}>{{ name }}</option>{% endfor %}
-    </select></label>
     {% if lots %}<button formaction="/export.xlsx" title="Все найденные лоты в Excel">Excel</button>{% endif %}
   </div>
-  <div class="subscribe">
+  </div>
+  <aside class="subscribe">
+    <b>🔔 Подписка на этот поиск</b>
     {% if f.relative() %}
     <input type="hidden" name="scope" value="{{ scope }}">
     <input name="name" placeholder="Название подписки (необязательно)" aria-label="Название подписки">
@@ -174,11 +177,12 @@
       <option value="">в мой Telegram</option>
       {% for chat_id, title in groups %}<option value="{{ chat_id }}">в группу «{{ title }}»</option>{% endfor %}
     </select>
-    <button formmethod="post" formaction="/subscriptions/filter" class="primary">🔔 Подписаться на этот поиск</button>
-    <span class="muted">Новые {{ "лоты" if lots else "объявления" }} по этим условиям придут в Telegram.</span>
+    <button formmethod="post" formaction="/subscriptions/filter" class="primary">Подписаться на этот поиск</button>
+    <span class="muted">Новые {{ "лоты" if lots else "объявления" }} по этим условиям придут в Telegram. Подписок может быть несколько — <a href="/subscriptions">мои подписки</a>.</span>
     {% else %}
-    <span class="muted">🔔 Подписаться можно, когда в фильтре нет конкретных дат: окончание «через 2 рабочих дня» или без ограничения — тогда условия сами сдвигаются каждый день.</span>
+    <span class="muted">Подписаться можно, когда в фильтре нет конкретных дат: окончание «через 2 рабочих дня» или без ограничения — тогда условия сами сдвигаются каждый день.</span>
     {% endif %}
+  </aside>
   </div>
 </form>
 <script>
@@ -222,6 +226,25 @@
   const until = document.querySelector("[name=deadline_date]");
   mode.addEventListener("change", () => { if (mode.value !== "date") until.value = ""; else until.focus(); });
   until.addEventListener("change", () => { if (until.value) mode.value = "date"; });
+</script>
+{% endmacro %}
+
+{% macro sort_bar(found) %}
+<div class="sortbar">
+  <div>{{ found }}</div>
+  <label class="muted">Сортировка
+    <select data-sort aria-label="Сортировка">
+      {% for key, name in sorts.items() %}<option value="{{ key }}" {% if f.sort == key %}selected{% endif %}>{{ name }}</option>{% endfor %}
+    </select></label>
+</div>
+<script>
+  document.querySelector("[data-sort]").addEventListener("change", (event) => {
+    const url = new URL(location.href);
+    url.searchParams.set("sort", event.target.value);
+    url.searchParams.set("applied", "1");
+    url.searchParams.delete("page");
+    location.href = url;
+  });
 </script>
 {% endmacro %}
 

@@ -111,16 +111,20 @@ def test_where_applies_every_default_per_lot(conn):
         {"id": 112, "amount": 400_000, "prepayment": 30, "kato": ["711410000"], "name": "Астана"},
         {"id": 113, "amount": 500_000, "prepayment": 0, "kato": ["191010000"], "name": "годится"},
     ])
-    assert _lot_ids(conn, Filters()) == [10, 50, 90, 113]
-    assert _lot_ids(conn, Filters(advance_only=True)) == [10, 50]
-    assert _lot_ids(conn, Filters(advance_min=30)) == [10, 50]
+    assert _lot_ids(conn, Filters()) == [10, 50]  # по умолчанию аванс от 30%
+    assert _lot_ids(conn, Filters(advance_min=0)) == [10, 50, 90, 113]
+    assert _lot_ids(conn, Filters(advance_min=0, advance_only=True)) == [10, 50]
     assert _lot_ids(conn, Filters(advance_min=35)) == []
-    assert _lot_ids(conn, Filters(advance_max=0)) == [90, 113]
-    assert _lot_ids(conn, Filters(q="Лот или годится")) == [10, 50, 90, 113]
+    assert _lot_ids(conn, Filters(advance_min=0, advance_max=0)) == [90, 113]
+    assert _lot_ids(conn, Filters(advance_min=0, q="Лот или годится")) == [10, 50, 90, 113]
+    assert Filters.from_json({"statuses": [240]}).advance_min == 0
+    # «Окончание с» по умолчанию — сегодня, и на подписку это не влияет.
+    assert Filters().end_from == "today" and Filters().relative()
+    assert not Filters(end_from="2026-11-01").relative()
     assert Filters.from_form({"applied": ["1"], "advance_min": ["30"], "advance_max": ["500"]}
                              ).describe().endswith("аванс 30–100%")
-    assert _lot_ids(conn, Filters(deadline="")) == [10, 50, 70, 90, 113, 120]
-    assert _lot_ids(conn, Filters(deadline="2026-11-10")) == [10, 50, 90, 113, 120]
+    assert _lot_ids(conn, Filters(advance_min=0, deadline="")) == [10, 50, 70, 90, 113, 120]
+    assert _lot_ids(conn, Filters(advance_min=0, deadline="2026-11-10")) == [10, 50, 90, 113, 120]
 
 
 def test_filter_subscription_sends_lots_grouped_by_announcement(conn, monkeypatch):
@@ -132,7 +136,7 @@ def test_filter_subscription_sends_lots_grouped_by_announcement(conn, monkeypatc
     conn.execute(
         """INSERT INTO subscriptions (user_id, name, query, kind, filters)
            VALUES (%s, 'Алматы', '', 'announcements', %s)""",
-        (user, db.Jsonb(Filters().to_json())),
+        (user, db.Jsonb(Filters(advance_min=0).to_json())),
     )
     _announcement(conn, 1, lots=[
         {"id": 11, "amount": 400_000, "prepayment": 30, "kato": ["751410000"], "name": "Стол"},
@@ -154,7 +158,7 @@ def test_group_gets_each_lot_once_and_announcement_scope_sends_all_lots(conn, mo
     users = [conn.execute(
         "INSERT INTO users (email, telegram_chat_id) VALUES (%s, %s) RETURNING id", (email, chat)
     ).fetchone()[0] for email, chat in (("amir", "1"), ("serik", "2"))]
-    lot_filter = Filters(min_sum=Decimal(300_000))
+    lot_filter = Filters(min_sum=Decimal(300_000), advance_min=0)
     for user, name, scope in ((users[0], "Мебель", "lots"), (users[1], "Всё", "announcements")):
         conn.execute(
             """INSERT INTO subscriptions (user_id, name, query, kind, filters, scope, chat_id)
