@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Настройки{% endblock %}
+{% block style %}
+  .panel { max-width: 560px; border: 1px solid var(--line); border-radius: 12px; padding: 20px; margin-top: 12px; }
+  .panel h2 { font-size: 17px; margin: 0 0 6px; }
+  .panel p { margin: 0 0 14px; }
+  .status { display: inline-flex; align-items: center; gap: 8px; font-weight: 500; margin-bottom: 14px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
+  .dot.on { background: #1e9e5a; }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  .actions form { margin: 0; }
+  .primary { background: var(--accent); color: #fff; border-color: transparent; font-weight: 600; }
+  .note { margin-top: 14px; font-size: 14px; }
+{% endblock %}
+{% block main %}
+<section class="panel">
+  <h2>Уведомления в Telegram</h2>
+  <p class="muted">Новые лоты по вашим подпискам приходят сводкой раз в 10 минут.</p>
+  {% if not configured %}
+    <p>Бот пока не настроен на сервере.</p>
+  {% elif connected %}
+    <div class="status"><span class="dot on"></span>Подключено к @{{ bot_username }}</div>
+    <div class="actions">
+      <form method="post" action="/settings/telegram/test"><button>Отправить проверку</button></form>
+      <form method="post" action="/settings/telegram/unlink"><button>Отключить</button></form>
+    </div>
+    {% if sent == "ok" %}<p class="note">Проверочное сообщение отправлено.</p>
+    {% elif sent == "fail" %}<p class="note">Не удалось отправить. Возможно, бот заблокирован — подключите заново.</p>{% endif %}
+  {% else %}
+    <div class="status"><span class="dot"></span>Не подключено</div>
+    <div class="actions">
+      <form method="post" action="/settings/telegram/link"><button class="primary">Подключить Telegram</button></form>
+    </div>
+    <p class="note muted">Откроется бот @{{ bot_username }} — нажмите в нём «Start». Ссылка одноразовая и действует 30 минут. Потом обновите эту страницу.</p>
+  {% endif %}
+</section>
+{% endblock %}

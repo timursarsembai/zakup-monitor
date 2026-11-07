@@ -102,6 +102,14 @@ CREATE TABLE IF NOT EXISTS login_attempts (
 CREATE INDEX IF NOT EXISTS login_attempts_email ON login_attempts (email, created_at);
 CREATE INDEX IF NOT EXISTS login_attempts_ip ON login_attempts (ip, created_at);
 
+-- Одноразовые коды для привязки Telegram: сайт даёт ссылку t.me/<бот>?start=<код>,
+-- бот по коду узнаёт пользователя. В базе только sha256 кода.
+CREATE TABLE IF NOT EXISTS telegram_link_codes (
+    code_hash  bytea PRIMARY KEY,
+    user_id    bigint NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    expires_at timestamptz NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS subscriptions (
     id            bigserial PRIMARY KEY,
     user_id       bigint NOT NULL REFERENCES users (id) ON DELETE CASCADE,

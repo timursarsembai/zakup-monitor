@@ -77,3 +77,12 @@ def test_too_many_failures_lock_the_form(client):
     response = _login(client)
     assert response.status_code == 429
     assert "Слишком много" in response.text
+
+
+def test_settings_link_redirects_to_bot(client, monkeypatch):
+    monkeypatch.setenv("ZAKUP_TELEGRAM_BOT_TOKEN", "123:abc")
+    monkeypatch.setenv("ZAKUP_TELEGRAM_BOT_USERNAME", "test_bot")
+    _login(client)
+    assert "Подключить Telegram" in client.get("/settings").text
+    response = client.post("/settings/telegram/link", headers=ORIGIN, follow_redirects=False)
+    assert response.headers["location"].startswith("https://t.me/test_bot?start=")

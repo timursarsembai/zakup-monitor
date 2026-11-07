@@ -45,8 +45,13 @@ docker compose exec -it worker zakup set-password you@mail    # спросит �
 Веб-интерфейс открывается на `127.0.0.1:8096`. Наружу его выставлять через Nginx
 Proxy Manager.
 
-Telegram: в `.env` указать бота, затем завести себя командой
-`zakup add-user you@mail --telegram-chat-id 123` (тот же e-mail, что для входа).
+Telegram: токен бота (`ZAKUP_TELEGRAM_BOT_TOKEN`) в Infisical, username
+(`ZAKUP_TELEGRAM_BOT_USERNAME`) в `.env`. Сервис **bot** опрашивает Telegram и
+привязывает чаты: на странице «Настройки» кнопка «Подключить Telegram» даёт
+одноразовую ссылку `t.me/<бот>?start=<код>` на 30 минут. Совпадения рассылает
+worker сводками (до ~3800 символов в сообщении, не чаще раза в секунду в чат);
+если пользователь заблокировал бота, чат отвязывается. `ZAKUP_TELEGRAM_CHAT_ID` —
+чат владельца для служебных оповещений.
 
 ## Подписки
 

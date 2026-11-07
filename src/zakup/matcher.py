@@ -2,11 +2,12 @@
 
 import html
 import logging
+import time
 from typing import NamedTuple
 
 import psycopg
 
-from zakup import notify
+from zakup import telegram
 
 logger = logging.getLogger(__name__)
 
@@ -79,17 +80,59 @@ def format_match(match: Match) -> str:
     return "\n".join(lines)
 
 
-def deliver(conn: psycopg.Connection) -> int:
+def _digests(matches: list[Match]) -> list[tuple[str, list[Match]]]:
+    """Склеивает совпадения одного чата в сообщения до MESSAGE_LIMIT символов."""
+    digests: list[tuple[str, list[Match]]] = []
+    text, batch = "", []
+    for match in matches:
+        part = format_match(match)
+        if batch and len(text) + len(part) + 2 > telegram.MESSAGE_LIMIT:
+            digests.append((text, batch))
+            text, batch = "", []
+        text = f"{text}\n\n{part}" if text else part
+        batch.append(match)
+    if batch:
+        digests.append((text, batch))
+    return digests
+
+
+def _mark_notified(conn: psycopg.Connection, matches: list[Match]) -> None:
+    conn.execute(
+        """UPDATE matches SET notified_at = now()
+           WHERE (subscription_id, lot_id) IN (SELECT * FROM unnest(%s::bigint[], %s::bigint[]))""",
+        ([m.subscription_id for m in matches], [m.lot_id for m in matches]),
+    )
+    conn.commit()
+
+
+def deliver(conn: psycopg.Connection, pause: float = 1.1) -> int:
+    """Рассылает новые совпадения. Возвращает число отправленных совпадений."""
+    found = pending(conn, limit=1000)
+    # Без подключённого Telegram совпадение видно только на сайте, но считается обработанным.
+    _mark_notified(conn, [m for m in found if not m.chat_id])
+    by_chat: dict[str, list[Match]] = {}
+    for match in found:
+        if match.chat_id:
+            by_chat.setdefault(match.chat_id, []).append(match)
     sent = 0
-    for match in pending(conn):
-        if match.chat_id and not notify.send(format_match(match), chat_id=match.chat_id):
-            # Telegram недоступен: остальное отправим в следующий раз.
-            break
-        # Без chat_id совпадение остаётся только в вебе, но тоже считается обработанным.
-        conn.execute(
-            "UPDATE matches SET notified_at = now() WHERE subscription_id = %s AND lot_id = %s",
-            (match.subscription_id, match.lot_id),
-        )
-        conn.commit()
-        sent += 1
+    for chat_id, matches in by_chat.items():
+        for text, batch in _digests(matches):
+            try:
+                telegram.send_message(chat_id, text)
+            except telegram.TelegramError as error:
+                if not error.chat_gone:
+                    # Telegram недоступен или лимит: остальное отправим в следующий раз.
+                    logger.warning("delivery stopped: %s", error)
+                    return sent
+                logger.info("chat %s is gone, unlinking", chat_id)
+                conn.execute(
+                    "UPDATE users SET telegram_chat_id = NULL WHERE telegram_chat_id = %s",
+                    (chat_id,),
+                )
+                _mark_notified(conn, matches)
+                break
+            _mark_notified(conn, batch)
+            sent += len(batch)
+            # Telegram разрешает в один чат около сообщения в секунду.
+            time.sleep(pause)
     return sent

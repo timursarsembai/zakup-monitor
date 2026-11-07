@@ -16,7 +16,7 @@ from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 from psycopg_pool import ConnectionPool
 
-from zakup import auth
+from zakup import auth, bot, telegram
 from zakup.matcher import PORTAL_ANNOUNCEMENT_URL
 
 PAGE_SIZE = 50
@@ -256,3 +256,53 @@ def matches(request: Request, user: User):
             (user,),
         ).fetchall()
     return templates.TemplateResponse(request, "matches.html", {"rows": rows})
+
+
+@app.get("/settings")
+def settings(request: Request, user: User, sent: str = ""):
+    with pool.connection() as conn:
+        chat_id = conn.execute(
+            "SELECT telegram_chat_id FROM users WHERE id = %s", (user,)
+        ).fetchone()[0]
+    return templates.TemplateResponse(
+        request,
+        "settings.html",
+        {
+            "connected": bool(chat_id),
+            "bot_username": telegram.bot_username(),
+            "configured": bool(telegram.token() and telegram.bot_username()),
+            "sent": sent,
+        },
+    )
+
+
+@app.post("/settings/telegram/link", dependencies=[Depends(same_origin)])
+def telegram_link(user: User):
+    if not telegram.bot_username():
+        raise HTTPException(503, "Telegram-бот не настроен")
+    with pool.connection() as conn:
+        code = bot.create_link_code(conn, user)
+    return RedirectResponse(bot.link_url(code), status_code=303)
+
+
+@app.post("/settings/telegram/unlink", dependencies=[Depends(same_origin)])
+def telegram_unlink(user: User):
+    with pool.connection() as conn:
+        conn.execute("UPDATE users SET telegram_chat_id = NULL WHERE id = %s", (user,))
+    return RedirectResponse("/settings", status_code=303)
+
+
+@app.post("/settings/telegram/test", dependencies=[Depends(same_origin)])
+def telegram_test(user: User):
+    with pool.connection() as conn:
+        chat_id = conn.execute(
+            "SELECT telegram_chat_id FROM users WHERE id = %s", (user,)
+        ).fetchone()[0]
+    if not chat_id:
+        return RedirectResponse("/settings", status_code=303)
+    try:
+        telegram.send_message(chat_id, "Проверка: уведомления zakup приходят сюда.")
+        result = "ok"
+    except telegram.TelegramError:
+        result = "fail"
+    return RedirectResponse(f"/settings?sent={result}", status_code=303)

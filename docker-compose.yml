@@ -5,6 +5,7 @@ x-app-env: &app-env
   GOSZAKUP_TOKEN: ${GOSZAKUP_TOKEN:-}
   GOSZAKUP_REQUEST_DELAY: ${GOSZAKUP_REQUEST_DELAY:-0.5}
   ZAKUP_TELEGRAM_BOT_TOKEN: ${ZAKUP_TELEGRAM_BOT_TOKEN:-}
+  ZAKUP_TELEGRAM_BOT_USERNAME: ${ZAKUP_TELEGRAM_BOT_USERNAME:-}
   ZAKUP_TELEGRAM_CHAT_ID: ${ZAKUP_TELEGRAM_CHAT_ID:-}
 
 x-logging: &logging
@@ -50,6 +51,19 @@ services:
       - zakup migrate; while true; do zakup sync; zakup rescan; zakup refresh --limit 300; sleep 600; done
     environment: *app-env
     mem_limit: 256m
+    logging: *logging
+
+  bot:
+    image: zakup
+    container_name: zakup-bot
+    restart: unless-stopped
+    init: true
+    depends_on:
+      worker:
+        condition: service_started
+    entrypoint: ["zakup", "bot"]
+    environment: *app-env
+    mem_limit: 128m
     logging: *logging
 
   web:

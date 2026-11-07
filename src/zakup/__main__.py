@@ -6,7 +6,7 @@ import os
 import sys
 from datetime import date, datetime, time, timedelta
 
-from zakup import auth, db, matcher, notify, sync
+from zakup import auth, bot, db, matcher, notify, sync
 from zakup.goszakup import ENTITIES, PORTAL_TZ, Client
 
 # Сколько истории грузить, если start-from не запускали.
@@ -27,6 +27,7 @@ def main() -> int:
     again.add_argument("--max-pages", type=int, default=20)
     refresh = sub.add_parser("refresh", help="дочитать карточки открытых объявлений (заказчик)")
     refresh.add_argument("--limit", type=int, default=500)
+    sub.add_parser("bot", help="Telegram-бот: привязка чатов (работает постоянно)")
     passwd = sub.add_parser("set-password", help="задать пароль (создаст пользователя, если нет)")
     passwd.add_argument("email")
     user = sub.add_parser("add-user", help="завести пользователя")
@@ -40,6 +41,9 @@ def main() -> int:
     if args.command == "migrate":
         with db.connect(os.environ["DATABASE_URL"]) as conn:
             db.migrate(conn)
+        return 0
+    if args.command == "bot":
+        bot.run(os.environ["DATABASE_URL"])
         return 0
     if args.command == "set-password":
         return _set_password(args.email)
