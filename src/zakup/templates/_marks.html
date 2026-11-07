@@ -1,0 +1,33 @@
+{# Отметка на лоте: выпадающий список, сохраняется сразу при выборе. #}
+{% macro mark_control(lot_id, mark, next) %}
+<form class="mark-form" method="post" action="/lots/{{ lot_id }}/mark">
+  <input type="hidden" name="next" value="{{ next }}">
+  <select name="status" class="mark-select{% if mark and mark[0] %} marked mark-{{ mark[0] }}{% endif %}" onchange="this.form.submit()" aria-label="Отметка">
+    <option value="">{{ "Снять отметку" if mark and mark[0] else "Отметить…" }}</option>
+    {% for key, name in mark_statuses.items() %}
+    <option value="{{ key }}" {% if mark and mark[0] == key %}selected{% endif %}>{{ name }}</option>
+    {% endfor %}
+  </select>
+  <noscript><button>OK</button></noscript>
+</form>
+{% endmacro %}
+
+{% macro note_form(lot_id, mark, next) %}
+<form class="note-form" method="post" action="/lots/{{ lot_id }}/mark">
+  <input type="hidden" name="next" value="{{ next }}">
+  <textarea name="note" rows="2" maxlength="2000" placeholder="Заметка: цена поставщика, контакты, что подготовить…">{{ mark[1] if mark else "" }}</textarea>
+  <button>Сохранить заметку</button>
+</form>
+{% endmacro %}
+
+{% macro mark_styles() %}
+  .mark-select { padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; font: inherit; font-size: 13px; max-width: 100%; }
+  .mark-select.marked { font-weight: 600; border-color: var(--accent); }
+  .mark-select.mark-preparing, .mark-select.mark-submitted { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+  .mark-select.mark-won { background: color-mix(in srgb, #1e9e5a 18%, transparent); border-color: #1e9e5a; }
+  .mark-select.mark-rejected, .mark-select.mark-lost { color: var(--muted); border-color: var(--line); font-weight: 400; }
+  .mark-select option { color: #1d1d1f; background: #fff; }
+  .note-form { display: flex; gap: 8px; align-items: flex-end; margin-top: 10px; }
+  .note-form textarea { flex: 1; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; font: inherit; font-size: 14px; resize: vertical; }
+  @media (max-width: 640px) { .note-form { flex-direction: column; align-items: stretch; } }
+{% endmacro %}

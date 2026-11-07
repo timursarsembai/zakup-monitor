@@ -1,6 +1,8 @@
 {% extends "base.html" %}
+{% from "_marks.html" import mark_control, note_form, mark_styles %}
 {% block title %}№ {{ a.numberAnno or a.id }}{% endblock %}
 {% block style %}
+{{ mark_styles() }}
   .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
   .chip { padding: 2px 10px; border-radius: 999px; font-size: 13px; border: 1px solid var(--line); }
   .chip.status { background: color-mix(in srgb, var(--accent) 14%, transparent); border-color: transparent; }
@@ -101,6 +103,7 @@
       <div class="lot-sum">
         <b>{{ lot.amount | money }} ₸</b>
         <div class="muted">{% if i.price is not none %}{{ i.price | money }} ₸ × {% endif %}{{ '%g'|format(lot.count or 0) }} {{ (i.unit_name or "")|lower }}</div>
+        <div style="margin-top:8px">{{ mark_control(lot.id, marks.get(lot.id), here) }}</div>
       </div>
     </div>
     <dl class="facts">
@@ -113,6 +116,7 @@
       {% if plan and ((plan.sum2 or 0) > 0 or (plan.sum3 or 0) > 0) %}<dt>По годам</dt><dd>{{ plan.sum1 | money }} / {{ plan.sum2 | money }} / {{ plan.sum3 | money }} ₸</dd>{% endif %}
       <dt>Статус лота</dt><dd>{{ (lot.RefLotsStatus or {}).nameRu or "—" }}</dd>
     </dl>
+    {% if marks.get(lot.id) %}{{ note_form(lot.id, marks.get(lot.id), here) }}{% endif %}
     {% if spec_file(lot) %}
     <details class="spec" data-src="/a/{{ a.id }}/lots/{{ lot.id }}/spec">
       <summary>Техническая спецификация</summary>

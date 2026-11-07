@@ -116,3 +116,24 @@ def test_announcement_page_shows_lots_and_loads_spec(client, conn, monkeypatch):
     fragment = client.get("/a/77/lots/5/spec")
     assert "Столик, дерево" in fragment.text
     assert client.get("/a/404404").status_code == 404
+
+
+def test_marks_on_search_my_page_and_hiding(client, conn):
+    db.upsert_announcement(conn, {"id": 78, "name_ru": "Стулья", "end_date": "2099-01-01 09:00:00"})
+    db.upsert_lot(conn, {"id": 6, "trd_buy_id": 78, "name_ru": "Стул офисный", "amount": 500000})
+    conn.commit()
+    _login(client)
+    search = "/?applied=1&deadline_mode="
+    assert "Стул офисный" in client.get(search).text
+    response = client.post("/lots/6/mark", data={"status": "preparing", "next": search},
+                           headers=ORIGIN, follow_redirects=False)
+    assert response.headers["location"] == search + "#lot-6"
+    client.post("/lots/6/mark", data={"note": "поставщик Алатау", "next": "/my"}, headers=ORIGIN)
+    my = client.get("/my").text
+    assert "Готовлю заявку" in my and "Стул офисный" in my and "поставщик Алатау" in my
+    client.post("/lots/6/mark", data={"status": "rejected"}, headers=ORIGIN)
+    page = client.get(search).text
+    assert "Стул офисный" not in page and "Скрыто лотов" in page
+    assert "Стул офисный" in client.get(search + "&hidden=1").text
+    assert client.post("/lots/6/mark", data={"status": "bogus"}, headers=ORIGIN).status_code == 422
+    assert client.post("/lots/999/mark", data={"status": "won"}, headers=ORIGIN).status_code == 404

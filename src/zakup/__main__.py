@@ -6,7 +6,7 @@ import os
 import sys
 from datetime import date, datetime, time, timedelta
 
-from zakup import auth, bot, db, details, matcher, notify, sync
+from zakup import auth, bot, db, details, marks, matcher, notify, sync
 from zakup.goszakup import ENTITIES, PORTAL_TZ, Client
 
 # Сколько истории грузить, если start-from не запускали.
@@ -187,7 +187,7 @@ def _match_and_deliver(conn) -> None:
     lots = matcher.run(conn)
     announcements = matcher.run_filters(conn)
     print(f"matches: lots {lots}, announcements {announcements}, "
-          f"delivered: {matcher.deliver(conn)}")
+          f"delivered: {matcher.deliver(conn)}, reminders: {marks.remind(conn)}")
 
 
 if __name__ == "__main__":

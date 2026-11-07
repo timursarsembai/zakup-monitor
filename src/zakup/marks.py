@@ -1,0 +1,153 @@
+"""Отметки на лотах: «Интересно», «Готовлю заявку», «Заявка подана», итог.
+
+Пока приём заявок открыт, по лотам «Интересно» и «Готовлю заявку» бот
+напоминает в Telegram: за сутки и за 3 часа до окончания.
+"""
+
+import html
+import logging
+import time
+from datetime import UTC, datetime, timedelta
+
+import psycopg
+
+from zakup import telegram
+from zakup.goszakup import PORTAL_TZ
+from zakup.matcher import announcement_url
+
+logger = logging.getLogger(__name__)
+
+STATUSES = {
+    "interested": "Интересно",
+    "preparing": "Готовлю заявку",
+    "submitted": "Заявка подана",
+    "won": "Выиграли",
+    "lost": "Не выиграли",
+    "rejected": "Не подходит",
+}
+# Порядок разделов на странице «Мои лоты».
+ORDER = ["preparing", "interested", "submitted", "won", "lost", "rejected"]
+# По этим статусам заявка ещё не подана — о сроке нужно напомнить.
+REMIND_STATUSES = ["interested", "preparing"]
+REMIND_HOURS = [24, 3]
+NOTE_LIMIT = 2000
+
+
+def set_mark(conn: psycopg.Connection, user_id: int, lot_id: int, status: str) -> None:
+    """Ставит статус; пустой статус без заметки снимает отметку."""
+    if not status:
+        conn.execute(
+            "DELETE FROM lot_marks WHERE user_id = %s AND lot_id = %s AND note = ''",
+            (user_id, lot_id),
+        )
+        conn.execute(
+            "UPDATE lot_marks SET status = '', status_at = now(), updated_at = now() "
+            "WHERE user_id = %s AND lot_id = %s",
+            (user_id, lot_id),
+        )
+        return
+    if status not in STATUSES:
+        raise ValueError(status)
+    conn.execute(
+        """INSERT INTO lot_marks (user_id, lot_id, status) VALUES (%s, %s, %s)
+           ON CONFLICT (user_id, lot_id) DO UPDATE SET
+               status = EXCLUDED.status, updated_at = now(),
+               status_at = CASE WHEN lot_marks.status = EXCLUDED.status
+                                THEN lot_marks.status_at ELSE now() END,
+               reminded_hours = CASE WHEN lot_marks.status = EXCLUDED.status
+                                     THEN lot_marks.reminded_hours END""",
+        (user_id, lot_id, status),
+    )
+
+
+def set_note(conn: psycopg.Connection, user_id: int, lot_id: int, note: str) -> None:
+    note = note.strip()[:NOTE_LIMIT]
+    conn.execute(
+        """INSERT INTO lot_marks (user_id, lot_id, status, note) VALUES (%s, %s, '', %s)
+           ON CONFLICT (user_id, lot_id) DO UPDATE SET note = EXCLUDED.note, updated_at = now()""",
+        (user_id, lot_id, note),
+    )
+    conn.execute(
+        "DELETE FROM lot_marks WHERE user_id = %s AND lot_id = %s AND status = '' AND note = ''",
+        (user_id, lot_id),
+    )
+
+
+def of_user(conn: psycopg.Connection, user_id: int, lot_ids: list[int]) -> dict[int, tuple]:
+    """{lot_id: (status, note)} для показа на страницах."""
+    return {
+        row[0]: (row[1], row[2])
+        for row in conn.execute(
+            "SELECT lot_id, status, note FROM lot_marks WHERE user_id = %s AND lot_id = ANY(%s)",
+            (user_id, lot_ids),
+        )
+    }
+
+
+def _threshold(end: datetime, status_at: datetime, reminded: int | None, now: datetime) -> int | None:
+    """Какое напоминание пора отправить: самое близкое к сроку из наступивших.
+
+    Только если отметку поставили раньше этого момента: иначе вы только что
+    сами смотрели лот, и напоминание было бы лишним.
+    """
+    due = None
+    for hours in REMIND_HOURS:
+        moment = end - timedelta(hours=hours)
+        if moment <= now < end and status_at < moment and (reminded is None or hours < reminded):
+            due = hours
+    return due
+
+
+def _left(end: datetime, now: datetime) -> str:
+    minutes = int((end - now).total_seconds() // 60)
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours} ч {minutes} мин" if hours else f"{minutes} мин"
+
+
+def remind(conn: psycopg.Connection, now: datetime | None = None, pause: float = 1.1) -> int:
+    """Напоминает о сроке по отмеченным лотам. Возвращает число отправленных."""
+    now = now or datetime.now(UTC)
+    rows = conn.execute(
+        """SELECT m.user_id, m.lot_id, m.status, m.status_at, m.reminded_hours, m.note,
+                  u.telegram_chat_id, a.id, a.end_date, l.name_ru, l.amount,
+                  coalesce(a.customer_name_ru, l.customer_name_ru)
+           FROM lot_marks m
+           JOIN users u ON u.id = m.user_id
+           JOIN lots l ON l.id = m.lot_id
+           JOIN announcements a ON a.id = l.trd_buy_id
+           WHERE m.status = ANY(%s) AND a.end_date > %s AND a.end_date <= %s
+             AND u.telegram_chat_id IS NOT NULL
+           ORDER BY a.end_date""",
+        (REMIND_STATUSES, now, now + timedelta(hours=max(REMIND_HOURS))),
+    ).fetchall()
+    sent = 0
+    for user_id, lot_id, status, status_at, reminded, note, chat_id, a_id, end, name, amount, customer in rows:
+        hours = _threshold(end, status_at, reminded, now)
+        if hours is None:
+            continue
+        amount_text = f"{amount:,.0f}".replace(",", " ") + " ₸" if amount is not None else ""
+        lines = [
+            f"⏰ <b>Осталось {_left(end, now)}</b> — приём до "
+            f"{end.astimezone(PORTAL_TZ):%d.%m %H:%M}",
+            f"{html.escape(name or '—')} · {amount_text}",
+            html.escape(customer or ""),
+            f"Ваша отметка: {STATUSES[status]}",
+        ]
+        if note:
+            lines.append(f"Заметка: {html.escape(note[:300])}")
+        lines.append(f'<a href="{announcement_url(a_id)}#lot-{lot_id}">Открыть лот</a>')
+        try:
+            telegram.send_message(chat_id, "\n".join(line for line in lines if line))
+        except telegram.TelegramError as error:
+            logger.warning("reminder not sent: %s", error)
+            if not error.chat_gone:
+                break
+            continue
+        conn.execute(
+            "UPDATE lot_marks SET reminded_hours = %s WHERE user_id = %s AND lot_id = %s",
+            (hours, user_id, lot_id),
+        )
+        conn.commit()
+        sent += 1
+        time.sleep(pause)
+    return sent

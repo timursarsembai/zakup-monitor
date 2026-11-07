@@ -18,7 +18,7 @@ from fastapi.templating import Jinja2Templates
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
-from zakup import auth, bot, details, spec, telegram
+from zakup import auth, bot, details, marks, spec, telegram
 from zakup.filters import (
     DEADLINE_RULE,
     GROUP_ORDER_BY,
@@ -56,6 +56,7 @@ def _time_left(end: datetime | None) -> str:
 
 
 templates.env.globals["time_left"] = _time_left
+templates.env.globals["mark_statuses"] = marks.STATUSES
 
 
 @asynccontextmanager
@@ -172,12 +173,18 @@ def healthz() -> dict:
 
 
 @app.get("/")
-def search(request: Request, _: User, page: int = 1):
+def search(request: Request, user: User, page: int = 1, hidden: int = 0):
     form = parse_qs(request.url.query)
     current = Filters.from_form(form)
     page = max(page, 1)
     now = datetime.now(UTC)
     where, params = current.where(now)
+    params["user"] = user
+    hidden_where = where
+    if not hidden:
+        # Лоты, отмеченные «Не подходит», в выдаче не мешают.
+        where += """ AND NOT EXISTS (SELECT 1 FROM lot_marks m WHERE m.user_id = %(user)s
+                                     AND m.lot_id = l.id AND m.status = 'rejected')"""
     with pool.connection() as conn:
         groups = conn.execute(
             f"""SELECT a.id, a.number_anno, a.name_ru, a.end_date,
@@ -203,13 +210,20 @@ def search(request: Request, _: User, page: int = 1):
             f"SELECT count(DISTINCT a.id), count(*) FROM lots l, announcements a WHERE {where}",
             params,
         ).fetchone()
+        hidden_count = conn.execute(
+            f"""SELECT count(*) FROM lots l, announcements a, lot_marks m
+                WHERE {hidden_where} AND m.user_id = %(user)s AND m.lot_id = l.id
+                  AND m.status = 'rejected'""",
+            params,
+        ).fetchone()[0]
+        lot_marks = marks.of_user(conn, user, [row[1] for rows in lots.values() for row in rows])
         stats = conn.execute(
             """SELECT (SELECT count(*) FROM announcements WHERE end_date > now()),
                       (SELECT count(*) FROM announcements
                        WHERE end_date > now() AND details_fetched_at IS NULL),
                       (SELECT max(updated_at) FROM sync_state)"""
         ).fetchone()
-    query = {k: v for k, v in form.items() if k != "page"}
+    query = {k: v for k, v in form.items() if k not in ("page", "hidden")}
     query["applied"] = ["1"]
     today = now.astimezone(PORTAL_TZ).date()
     return templates.TemplateResponse(
@@ -229,6 +243,10 @@ def search(request: Request, _: User, page: int = 1):
             "rule": DEADLINE_RULE,
             "query": urlencode(query, doseq=True),
             "stats": stats,
+            "marks": lot_marks,
+            "hidden": hidden,
+            "hidden_count": hidden_count,
+            "here": request.url.path + (f"?{request.url.query}" if request.url.query else ""),
         },
     )
 
@@ -296,6 +314,8 @@ def announcement(request: Request, user: User, announcement_id: int):
     documents = [f for f in files if f not in protocols]
     lots = [lot for lot in detail.get("Lots") or [] if not lot.get("isDeleted")]
     info = {lot["id"]: details.parse_lot(lot) for lot in lots}
+    with pool.connection() as conn:
+        lot_marks = marks.of_user(conn, user, list(info))
     # Сначала лоты с авансом побольше, дальше по номеру.
     lots.sort(key=lambda lot: (-(info[lot["id"]]["prepayment"] or 0), lot.get("lotNumber") or ""))
     return templates.TemplateResponse(
@@ -306,6 +326,8 @@ def announcement(request: Request, user: User, announcement_id: int):
             "lots": lots,
             "info": info,
             "subscribed": subscribed,
+            "marks": lot_marks,
+            "here": request.url.path,
             "documents": documents,
             "protocols": protocols,
             "end": parse_date(detail.get("endDate")),
@@ -334,6 +356,54 @@ def lot_spec(request: Request, _: User, announcement_id: int, lot_id: int):
             text, error = spec.get(conn, lot_id, url)
     return templates.TemplateResponse(
         request, "spec_fragment.html", {"text": text, "error": error, "url": url}
+    )
+
+
+@app.post("/lots/{lot_id}/mark", dependencies=[Depends(same_origin)])
+def mark_lot(
+    user: User,
+    lot_id: int,
+    status: Annotated[str, Form()] = "",
+    note: Annotated[str | None, Form()] = None,
+    next: Annotated[str, Form()] = "/my",
+):
+    if status and status not in marks.STATUSES:
+        raise HTTPException(422, "неизвестная отметка")
+    with pool.connection() as conn:
+        if not conn.execute("SELECT 1 FROM lots WHERE id = %s", (lot_id,)).fetchone():
+            raise HTTPException(404, "Такого лота нет в базе")
+        if note is not None:
+            marks.set_note(conn, user, lot_id, note)
+        else:
+            marks.set_mark(conn, user, lot_id, status)
+    target = _safe_next(next)
+    return RedirectResponse(f"{target}#lot-{lot_id}" if "#" not in target else target, status_code=303)
+
+
+@app.get("/my")
+def my_lots(request: Request, user: User):
+    with pool.connection() as conn:
+        rows = conn.execute(
+            """SELECT m.status, m.note, m.status_at, l.id, l.trd_buy_id, l.name_ru,
+                      coalesce(l.extra_desc, l.description_ru), l.amount, l.prepayment,
+                      coalesce(a.customer_name_ru, l.customer_name_ru), a.end_date,
+                      a.number_anno, l.lot_number,
+                      (SELECT lot->'RefLotsStatus'->>'nameRu'
+                       FROM jsonb_array_elements(a.detail->'Lots') lot
+                       WHERE (lot->>'id')::bigint = l.id),
+                      a.detail->'RefBuyStatus'->>'nameRu'
+               FROM lot_marks m
+               JOIN lots l ON l.id = m.lot_id
+               LEFT JOIN announcements a ON a.id = l.trd_buy_id
+               WHERE m.user_id = %s AND m.status <> ''
+               ORDER BY a.end_date NULLS LAST, l.trd_buy_id, l.id""",
+            (user,),
+        ).fetchall()
+    sections = {status: [] for status in marks.ORDER}
+    for row in rows:
+        sections.setdefault(row[0], []).append(row)
+    return templates.TemplateResponse(
+        request, "my.html", {"sections": sections, "now": datetime.now(UTC)}
     )
 
 

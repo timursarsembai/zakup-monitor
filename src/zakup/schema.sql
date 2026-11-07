@@ -185,3 +185,18 @@ BEGIN
         DROP TABLE announcement_matches;
     END IF;
 END $$;
+
+-- Отметки пользователя на лотах: участие ведётся прямо на сайте (zakup.marks).
+CREATE TABLE IF NOT EXISTS lot_marks (
+    user_id    bigint NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    lot_id     bigint NOT NULL REFERENCES lots (id) ON DELETE CASCADE,
+    status     text NOT NULL,
+    note       text NOT NULL DEFAULT '',
+    created_at timestamptz NOT NULL DEFAULT now(),
+    -- Когда поставлен текущий статус: от него считаются напоминания.
+    status_at  timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    -- Самое близкое к окончанию напоминание, которое уже отправлено (часы).
+    reminded_hours integer,
+    PRIMARY KEY (user_id, lot_id)
+);

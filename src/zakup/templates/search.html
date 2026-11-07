@@ -1,6 +1,8 @@
 {% extends "base.html" %}
+{% from "_marks.html" import mark_control, mark_styles %}
 {% block title %}Объявления{% endblock %}
 {% block style %}
+{{ mark_styles() }}
   .filters-panel { border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin: 12px 0; }
   .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px 24px; }
   fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
@@ -79,7 +81,8 @@
 </form>
 
 <p class="summary">Найдено: <b>{{ totals[0] }}</b> {{ "объявление" if totals[0] % 10 == 1 and totals[0] % 100 != 11 else "объявлений" }}, подходящих лотов: <b>{{ totals[1] }}</b>{% if deadline_date %} · окончание по {{ deadline_date.strftime("%d.%m.%Y") }} включительно{% endif %}</p>
-<p class="muted">Открытых объявлений в базе: {{ stats[0] }}{% if stats[1] %}, ещё {{ stats[1] }} ждут загрузки подробностей (признаки, место, аванс) — пока не попадают в фильтр{% endif %}{% if stats[2] %}. Обновлено {{ (stats[2]|local).strftime("%d.%m %H:%M") }}{% endif %}.</p>
+<p class="muted">Открытых объявлений в базе: {{ stats[0] }}{% if stats[1] %}, ещё {{ stats[1] }} ждут загрузки подробностей (признаки, место, аванс) — пока не попадают в фильтр{% endif %}{% if stats[2] %}. Обновлено {{ (stats[2]|local).strftime("%d.%m %H:%M") }}{% endif %}.
+{% if hidden_count %}{% if hidden %}Показаны и скрытые лоты — <a href="/?{{ query }}">скрыть «Не подходит» ({{ hidden_count }})</a>{% else %}Скрыто лотов с отметкой «Не подходит»: {{ hidden_count }} — <a href="/?{{ query }}&hidden=1">показать</a>{% endif %}.{% endif %}</p>
 
 {% for g in groups %}
 <article class="card">
@@ -94,15 +97,16 @@
     </div>
   </header>
   <div class="table-wrap"><table class="lots">
-    <tr><th>Лот</th><th>Кол-во</th><th>Цена за ед., ₸</th><th>Сумма, ₸</th><th>Аванс</th><th>Место</th></tr>
+    <tr><th>Лот</th><th>Кол-во</th><th>Цена за ед., ₸</th><th>Сумма, ₸</th><th>Аванс</th><th>Место</th><th>Отметка</th></tr>
     {% for l in lots.get(g[0], []) %}
-    <tr>
+    <tr id="lot-{{ l[1] }}">
       <td><span class="title">{{ l[3] or "—" }}</span>{% if l[4] and l[4] != l[3] %}<div class="muted">{{ l[4][:160] }}</div>{% endif %}<div class="muted">№ {{ l[2] or l[1] }}</div></td>
       <td class="num">{% if l[5] is not none %}{{ '%g'|format(l[5]) }}{% endif %} {{ (l[6] or "")|lower }}</td>
       <td class="num">{{ l[7] | money }}</td>
       <td class="num">{{ l[8] | money }}</td>
       <td>{% if l[9] %}<span class="badge {% if l[9] >= 30 %}hot{% endif %}">{{ '%g'|format(l[9]) }}%</span>{% else %}<span class="muted">нет</span>{% endif %}</td>
       <td>{{ region_names(l[10]) | join(", ") }}</td>
+      <td>{{ mark_control(l[1], marks.get(l[1]), here) }}</td>
     </tr>
     {% endfor %}
   </table></div>
@@ -112,7 +116,7 @@
 <p class="muted">Под фильтр ничего не подходит.</p>
 {% endfor %}
 <p>
-  {% if page > 1 %}<a href="/?{{ query }}&page={{ page - 1 }}">← назад</a>{% endif %}
-  {% if has_next %}<a href="/?{{ query }}&page={{ page + 1 }}">дальше →</a>{% endif %}
+  {% if page > 1 %}<a href="/?{{ query }}&page={{ page - 1 }}{% if hidden %}&hidden=1{% endif %}">← назад</a>{% endif %}
+  {% if has_next %}<a href="/?{{ query }}&page={{ page + 1 }}{% if hidden %}&hidden=1{% endif %}">дальше →</a>{% endif %}
 </p>
 {% endblock %}
