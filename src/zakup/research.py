@@ -164,9 +164,10 @@ def build_prompt(context: dict[str, Any], region: str, whole_kz: bool) -> str:
 
 def enqueue(conn: psycopg.Connection, user_id: int, lot_id: int, region: str,
             whole_kz: bool) -> int:
+    # Кто ищет — решает администратор в своих настройках, для всех пользователей.
     provider, model = conn.execute(
-        "SELECT ai_provider, ai_model FROM users WHERE id = %s", (user_id,)
-    ).fetchone()
+        "SELECT ai_provider, ai_model FROM users WHERE role = 'admin' ORDER BY id LIMIT 1"
+    ).fetchone() or ("claude_code", None)
     provider = provider or "claude_code"
     active = conn.execute(
         """SELECT id FROM lot_research WHERE lot_id = %s AND status IN ('queued', 'running')""",
@@ -333,7 +334,8 @@ def run_job(conn: psycopg.Connection, job: dict[str, Any]) -> dict[str, Any]:
     prompt = build_prompt(context, job["region"], job["whole_kz"])
     key = None
     if job["provider"] != "claude_code":
-        key = secrets_box.user_key(conn, job["user_id"], job["provider"])
+        admin = conn.execute("SELECT id FROM users WHERE role = 'admin' ORDER BY id LIMIT 1").fetchone()
+        key = secrets_box.user_key(conn, admin[0], job["provider"]) if admin else None
         if not key:
             raise ResearchError("в настройках не указан API-ключ")
     # Поиск идёт минутами: не держим транзакцию открытой.

@@ -111,11 +111,12 @@ def login(
     return token
 
 
-def user_by_session(conn: psycopg.Connection, token: str | None) -> tuple[int, str] | None:
+def user_by_session(conn: psycopg.Connection, token: str | None) -> tuple[int, str, str] | None:
+    """(id, логин, роль) по cookie сессии."""
     if not token:
         return None
     return conn.execute(
-        """SELECT u.id, u.email FROM sessions s JOIN users u ON u.id = s.user_id
+        """SELECT u.id, u.email, u.role FROM sessions s JOIN users u ON u.id = s.user_id
            WHERE s.token_hash = %s AND s.expires_at > now()""",
         (_token_hash(token),),
     ).fetchone()
@@ -125,3 +126,14 @@ def logout(conn: psycopg.Connection, token: str | None) -> None:
     if token:
         conn.execute("DELETE FROM sessions WHERE token_hash = %s", (_token_hash(token),))
         conn.commit()
+
+
+def generate_password() -> str:
+    """Пароль для выдачи пользователю: 12 букв и цифр без похожих (0/O, 1/l)."""
+    alphabet = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    return "".join(secrets.choice(alphabet) for _ in range(12))
+
+
+def check_password(conn: psycopg.Connection, user_id: int, password: str) -> bool:
+    row = conn.execute("SELECT password_hash FROM users WHERE id = %s", (user_id,)).fetchone()
+    return bool(row and row[0] and verify_password(password, row[0]))

@@ -17,6 +17,8 @@ def client(conn, monkeypatch):
     )
     monkeypatch.setattr(web, "pool", test_pool)
     auth.set_password(conn, "owner@mail.kz", "long-enough-password")
+    conn.execute("UPDATE users SET role = 'admin' WHERE email = 'owner@mail.kz'")
+    conn.commit()
     with TestClient(web.app, base_url="https://testserver") as test_client:
         yield test_client
 
@@ -310,3 +312,30 @@ def test_logo_and_share_buttons(client, conn):
     assert 'data-share="https://zakup.sarsembai.com/a/501"' in page
     assert 'data-share="https://goszakup.gov.kz/ru/announce/index/501"' in page
     assert 'data-share="https://zakup.sarsembai.com/lots/5011"' in client.get("/lots/5011").text
+
+
+def test_roles_users_and_passwords(client, conn):
+    _login(client)
+    page = client.post("/settings/users", data={"login": "Amir"}, headers=ORIGIN).text
+    password = page.split("Пароль: ", 1)[1].split(" ", 1)[0]
+    assert len(password) == 12 and "Telegram-группы" in page and "Сбросить пароль" in page
+    client.post("/logout", headers=ORIGIN)
+    friend = client.post("/login", data={"email": "amir", "password": password, "next": "/settings"},
+                         headers=ORIGIN)
+    assert "Мой пароль" in friend.text
+    assert "Telegram-группы" not in friend.text and "Искусственный интеллект" not in friend.text
+    assert "Пользователи" not in friend.text
+    assert client.post("/settings/ai", data={"provider": "claude_code"}, headers=ORIGIN).status_code == 403
+    assert client.post("/settings/users", data={"login": "x"}, headers=ORIGIN).status_code == 403
+    bad = client.post("/settings/password", data={"current": "wrong-one", "password": "new-password-1",
+                                                  "repeat": "new-password-1"}, headers=ORIGIN)
+    assert bad.status_code == 422 and "Текущий пароль неверный" in bad.text
+    ok = client.post("/settings/password", data={"current": password, "password": "new-password-1",
+                                                 "repeat": "new-password-1"},
+                     headers=ORIGIN, follow_redirects=False)
+    assert ok.headers["location"] == "/login"
+    assert client.get("/settings", follow_redirects=False).status_code == 303  # сессия сброшена
+    amir = conn.execute("SELECT id FROM users WHERE email = 'amir'").fetchone()[0]
+    _login(client)
+    reset = client.post(f"/settings/users/{amir}/reset", headers=ORIGIN).text
+    assert "Новый пароль для amir" in reset

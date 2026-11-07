@@ -52,7 +52,7 @@
     <label class="muted"><input type="checkbox" name="whole_kz" value="1" {% if not job or job.whole_kz %}checked{% endif %}> и по всему Казахстану</label>
     <button class="primary" {% if job and job.status in ("queued", "running") %}disabled{% endif %}>{{ "Найти заново" if job else "Найти товары" }}</button>
   </form>
-  <p class="muted">Claude прочитает техспецификацию, найдёт в интернете подходящие товары — сначала в регионе поставки, потом по Казахстану — и посчитает маржу от цены в лоте. Сейчас ищет: {{ provider_name }} (<a href="/settings#ai">настройки</a>).</p>
+  <p class="muted">Claude прочитает техспецификацию, найдёт в интернете подходящие товары — сначала в регионе поставки, потом по Казахстану — и посчитает маржу от цены в лоте. Сейчас ищет: {{ provider_name }}{% if request.state.role == "admin" %} (<a href="/settings#ai">настройки</a>){% endif %}.</p>
   {% else %}
   <p class="muted">Нет данных лота для поиска.</p>
   {% endif %}

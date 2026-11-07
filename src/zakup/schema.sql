@@ -289,3 +289,9 @@ CREATE TABLE IF NOT EXISTS lot_research (
 );
 CREATE INDEX IF NOT EXISTS lot_research_lot ON lot_research (lot_id, id DESC);
 CREATE INDEX IF NOT EXISTS lot_research_queue ON lot_research (status, provider, id);
+
+-- Роли (2026-11-08): 'admin' — владелец, управляет пользователями и общими
+-- настройками (группы, ИИ, организация); 'user' — остальные.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS role text NOT NULL DEFAULT 'user';
+UPDATE users SET role = 'admin'
+WHERE id = (SELECT min(id) FROM users) AND NOT EXISTS (SELECT 1 FROM users WHERE role = 'admin');

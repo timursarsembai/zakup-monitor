@@ -102,10 +102,20 @@ def current_user(request: Request) -> int:
     if user is None:
         raise LoginRequired()
     request.state.email = user[1]
+    request.state.role = user[2]
     return user[0]
 
 
 User = Annotated[int, Depends(current_user)]
+
+
+def current_admin(request: Request, user: User) -> int:
+    if request.state.role != "admin":
+        raise HTTPException(403, "Доступно только администратору")
+    return user
+
+
+Admin = Annotated[int, Depends(current_admin)]
 
 
 def same_origin(request: Request) -> None:
@@ -396,7 +406,9 @@ def lot_page(request: Request, user: User, lot_id: int):
     with pool.connection() as conn:
         job = research.latest(conn, lot_id)
         lot_info = research.lot_context(conn, lot_id)
-        provider = conn.execute("SELECT ai_provider FROM users WHERE id = %s", (user,)).fetchone()[0]
+        provider = (conn.execute(
+            "SELECT ai_provider FROM users WHERE role = 'admin' ORDER BY id LIMIT 1"
+        ).fetchone() or ("claude_code",))[0]
     context.update(lot=lot, others=[other for other in context["lots"] if other["id"] != lot_id],
                    here=request.url.path, job=job, lot_info=lot_info,
                    region=research.default_region(lot_info) if lot_info else "",
@@ -743,6 +755,12 @@ def matches(request: Request, user: User):
 
 @app.get("/settings")
 def settings(request: Request, user: User, sent: str = "", saved: str = ""):
+    return _settings_page(request, user, sent=sent, saved=saved)
+
+
+def _settings_page(request: Request, user: int, *, sent: str = "", saved: str = "",
+                   notice: str | None = None, error: str | None = None, status_code: int = 200):
+    is_admin = request.state.role == "admin"
     with pool.connection() as conn:
         chat_id, company_bin = conn.execute(
             "SELECT telegram_chat_id, company_bin FROM users WHERE id = %s", (user,)
@@ -750,15 +768,23 @@ def settings(request: Request, user: User, sent: str = "", saved: str = ""):
         groups = _user_groups(conn, user)
         ai = conn.execute("SELECT ai_provider, ai_model FROM users WHERE id = %s", (user,)).fetchone()
         ai_keys = secrets_box.saved_providers(conn, user)
+        users = conn.execute(
+            """SELECT u.id, u.email, u.role, u.telegram_chat_id IS NOT NULL,
+                      (SELECT max(created_at) FROM sessions s WHERE s.user_id = u.id)
+               FROM users u ORDER BY u.role, u.email"""
+        ).fetchall() if is_admin else []
     return templates.TemplateResponse(
         request,
         "settings.html",
         {
+            "is_admin": is_admin,
             "connected": bool(chat_id),
             "bot_username": telegram.bot_username(),
             "configured": bool(telegram.token() and telegram.bot_username()),
             "sent": sent,
             "saved": saved,
+            "notice": notice,
+            "error": error,
             "company_bin": company_bin,
             "groups": groups,
             "ai_provider": ai[0],
@@ -766,13 +792,71 @@ def settings(request: Request, user: User, sent: str = "", saved: str = ""):
             "ai_keys": ai_keys,
             "providers": research.PROVIDERS,
             "default_models": research.DEFAULT_MODELS,
+            "users": users,
+            "me": user,
+            "min_password": auth.MIN_PASSWORD_LENGTH,
         },
+        status_code=status_code,
     )
+
+
+@app.post("/settings/password", dependencies=[Depends(same_origin)])
+def change_password(
+    request: Request,
+    user: User,
+    current: Annotated[str, Form()],
+    password: Annotated[str, Form()],
+    repeat: Annotated[str, Form()],
+):
+    with pool.connection() as conn:
+        if not auth.check_password(conn, user, current):
+            error = "Текущий пароль неверный."
+        elif password != repeat:
+            error = "Новые пароли не совпали."
+        elif len(password) < auth.MIN_PASSWORD_LENGTH:
+            error = f"Пароль — не короче {auth.MIN_PASSWORD_LENGTH} символов."
+        else:
+            error = None
+            auth.set_password(conn, request.state.email, password)
+    if error:
+        return _settings_page(request, user, error=error, status_code=422)
+    # Смена пароля сбрасывает все сессии, в том числе эту: входим заново.
+    return RedirectResponse("/login", status_code=303)
+
+
+@app.post("/settings/users", dependencies=[Depends(same_origin)])
+def add_user(request: Request, admin: Admin, login: Annotated[str, Form()]):
+    login = auth.normalize_email(login)
+    if not login or len(login) > 100 or any(c.isspace() for c in login):
+        return _settings_page(request, admin, error="Логин — без пробелов, до 100 символов.",
+                              status_code=422)
+    with pool.connection() as conn:
+        if conn.execute("SELECT 1 FROM users WHERE email = %s", (login,)).fetchone():
+            return _settings_page(request, admin, error=f"Пользователь {login} уже есть.",
+                                  status_code=422)
+        password = auth.generate_password()
+        auth.set_password(conn, login, password)
+    return _settings_page(request, admin, notice=f"Создан пользователь {login}. Пароль: {password} "
+                          "— передайте его, больше он нигде не показывается.")
+
+
+@app.post("/settings/users/{user_id}/reset", dependencies=[Depends(same_origin)])
+def reset_password(request: Request, admin: Admin, user_id: int):
+    with pool.connection() as conn:
+        row = conn.execute("SELECT email FROM users WHERE id = %s", (user_id,)).fetchone()
+        if row is None:
+            raise HTTPException(404, "Нет такого пользователя")
+        password = auth.generate_password()
+        auth.set_password(conn, row[0], password)
+    if user_id == admin:
+        return RedirectResponse("/login", status_code=303)
+    return _settings_page(request, admin, notice=f"Новый пароль для {row[0]}: {password} — "
+                          "передайте его, больше он нигде не показывается. Старые входы сброшены.")
 
 
 @app.post("/settings/ai", dependencies=[Depends(same_origin)])
 def save_ai(
-    user: User,
+    user: Admin,
     provider: Annotated[str, Form()],
     model: Annotated[str, Form()] = "",
     api_key: Annotated[str, Form()] = "",
@@ -795,7 +879,7 @@ def save_ai(
 
 
 @app.post("/settings/company", dependencies=[Depends(same_origin)])
-def save_company(user: User, company_bin: Annotated[str, Form()] = ""):
+def save_company(user: Admin, company_bin: Annotated[str, Form()] = ""):
     company_bin = company_bin.strip()
     if company_bin and not (company_bin.isdigit() and len(company_bin) == 12):
         raise HTTPException(422, "БИН или ИИН — 12 цифр")
@@ -816,7 +900,7 @@ def telegram_link(user: User):
 
 
 @app.post("/settings/telegram/group", dependencies=[Depends(same_origin)])
-def telegram_group_link(user: User):
+def telegram_group_link(user: Admin):
     if not telegram.bot_username():
         raise HTTPException(503, "Telegram-бот не настроен")
     with pool.connection() as conn:
@@ -825,7 +909,7 @@ def telegram_group_link(user: User):
 
 
 @app.post("/settings/groups/remove", dependencies=[Depends(same_origin)])
-def telegram_group_remove(user: User, chat_id: Annotated[str, Form()]):
+def telegram_group_remove(user: Admin, chat_id: Annotated[str, Form()]):
     with pool.connection() as conn:
         conn.execute(
             "UPDATE subscriptions SET chat_id = NULL WHERE user_id = %s AND chat_id = %s",

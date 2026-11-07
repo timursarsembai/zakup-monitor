@@ -11,9 +11,16 @@
   .actions form { margin: 0; }
   .primary { background: var(--accent); color: #fff; border-color: transparent; font-weight: 600; }
   .note { margin-top: 14px; font-size: 14px; }
+  .flash { max-width: 760px; padding: 12px 16px; border-radius: 10px; background: color-mix(in srgb, #1e9e5a 18%, transparent); font-weight: 500; user-select: all; }
+  .flash.bad { background: color-mix(in srgb, #c0392b 20%, transparent); user-select: auto; }
+  .panel#users { max-width: 760px; }
+  form.pw { display: grid; gap: 8px; max-width: 360px; }
+  form.pw input, .actions input[name=login] { padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; font: inherit; }
   .actions input { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; font: inherit; }
 {% endblock %}
 {% block main %}
+{% if notice %}<p class="flash">{{ notice }}</p>{% endif %}
+{% if error %}<p class="flash bad">{{ error }}</p>{% endif %}
 <section class="panel">
   <h2>Уведомления в Telegram</h2>
   <p class="muted">Новые лоты по вашим подпискам приходят сводкой раз в 10 минут.</p>
@@ -35,6 +42,7 @@
     <p class="note muted">Откроется бот @{{ bot_username }} — нажмите в нём «Start». Ссылка одноразовая и действует 30 минут. Потом обновите эту страницу.</p>
   {% endif %}
 </section>
+{% if is_admin %}
 <section class="panel">
   <h2>Telegram-группы</h2>
   <p class="muted">Результаты подписок можно присылать в общую группу — например, с партнёрами. Каждый участник подключает группу у себя, потом в подписке выбирает «в группу». Если лот подошёл под подписки нескольких человек, в группу он придёт один раз, с названием подписки и логином.</p>
@@ -71,5 +79,38 @@
     <button class="primary">Сохранить</button>
   </form>
   {% if saved == "bin" %}<p class="note">Сохранено.</p>{% endif %}
+</section>
+
+<section class="panel" id="users">
+  <h2>Пользователи</h2>
+  <p class="muted">Администратор заводит пользователей и сбрасывает им пароли. Новый пароль показывается один раз — передайте его человеку.</p>
+  <div class="table-wrap"><table>
+    <tr><th>Логин</th><th>Роль</th><th>Telegram</th><th>Последний вход</th><th></th></tr>
+    {% for u in users %}
+    <tr>
+      <td>{{ u[1] }}{% if u[0] == me %} <span class="muted">(вы)</span>{% endif %}</td>
+      <td>{{ "администратор" if u[2] == "admin" else "пользователь" }}</td>
+      <td>{{ "подключён" if u[3] else "—" }}</td>
+      <td class="muted">{{ (u[4]|local).strftime("%d.%m.%Y %H:%M") if u[4] else "—" }}</td>
+      <td>{% if u[0] != me %}<form method="post" action="/settings/users/{{ u[0] }}/reset" onsubmit="return confirm('Сбросить пароль {{ u[1] }}? Старый перестанет работать.')"><button>Сбросить пароль</button></form>{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table></div>
+  <form class="actions" method="post" action="/settings/users" style="margin-top:12px">
+    <input name="login" placeholder="логин нового пользователя" required autocapitalize="none" spellcheck="false">
+    <button class="primary">Добавить</button>
+  </form>
+</section>
+{% endif %}
+
+<section class="panel">
+  <h2>Мой пароль</h2>
+  <form method="post" action="/settings/password" class="pw">
+    <input type="password" name="current" placeholder="текущий пароль" autocomplete="current-password" required>
+    <input type="password" name="password" placeholder="новый пароль, от {{ min_password }} символов" autocomplete="new-password" minlength="{{ min_password }}" required>
+    <input type="password" name="repeat" placeholder="новый пароль ещё раз" autocomplete="new-password" minlength="{{ min_password }}" required>
+    <button class="primary">Сменить пароль</button>
+  </form>
+  <p class="note muted">После смены пароля нужно войти заново — на всех устройствах.</p>
 </section>
 {% endblock %}
