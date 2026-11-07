@@ -497,7 +497,7 @@ def _announcement_context(request: Request, user: int, announcement_id: int) -> 
 
 
 @app.get("/a/{announcement_id}/lots/{lot_id}/spec")
-def lot_spec(request: Request, _: User, announcement_id: int, lot_id: int):
+def lot_spec(request: Request, _: User, announcement_id: int, lot_id: int, refresh: int = 0):
     with pool.connection() as conn:
         row = conn.execute(
             "SELECT detail FROM announcements WHERE id = %s", (announcement_id,)
@@ -509,6 +509,11 @@ def lot_spec(request: Request, _: User, announcement_id: int, lot_id: int):
         if url is None:
             text, error = None, "У лота нет файла технической спецификации."
         else:
+            if refresh:
+                # Повтор после ошибки: прошлую ошибку из кэша не берём.
+                conn.execute(
+                    "DELETE FROM lot_specs WHERE lot_id = %s AND text IS NULL", (lot_id,)
+                )
             text, error = spec.get(conn, lot_id, url)
     return templates.TemplateResponse(
         request, "spec_fragment.html", {"text": text, "error": error, "url": url}

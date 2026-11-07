@@ -112,8 +112,10 @@ def test_announcement_page_shows_lots_and_loads_spec(client, conn, monkeypatch):
     for text in ("Приобретение столика", "88448423-ЗЦП1", "аванс 30%", "г.Қонаев, мкр.5",
                  "Проект договора", "Техническая спецификация", "data-end="):
         assert text in page.text
+    monkeypatch.setattr(web.spec, "get", lambda conn, lot_id, url: (None, "портал недоступен"))
+    assert "Обновить" in client.get("/a/77/lots/5/spec").text
     monkeypatch.setattr(web.spec, "get", lambda conn, lot_id, url: ("Столик, дерево", None))
-    fragment = client.get("/a/77/lots/5/spec")
+    fragment = client.get("/a/77/lots/5/spec?refresh=1")
     assert "Столик, дерево" in fragment.text
     assert client.get("/a/404404").status_code == 404
 
