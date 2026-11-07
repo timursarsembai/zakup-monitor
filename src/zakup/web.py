@@ -240,7 +240,7 @@ _client: Client | None = None
 def _goszakup() -> Client:
     global _client
     if _client is None:
-        _client = Client(os.environ.get("GOSZAKUP_TOKEN", ""), delay=0)
+        _client = Client(os.environ.get("GOSZAKUP_TOKEN", ""), delay=0, attempts=2)
     return _client
 
 

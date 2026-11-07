@@ -38,8 +38,11 @@ class Page(NamedTuple):
 
 
 class Client:
-    def __init__(self, token: str, delay: float = 0.5, base_url: str = BASE_URL):
+    def __init__(
+        self, token: str, delay: float = 0.5, base_url: str = BASE_URL, attempts: int = 8
+    ):
         self._delay = delay
+        self._attempts = attempts
         self._last_request = 0.0
         self._http = httpx.Client(
             base_url=base_url,
@@ -79,7 +82,7 @@ class Client:
         return self._request("GET", path, params=params)
 
     def _request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
-        for attempt in range(5):
+        for attempt in range(self._attempts):
             wait = self._delay - (time.monotonic() - self._last_request)
             if wait > 0:
                 time.sleep(wait)
@@ -87,15 +90,18 @@ class Client:
             try:
                 response = self._http.request(method, path, **kwargs)
             except httpx.ConnectTimeout:
+                # Первый повтор сразу (обычно хватает), дальше портал, похоже, недоступен
+                # целиком — бывает по полминуты, — поэтому ждём всё дольше.
                 logger.info("goszakup %s: connect timeout, retry %d", path, attempt)
+                self._pause(attempt, min(attempt * 5, 30))
                 continue
             except httpx.TransportError as error:
                 logger.warning("goszakup %s: %s, retry %d", path, type(error).__name__, attempt)
-                time.sleep(2**attempt * 5)
+                self._pause(attempt, min(2**attempt * 5, 120))
                 continue
             if response.status_code == 429 or response.status_code >= 500:
                 logger.warning("goszakup %s: HTTP %d, retry %d", path, response.status_code, attempt)
-                time.sleep(2**attempt * 5)
+                self._pause(attempt, min(2**attempt * 5, 120))
                 continue
             if response.status_code != 200:
                 raise GoszakupError(
@@ -104,6 +110,10 @@ class Client:
                 )
             return response.json()
         raise GoszakupError(f"{path}: no successful response after retries")
+
+    def _pause(self, attempt: int, seconds: float) -> None:
+        if attempt + 1 < self._attempts:
+            time.sleep(seconds)
 
 
 def next_after(next_page: str | None) -> int | None:

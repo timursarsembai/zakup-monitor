@@ -1,5 +1,9 @@
 from datetime import datetime
 
+import httpx
+import pytest
+
+from zakup import goszakup
 from zakup.goszakup import PORTAL_TZ, next_after, normalize, parse_date
 
 
@@ -23,3 +27,33 @@ def test_parse_date_assumes_portal_time_zone():
     assert parse_date("2026-11-06T10:00:00+05:00").utcoffset().total_seconds() == 5 * 3600
     assert parse_date(None) is None
     assert parse_date("not a date") is None
+
+
+def _client(responses, monkeypatch, attempts=8):
+    pauses = []
+    monkeypatch.setattr(goszakup.time, "sleep", pauses.append)
+    client = goszakup.Client("t", delay=0, attempts=attempts)
+
+    def handler(request):
+        outcome = responses.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return httpx.Response(200, json=outcome)
+
+    client._http = httpx.Client(base_url="https://x", transport=httpx.MockTransport(handler))
+    return client, pauses
+
+
+def test_connect_timeouts_back_off_until_portal_answers(monkeypatch):
+    timeout = httpx.ConnectTimeout("slow")
+    client, pauses = _client([timeout] * 6 + [{"items": []}], monkeypatch)
+    assert client.page("lots").items == []
+    assert pauses == [0, 5, 10, 15, 20, 25]
+
+
+def test_gives_up_without_pausing_after_last_attempt(monkeypatch):
+    timeout = httpx.ConnectTimeout("slow")
+    client, pauses = _client([timeout, timeout], monkeypatch, attempts=2)
+    with pytest.raises(goszakup.GoszakupError):
+        client.page("lots")
+    assert pauses == [0]
