@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Выкладка: собрать образ, при изменённой схеме базы применить её при остановленных
+# Выкладка: собрать образ, новые миграции базы применить при остановленных
 # сборщиках, поднять все службы, перезапустить ИИ-службу на хосте.
 #
 # Почему так: изменение таблиц (ALTER) ждёт, пока все закроют транзакции, а сборщики
@@ -16,11 +16,16 @@ fi
 
 docker compose build -q worker
 
-file_digest=$(sha256sum src/zakup/schema.sql | cut -d' ' -f1)
-db_digest=$(docker compose exec -T postgres psql -U zakup -Atc \
-  "SELECT digest FROM schema_state WHERE id = 1" 2>/dev/null || true)
-if [ "$file_digest" != "$db_digest" ]; then
-  echo "Схема изменилась: применяю при остановленных сборщиках"
+# Новые миграции — файлы src/zakup/migrations/*.sql, которых нет в schema_migrations.
+applied=$(docker compose exec -T postgres psql -U zakup -Atc \
+  "SELECT name FROM schema_migrations" 2>/dev/null || true)
+new_migrations=""
+for file in src/zakup/migrations/*.sql; do
+  name=$(basename "$file" .sql)
+  grep -qx "$name" <<< "$applied" || new_migrations="$new_migrations $name"
+done
+if [ -n "$new_migrations" ]; then
+  echo "Новые миграции:$new_migrations — применяю при остановленных сборщиках"
   # Если миграция упадёт, службы не должны остаться остановленными.
   trap 'echo "Миграция не прошла — поднимаю службы на старой схеме"; docker compose up -d; systemctl --user start zakup-research' EXIT
   docker compose stop worker archive specs research bot client-bot

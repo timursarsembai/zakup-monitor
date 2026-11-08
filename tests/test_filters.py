@@ -211,10 +211,21 @@ def test_search_finds_kazakh_names(conn):
     assert _lot_ids(conn, Filters(exclude="үстелі")) == []
 
 
-def test_migrate_runs_only_when_schema_changes(conn):
+def test_migrations_apply_once_and_old_databases_are_recognised(conn):
     from zakup import db
 
-    assert db.migrate(conn) is False  # фикстура уже применила схему — повторно не трогаем
-    conn.execute("UPDATE schema_state SET digest = 'old'")
+    assert db.migrate(conn) is False and db.pending(conn) == []  # фикстура уже всё применила
+    names = [name for name, _ in db.migrations()]
+    assert names[0] == "0001_initial" and names == sorted(names)
+    # Последняя миграция «забыта» — применяется заново, и только она.
+    conn.execute("DELETE FROM schema_migrations WHERE name = %s", (names[-1],))
     conn.commit()
+    assert db.pending(conn) == [names[-1]]
     assert db.migrate(conn) is True and db.migrate(conn) is False
+    # База прежнего образца (schema_state есть, schema_migrations пуст): первая миграция
+    # считается применённой, остальные — применяются.
+    conn.execute("DELETE FROM schema_migrations")
+    conn.execute("CREATE TABLE schema_state (id int PRIMARY KEY, digest text NOT NULL)")
+    conn.commit()
+    assert db.pending(conn) == names[1:]
+    assert db.migrate(conn) is True and db.pending(conn) == []

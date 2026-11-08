@@ -24,7 +24,7 @@ def _schema():
         connection.commit()
         db.migrate(connection)
         tables = [row[0] for row in connection.execute(
-            "SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'schema_state'")]
+            "SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'schema_migrations'")]
         sequences = [row[0] for row in connection.execute(
             "SELECT sequencename FROM pg_sequences WHERE schemaname = 'public'")]
     # TRUNCATE на сорока таблицах — секунды (новые файлы на диске); таблицы в тестах

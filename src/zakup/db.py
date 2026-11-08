@@ -1,4 +1,3 @@
-import hashlib
 import time
 from decimal import Decimal, InvalidOperation
 from importlib.resources import files
@@ -14,42 +13,62 @@ def connect(url: str) -> psycopg.Connection:
     return psycopg.connect(url)
 
 
+# Изменения базы — нумерованные файлы migrations/NNNN_что.sql; каждый применяется один
+# раз, применённые записаны в schema_migrations. Новое изменение — новый файл с
+# следующим номером; старые файлы не правим.
+BASELINE = "0001_initial"
+
+
+def migrations() -> list[tuple[str, str]]:
+    """[(имя без .sql, текст)] по порядку номеров."""
+    folder = files("zakup").joinpath("migrations")
+    return sorted((f.name.removesuffix(".sql"), f.read_text(encoding="utf-8"))
+                  for f in folder.iterdir() if f.name.endswith(".sql"))
+
+
+def applied(conn: psycopg.Connection) -> set[str]:
+    conn.execute("""CREATE TABLE IF NOT EXISTS schema_migrations (
+                        name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())""")
+    done = {row[0] for row in conn.execute("SELECT name FROM schema_migrations")}
+    if not done and conn.execute("SELECT to_regclass('schema_state') IS NOT NULL").fetchone()[0]:
+        # База создана прежним способом (весь schema.sql целиком) — первая миграция уже в ней.
+        conn.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (BASELINE,))
+        done = {BASELINE}
+    conn.commit()
+    return done
+
+
+def pending(conn: psycopg.Connection) -> list[str]:
+    done = applied(conn)
+    return [name for name, _ in migrations() if name not in done]
+
+
 def migrate(conn: psycopg.Connection, attempts: int = 10) -> bool:
-    """Применяет schema.sql, только если файл изменился с прошлого раза.
+    """Применяет новые миграции. True — что-то применилось.
 
     Команды ALTER/CREATE берут на таблицу исключительную блокировку. Сборщики в это
-    время пишут в те же таблицы, и при каждом перезапуске это давало взаимные
-    блокировки (DeadlockDetected). Поэтому: отпечаток схемы хранится в базе и без
-    изменений ничего не выполняется; а при изменениях lock_timeout меньше
-    deadlock_timeout базы (1 с) — миграция уступает первой и повторяет, сборщик не падает.
-    Возвращает True, если схема применялась.
+    время пишут в те же таблицы, и раньше это давало взаимные блокировки
+    (DeadlockDetected). Поэтому без новых миграций ничего не выполняется, а при новых
+    lock_timeout меньше deadlock_timeout базы (1 с) — миграция уступает первой и
+    повторяет, сборщик не падает.
     """
-    schema = files("zakup").joinpath("schema.sql").read_text(encoding="utf-8")
-    digest = hashlib.sha256(schema.encode()).hexdigest()
-    conn.execute("CREATE TABLE IF NOT EXISTS schema_state (id int PRIMARY KEY, digest text NOT NULL)")
-    conn.commit()
-    row = conn.execute("SELECT digest FROM schema_state WHERE id = 1").fetchone()
-    conn.commit()
-    if row and row[0] == digest:
-        return False
-    for attempt in range(attempts):
-        try:
-            conn.execute("SET lock_timeout = '500ms'")
-            conn.execute(schema)
-            conn.execute(
-                """INSERT INTO schema_state (id, digest) VALUES (1, %s)
-                   ON CONFLICT (id) DO UPDATE SET digest = excluded.digest""",
-                (digest,),
-            )
-            conn.execute("RESET lock_timeout")
-            conn.commit()
-            return True
-        except (psycopg.errors.LockNotAvailable, psycopg.errors.DeadlockDetected):
-            conn.rollback()
-            if attempt == attempts - 1:
-                raise
-            time.sleep(1 + attempt)
-    return False
+    done = applied(conn)
+    todo = [(name, sql) for name, sql in migrations() if name not in done]
+    for name, sql in todo:
+        for attempt in range(attempts):
+            try:
+                conn.execute("SET lock_timeout = '500ms'")
+                conn.execute(sql)
+                conn.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (name,))
+                conn.execute("RESET lock_timeout")
+                conn.commit()
+                break
+            except (psycopg.errors.LockNotAvailable, psycopg.errors.DeadlockDetected):
+                conn.rollback()
+                if attempt == attempts - 1:
+                    raise
+                time.sleep(1 + attempt)
+    return bool(todo)
 
 
 class SyncState(NamedTuple):
