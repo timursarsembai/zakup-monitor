@@ -129,6 +129,9 @@ def handle_message(conn: psycopg.Connection, message: dict) -> str | None:
                      (chat_id, user_id))
         login = conn.execute("UPDATE users SET telegram_chat_id = %s WHERE id = %s RETURNING email",
                              (chat_id, user_id)).fetchone()[0]
+        # Человек в группе клиентов теперь — по этому аккаунту: его оплата и решает, оставаться
+        # ли в группе (иначе удалили бы по прежнему аккаунту, а с этого не проверяли бы).
+        _move_membership(conn, chat["id"], user_id)
         conn.commit()
         return (f"Готово, уведомления для {login} будут приходить сюда.\n"
                 "Подписки настраиваются на сайте. /stop — отключить.")
@@ -138,6 +141,17 @@ def handle_message(conn: psycopg.Connection, message: dict) -> str | None:
         conn.commit()
         return "Уведомления отключены." if gone else "Этот чат и так не подключён."
     return HELP
+
+
+def _move_membership(conn: psycopg.Connection, tg_id: int, user_id: int) -> None:
+    """Запись «этот Telegram в группе» — на аккаунт user_id (одна на аккаунт и на человека)."""
+    conn.execute("DELETE FROM client_group_members WHERE user_id = %s AND tg_id <> %s", (user_id, tg_id))
+    conn.execute(
+        """UPDATE client_group_members SET user_id = %s WHERE tg_id = %s AND user_id =
+               (SELECT min(user_id) FROM client_group_members WHERE tg_id = %s)
+             AND NOT EXISTS (SELECT 1 FROM client_group_members WHERE user_id = %s)""",
+        (user_id, tg_id, tg_id, user_id))
+    conn.execute("DELETE FROM client_group_members WHERE tg_id = %s AND user_id <> %s", (tg_id, user_id))
 
 
 def handle_join_request(conn: psycopg.Connection, request: dict) -> str:

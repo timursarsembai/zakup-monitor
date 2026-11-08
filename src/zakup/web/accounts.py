@@ -61,11 +61,28 @@ def staff_login(request: Request, email: Annotated[str, Form()], password: Annot
     return _login_attempt(request, email, password, next, staff=True)
 
 
+DEVICE_COOKIE = "zakup_dev"
+DEVICE_TTL = 365 * 24 * 3600
+
+
+def _remember_device(response, user_id: int):
+    """Браузер, где пользователь уже входил: чужие неверные пароли его не блокируют."""
+    if mark := auth.device_mark(user_id):
+        response.set_cookie(DEVICE_COOKIE, mark, max_age=DEVICE_TTL, httponly=True, secure=True,
+                            samesite="lax")
+    return response
+
+
 def _login_attempt(request: Request, email: str, password: str, next: str, staff: bool):
     ip = request.client.host if request.client else None
     email_norm = auth.normalize_email(email)
     with core.pool.connection() as conn:
-        locked = auth.too_many_failures(conn, email_norm, ip)
+        # Проверка лимита, пароль и запись попытки — по очереди для одного логина: иначе
+        # параллельные запросы видят одно и то же старое число неудач.
+        conn.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", ("login:" + email_norm,))
+        account = conn.execute("SELECT id FROM users WHERE email = %s", (email_norm,)).fetchone()
+        known = auth.known_device(request.cookies.get(DEVICE_COOKIE), account[0] if account else None)
+        locked = auth.too_many_failures(conn, email_norm, ip, known)
         if locked:
             token = None
             error = i18n.gettext("Слишком много неудачных попыток. Попробуйте через 15 минут.")
@@ -74,7 +91,8 @@ def _login_attempt(request: Request, email: str, password: str, next: str, staff
             error = None if token else i18n.gettext(
                 "Неверный логин или пароль." if staff else "Неверный телефон или пароль.")
     if token is None:
-        _audit(request, None, "login_failed", login=email_norm[:100],
+        # Логин — только если такой аккаунт есть: в поле логина бывает вставлен пароль.
+        _audit(request, None, "login_failed", login=email_norm[:100] if account else None,
                reason="lock" if locked else "password")
         return templates.TemplateResponse(
             request,
@@ -88,7 +106,7 @@ def _login_attempt(request: Request, email: str, password: str, next: str, staff
     target = _safe_next(next)
     if target == "/" and role in auth.STAFF_ROLES:
         target = "/dashboard"  # главная сотрудника — дашборд платформы
-    return _with_session(RedirectResponse(target, status_code=303), token)
+    return _remember_device(_with_session(RedirectResponse(target, status_code=303), token), user_id)
 
 
 def _phone_page(request: Request, purpose: str, phone: str = "", error: str | None = None,
@@ -134,14 +152,28 @@ def forgot_start(request: Request, phone: Annotated[str, Form()]):
     return _start(request, "reset", phone)
 
 
+PHONE_CHECKS_PER_HOUR = 10
+
+
 def _start(request: Request, purpose: str, raw_phone: str):
     phone = auth.normalize_phone(raw_phone)
     if phone is None:
         return _phone_page(request, purpose, raw_phone,
                            i18n.gettext("Нужен казахстанский мобильный номер: +7 7XX XXX XX XX."), 422)
+    ip = request.client.host if request.client else None
     with core.pool.connection() as conn:
         if purpose == "register" and not signup.registration_open(conn):
             return _phone_page(request, purpose, closed=True, status_code=403)
+        # Ответ говорит, есть ли такой номер: проверок с одного адреса — не больше
+        # стольких в час, иначе по ответам можно перебрать номера всех клиентов.
+        checked = conn.execute(
+            """SELECT count(*) FROM login_attempts WHERE email = '#phone-check' AND ip = %s
+               AND created_at > now() - interval '1 hour'""", (ip,)).fetchone()[0]
+        if checked >= PHONE_CHECKS_PER_HOUR:
+            return _phone_page(request, purpose, raw_phone,
+                               i18n.gettext("Слишком много попыток. Попробуйте через час."), 429)
+        conn.execute("INSERT INTO login_attempts (email, ip, ok) VALUES ('#phone-check', %s, true)", (ip,))
+        conn.commit()
         user = conn.execute("SELECT deleted_at, may_reregister FROM users WHERE email = %s",
                             (phone,)).fetchone()
         if purpose == "register" and user and user[0] is None:
@@ -154,7 +186,7 @@ def _start(request: Request, purpose: str, raw_phone: str):
             return _phone_page(request, purpose, raw_phone, i18n.gettext(
                 "Такой номер не зарегистрирован."), 404)
         try:
-            flow = signup.start(conn, phone, purpose, request.client.host if request.client else None)
+            flow = signup.start(conn, phone, purpose, ip)
         except signup.SignupError as error:
             return _phone_page(request, purpose, raw_phone, i18n.gettext(str(error)), 429)
     _audit(request, None, "otp_sent", login=phone, purpose=purpose)
@@ -180,9 +212,9 @@ def _finish(request: Request, purpose: str, flow: str, code: str, password: str,
             return _phone_page(request, purpose, error=i18n.gettext("Код устарел. Запросите новый."),
                                status_code=410)
         # Пароль проверяем до кода: ошибка в пароле не должна сжигать попытку кода.
-        if len(password) < 8:
+        if len(password) < auth.MIN_PASSWORD_LENGTH:
             return _code_page(request, purpose, flow, phone,
-                              i18n.gettext("Пароль — не короче 8 знаков."), 422)
+                              i18n.gettext("Пароль — не короче 10 знаков."), 422)
         if password != password2:
             return _code_page(request, purpose, flow, phone, i18n.gettext("Пароли не совпадают."), 422)
         # Администратор мог закрыть регистрацию, пока клиент ждал SMS.
@@ -218,7 +250,7 @@ def _finish(request: Request, purpose: str, flow: str, code: str, password: str,
     if token is None:  # аккаунт успели отключить или удалить
         return RedirectResponse("/login", status_code=303)
     target = "/welcome/company" if purpose == "register" else "/"
-    return _with_session(RedirectResponse(target, status_code=303), token)
+    return _remember_device(_with_session(RedirectResponse(target, status_code=303), token), user_id)
 
 
 ORG_KINDS = {"ip": "ИП", "too": "ТОО", "other": "Другое"}
@@ -277,6 +309,8 @@ def logout(request: Request):
     with core.pool.connection() as conn:
         who = auth.user_by_session(conn, request.cookies.get(SESSION_COOKIE))
         auth.logout(conn, request.cookies.get(SESSION_COOKIE))
+        # Выход «из-под пользователя» целиком: сессия администратора тоже закрывается.
+        auth.logout(conn, request.cookies.get(RETURN_COOKIE))
     if who:
         _audit(request, who[0], "logout")
     response = RedirectResponse("/login", status_code=303)

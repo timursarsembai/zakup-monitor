@@ -6,17 +6,20 @@ import psycopg
 from zakup import secrets_box
 
 DEFAULT_PROVIDER = "claude_code"
+# Настройки берутся у первого действующего администратора: удалённый или отключённый
+# мог остаться первым по номеру.
+ADMIN = "role = 'admin' AND deleted_at IS NULL AND NOT disabled"
 
 
 def admin_id(conn: psycopg.Connection) -> int | None:
-    row = conn.execute("SELECT id FROM users WHERE role = 'admin' ORDER BY id LIMIT 1").fetchone()
+    row = conn.execute(f"SELECT id FROM users WHERE {ADMIN} ORDER BY id LIMIT 1").fetchone()
     return row[0] if row else None
 
 
 def models(conn: psycopg.Connection) -> tuple[str, str | None, str | None]:
     """(провайдер, модель поиска, модель коротких задач); модели — None, если не выбраны."""
     row = conn.execute(
-        "SELECT ai_provider, ai_model, ai_model_light FROM users WHERE role = 'admin' ORDER BY id LIMIT 1"
+        f"SELECT ai_provider, ai_model, ai_model_light FROM users WHERE {ADMIN} ORDER BY id LIMIT 1"
     ).fetchone()
     if row is None:
         return DEFAULT_PROVIDER, None, None

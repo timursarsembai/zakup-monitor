@@ -11,12 +11,12 @@
     <input id="code" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="8" required autofocus>
   </div>
   <div class="field">
-    <label for="password">{{ _("Новый пароль") if reset else _("Придумайте пароль") }} <span class="muted">{{ _("— не короче 8 знаков") }}</span></label>
-    <input id="password" name="password" type="password" autocomplete="new-password" minlength="8" required>
+    <label for="password">{{ _("Новый пароль") if reset else _("Придумайте пароль") }} <span class="muted">{{ _("— не короче 10 знаков") }}</span></label>
+    <input id="password" name="password" type="password" autocomplete="new-password" minlength="10" required>
   </div>
   <div class="field">
     <label for="password2">{{ _("Повторите пароль") }}</label>
-    <input id="password2" name="password2" type="password" autocomplete="new-password" minlength="8" required>
+    <input id="password2" name="password2" type="password" autocomplete="new-password" minlength="10" required>
   </div>
   <button class="submit">{{ _("Сохранить пароль") if reset else _("Зарегистрироваться") }}</button>
 </form>

@@ -22,6 +22,7 @@ from zakup.web.core import (
     Viewer,
     _audit,
     logger,
+    not_impersonating,
     same_origin,
     templates,
 )
@@ -43,7 +44,7 @@ def pricing(request: Request, user: Viewer, need: str = "", error: str = ""):
         "need": need, "error": error})
 
 
-@router.post("/pay/tariff", dependencies=[Depends(same_origin)])
+@router.post("/pay/tariff", dependencies=[Depends(same_origin), Depends(not_impersonating)])
 def pay_tariff(request: Request, user: User):
     with core.pool.connection() as conn:
         price = tariff.get(conn)["price"]
@@ -51,7 +52,7 @@ def pay_tariff(request: Request, user: User):
                 f"Zakup: тариф на {payments.TARIFF_DAYS} дней")
 
 
-@router.post("/pay/searches", dependencies=[Depends(same_origin)])
+@router.post("/pay/searches", dependencies=[Depends(same_origin), Depends(not_impersonating)])
 def pay_searches(request: Request, user: Paid, count: Annotated[int, Form()]):
     # Поиски — дополнение к тарифу: без оплаченного тарифа купить нельзя.
     if not 1 <= count <= payments.MAX_SEARCHES:
@@ -108,7 +109,7 @@ def pay_status(user: User, ref: str):
 INVOICES_PER_HOUR = 5
 
 
-@router.post("/pay/{ref}/kaspi", dependencies=[Depends(same_origin)])
+@router.post("/pay/{ref}/kaspi", dependencies=[Depends(same_origin), Depends(not_impersonating)])
 def pay_kaspi_invoice(request: Request, user: User, ref: str, phone: Annotated[str, Form()] = ""):
     """Счёт в приложение Kaspi на номер (свой или указанный)."""
     with core.pool.connection() as conn:

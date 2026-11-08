@@ -8,6 +8,8 @@ from datetime import timedelta
 
 import psycopg
 
+from zakup import config
+
 SESSION_TTL = timedelta(days=30)
 # Не больше стольких неудачных попыток за окно — на e-mail и на IP.
 MAX_FAILURES_PER_EMAIL = 5
@@ -86,7 +88,25 @@ def is_phone_login(login: str) -> bool:
     return login.startswith("+7") and len(login) == 12 and login[1:].isdigit()
 
 
-def too_many_failures(conn: psycopg.Connection, email: str, ip: str | None) -> bool:
+def device_mark(user_id: int) -> str | None:
+    """Метка «с этого браузера уже входили»: id и подпись. Без ключа — меток нет."""
+    key = config.secret_key()
+    if not key:
+        return None
+    sign = hmac.new(key.encode(), f"device:{user_id}".encode(), hashlib.sha256).hexdigest()[:32]
+    return f"{user_id}.{sign}"
+
+
+def known_device(mark: str | None, user_id: int | None) -> bool:
+    expected = device_mark(user_id) if user_id else None
+    return bool(mark and expected and hmac.compare_digest(mark, expected))
+
+
+def too_many_failures(conn: psycopg.Connection, email: str, ip: str | None,
+                      known: bool = False) -> bool:
+    """Слишком много неудачных попыток. Входы по логину из браузера, где этот пользователь
+    уже входил (known), не блокируются: иначе чужой мог бы держать аккаунт закрытым,
+    просто вводя неверный пароль."""
     row = conn.execute(
         """SELECT count(*) FILTER (WHERE email = %(email)s),
                   count(*) FILTER (WHERE ip = %(ip)s)
@@ -95,7 +115,7 @@ def too_many_failures(conn: psycopg.Connection, email: str, ip: str | None) -> b
              AND (email = %(email)s OR ip = %(ip)s)""",
         {"email": email, "ip": ip, "window": FAILURE_WINDOW},
     ).fetchone()
-    return row[0] >= MAX_FAILURES_PER_EMAIL or (ip is not None and row[1] >= MAX_FAILURES_PER_IP)
+    return (not known and row[0] >= MAX_FAILURES_PER_EMAIL) or (ip is not None and row[1] >= MAX_FAILURES_PER_IP)
 
 
 def log_attempt(conn: psycopg.Connection, email: str, ip: str | None, ok: bool) -> None:
@@ -122,19 +142,20 @@ def login(
 
 
 def create_session(conn: psycopg.Connection, user_id: int, user_agent: str | None,
-                   ttl=None) -> str:
+                   ttl=None, impersonated_by: int | None = None) -> str:
     token = secrets.token_urlsafe(32)
     conn.execute(
-        """INSERT INTO sessions (token_hash, user_id, expires_at, user_agent)
-           VALUES (%s, %s, now() + %s, %s)""",
-        (_token_hash(token), user_id, ttl or SESSION_TTL, (user_agent or "")[:300]),
+        """INSERT INTO sessions (token_hash, user_id, expires_at, user_agent, impersonated_by)
+           VALUES (%s, %s, now() + %s, %s, %s)""",
+        (_token_hash(token), user_id, ttl or SESSION_TTL, (user_agent or "")[:300], impersonated_by),
     )
     conn.execute("DELETE FROM sessions WHERE expires_at < now()")
     return token
 
 
 def user_by_session(conn: psycopg.Connection, token: str | None) -> tuple | None:
-    """(id, логин, роль, есть ли доступ к платному, остаток поисков) по cookie сессии.
+    """(id, логин, роль, есть ли доступ к платному, остаток поисков, кто из администраторов
+    вошёл под этим пользователем — или None) по cookie сессии.
 
     Платное доступно сотрудникам всегда, клиентам — пока оплачено (paid_until)."""
     if not token:
@@ -142,7 +163,8 @@ def user_by_session(conn: psycopg.Connection, token: str | None) -> tuple | None
     return conn.execute(
         """SELECT u.id, u.email, u.role,
                   u.role IN ('admin', 'moderator') OR coalesce(u.paid_until > now(), false),
-                  (SELECT coalesce(sum(g.delta), 0) FROM search_ledger g WHERE g.user_id = u.id)
+                  (SELECT coalesce(sum(g.delta), 0) FROM search_ledger g WHERE g.user_id = u.id),
+                  s.impersonated_by
            FROM sessions s JOIN users u ON u.id = s.user_id
            WHERE s.token_hash = %s AND s.expires_at > now() AND NOT u.disabled
              AND u.deleted_at IS NULL""",

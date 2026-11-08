@@ -217,7 +217,11 @@ def _record_visit(**fields) -> None:
 
 def _audit(request: Request, user: int | None, action: str, target: str | None = None,
            login: str | None = None, **details) -> None:
-    """Запись в журнал действий; сбой журнала не должен ломать само действие."""
+    """Запись в журнал действий; сбой журнала не должен ломать само действие.
+    Под «входом как пользователь» — с пометкой, кто из администраторов это сделал."""
+    admin = getattr(request.state, "impersonator_id", None)
+    if admin and user != admin:
+        details["by_admin"] = admin
     try:
         with pool.connection() as conn:
             audit.log(conn, user, action, target, details or None,
@@ -241,13 +245,14 @@ def optional_user(request: Request) -> int | None:
     request.state.paid = bool(user and user[3])
     request.state.staff = bool(user and user[2] in auth.STAFF_ROLES)
     request.state.searches = user[4] if user else 0
-    # Администратор вошёл как этот пользователь: его собственная сессия — в отдельной cookie.
+    # Администратор вошёл как этот пользователь — видно по самой сессии (cookie можно
+    # удалить, сессию — нет). Его собственная сессия — в отдельной cookie.
     request.state.impersonator = None
-    if user and request.cookies.get(RETURN_COOKIE):
+    request.state.impersonator_id = user[5] if user else None
+    if request.state.impersonator_id:
         with pool.connection() as conn:
-            admin = auth.user_by_session(conn, request.cookies.get(RETURN_COOKIE))
-        if admin and admin[2] == "admin" and admin[0] != user[0]:
-            request.state.impersonator = admin[1]
+            request.state.impersonator = conn.execute(
+                "SELECT email FROM users WHERE id = %s", (user[5],)).fetchone()[0]
     return user[0] if user else None
 
 
@@ -290,6 +295,14 @@ def current_admin(request: Request, user: User) -> int:
 
 
 Admin = Annotated[int, Depends(current_admin)]
+
+
+def not_impersonating(request: Request, user: User) -> None:
+    """Пароль, Telegram, оплата, группа клиентов — только сам владелец аккаунта, не
+    администратор, вошедший под ним (иначе он мог бы, например, привязать свой Telegram
+    к чужому аккаунту и читать его уведомления)."""
+    if request.state.impersonator_id:
+        raise HTTPException(403, "Недоступно при входе как пользователь")
 
 
 def current_staff(request: Request, user: User) -> int:

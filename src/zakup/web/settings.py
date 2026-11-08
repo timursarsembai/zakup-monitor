@@ -38,6 +38,7 @@ from zakup.web.core import (
     _user_groups,
     _with_session,
     logger,
+    not_impersonating,
     same_origin,
     templates,
 )
@@ -131,7 +132,8 @@ def _users_tab(conn, user: int, is_admin: bool, is_staff: bool) -> dict:
     """Пользователи: список (модератор не видит администраторов), удалённые, регистрация."""
     users = conn.execute(
         """SELECT u.id, u.email, u.role, u.telegram_chat_id IS NOT NULL,
-                  (SELECT max(created_at) FROM sessions s WHERE s.user_id = u.id),
+                  (SELECT max(created_at) FROM sessions s WHERE s.user_id = u.id
+                   AND s.impersonated_by IS NULL),
                   u.disabled, o.name, o.bin, u.paid_until,
                   (SELECT coalesce(sum(g.delta), 0) FROM search_ledger g WHERE g.user_id = u.id)
            FROM users u LEFT JOIN client_orgs o ON o.user_id = u.id
@@ -148,7 +150,7 @@ def _users_tab(conn, user: int, is_admin: bool, is_staff: bool) -> dict:
             "registration_open": signup.registration_open(conn)}
 
 
-@router.post("/settings/password", dependencies=[Depends(same_origin)])
+@router.post("/settings/password", dependencies=[Depends(same_origin), Depends(not_impersonating)])
 def change_password(
     request: Request,
     user: User,
@@ -156,8 +158,15 @@ def change_password(
     password: Annotated[str, Form()],
     repeat: Annotated[str, Form()],
 ):
+    ip = request.client.host if request.client else None
     with core.pool.connection() as conn:
-        if not auth.check_password(conn, user, current):
+        # Подбор текущего пароля по чужой сессии — с тем же лимитом, что и вход.
+        mark = f"#password:{user}"
+        if auth.too_many_failures(conn, mark, None):
+            error = "Слишком много неудачных попыток. Попробуйте через 15 минут."
+        elif not auth.check_password(conn, user, current):
+            auth.log_attempt(conn, mark, ip, False)
+            conn.commit()
             error = "Текущий пароль неверный."
         elif password != repeat:
             error = "Новые пароли не совпали."
@@ -175,10 +184,16 @@ def change_password(
 
 @router.post("/settings/users", dependencies=[Depends(same_origin)])
 def add_user(request: Request, staff: Staff, login: Annotated[str, Form()]):
-    login = auth.normalize_email(login)
+    # Логин-телефон — в том же виде, что при регистрации по SMS (+7…): иначе «8701…» стал бы
+    # вторым аккаунтом того же человека.
+    login = auth.normalize_phone(login) or auth.normalize_email(login)
     if not login or len(login) > 100 or any(c.isspace() for c in login):
         return _settings_page(request, staff, error="Логин — без пробелов, до 100 символов.",
                               status_code=422, tab="users")
+    if auth.is_phone_login(login) and request.state.role != "admin":
+        # Аккаунт на чужой номер с паролем у модератора — вход под будущим клиентом.
+        return _settings_page(request, staff, error="Аккаунт на номер телефона заводит администратор "
+                              "или сам клиент при регистрации.", status_code=403, tab="users")
     with core.pool.connection() as conn:
         existing = conn.execute("SELECT deleted_at FROM users WHERE email = %s", (login,)).fetchone()
         if existing:
@@ -186,7 +201,9 @@ def add_user(request: Request, staff: Staff, login: Annotated[str, Form()]):
             return _settings_page(request, staff, error=f"Пользователь {login} уже есть.{hint}",
                                   status_code=422, tab="users")
         password = auth.generate_password()
-        auth.set_password(conn, login, password)
+        user_id = auth.set_password(conn, login, password)
+        if auth.is_phone_login(login):
+            conn.execute("UPDATE users SET phone = %s WHERE id = %s", (login, user_id))
     _audit(request, staff, "user_add", login)
     return _settings_page(request, staff, notice=f"Создан пользователь {login}. Пароль: {password} "
                           "— передайте его, больше он нигде не показывается.", tab="users")
@@ -262,7 +279,8 @@ def impersonate(request: Request, admin: Admin, user_id: int):
         role = conn.execute("SELECT role FROM users WHERE id = %s", (user_id,)).fetchone()[0]
         if role == "admin":
             raise HTTPException(403, "Входить как другой администратор нельзя")
-        token = auth.create_session(conn, user_id, request.headers.get("user-agent"), IMPERSONATE_TTL)
+        token = auth.create_session(conn, user_id, request.headers.get("user-agent"), IMPERSONATE_TTL,
+                                    impersonated_by=admin)
         conn.commit()
     _audit(request, admin, "impersonate", login)
     response = _with_session(RedirectResponse("/", status_code=303), token)
@@ -358,18 +376,19 @@ def toggle_reregister(request: Request, admin: Admin, user_id: int):
 def reset_password(request: Request, staff: Staff, user_id: int):
     with core.pool.connection() as conn:
         if user_id == staff:
-            login = conn.execute("SELECT email FROM users WHERE id = %s", (user_id,)).fetchone()[0]
-        elif request.state.role != "admin":
+            # Новый пароль себе здесь не показывается — вход был бы потерян.
+            raise HTTPException(422, "Свой пароль меняйте во вкладке «Аккаунт»")
+        if request.state.role != "admin":
             # Новый пароль клиента в руках модератора — это вход под клиентом, а он только у
             # администратора. Клиент восстанавливает пароль сам, по SMS.
             raise HTTPException(403, "Сбросить пароль клиента может только администратор")
-        else:
-            login = _other_user(conn, request, staff, user_id)
+        login = _other_user(conn, request, staff, user_id)
+        if conn.execute("SELECT role FROM users WHERE id = %s", (user_id,)).fetchone()[0] == "admin":
+            # Пароль другого администратора в руках — это его аккаунт целиком.
+            raise HTTPException(403, "Пароль другого администратора он сбрасывает сам")
         password = auth.generate_password()
         auth.set_password(conn, login, password)
     _audit(request, staff, "user_reset", login)
-    if user_id == staff:
-        return RedirectResponse("/login", status_code=303)
     return _settings_page(request, staff, notice=f"Новый пароль для {login}: {password} — "
                           "передайте его, больше он нигде не показывается. Старые входы сброшены.",
                           tab="users")
@@ -499,7 +518,7 @@ def save_company(request: Request, user: Admin, company_bin: Annotated[str, Form
     return RedirectResponse("/settings?saved=bin#company", status_code=303)
 
 
-@router.post("/settings/telegram/link", dependencies=[Depends(same_origin)])
+@router.post("/settings/telegram/link", dependencies=[Depends(same_origin), Depends(not_impersonating)])
 def telegram_link(request: Request, user: User):
     which = "main" if request.state.staff else "client"
     username = telegram.bot_username(which)
@@ -511,7 +530,7 @@ def telegram_link(request: Request, user: User):
     return RedirectResponse(f"https://t.me/{username}?start={code}", status_code=303)
 
 
-@router.post("/settings/client-group", dependencies=[Depends(same_origin)])
+@router.post("/settings/client-group", dependencies=[Depends(same_origin), Depends(not_impersonating)])
 def client_group_join(request: Request, user: Paid):
     """Ссылка-заявка в группу клиентов: бот одобрит её, если тариф оплачен."""
     with core.pool.connection() as conn:
@@ -548,7 +567,7 @@ def telegram_group_remove(request: Request, user: Admin, chat_id: Annotated[str,
     return RedirectResponse("/settings", status_code=303)
 
 
-@router.post("/settings/telegram/unlink", dependencies=[Depends(same_origin)])
+@router.post("/settings/telegram/unlink", dependencies=[Depends(same_origin), Depends(not_impersonating)])
 def telegram_unlink(request: Request, user: User):
     with core.pool.connection() as conn:
         conn.execute("UPDATE users SET telegram_chat_id = NULL WHERE id = %s", (user,))

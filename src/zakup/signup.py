@@ -7,18 +7,22 @@
 (минута между кодами на номер, 300 в сутки на бизнес).
 """
 
+import ipaddress
 import secrets
 from datetime import timedelta
 
 import psycopg
 
-from zakup import kazpayment
+from zakup import kazpayment, notify
 
 FLOW_TTL = timedelta(minutes=15)
 MAX_ATTEMPTS = 5          # попыток ввести один код
 PER_IP_HOUR = 5           # кодов в час с одного адреса
+PER_NET_HOUR = 10         # кодов в час с одной подсети (/24, у IPv6 — /64)
 PER_PHONE_DAY = 5         # кодов в сутки на один номер
-PER_DAY = 100             # кодов в сутки всего (≈4 000 ₸)
+# Кодов в сутки всего (≈40 ₸ за SMS) — у регистрации и восстановления свои: выбрав
+# лимит регистраций, нельзя закрыть восстановление пароля настоящим клиентам.
+PER_DAY = {"register": 100, "reset": 50}
 
 
 class SignupError(Exception):
@@ -41,24 +45,42 @@ def set_registration_open(conn: psycopg.Connection, value: bool) -> None:
 OTP_LOCK = 7_402
 
 
+def _network(ip: str | None) -> str | None:
+    """Подсеть адреса: у одного провайдера или хостинга адреса идут подряд."""
+    if not ip:
+        return None
+    try:
+        address = ipaddress.ip_address(ip)
+    except ValueError:
+        return None
+    prefix = 24 if address.version == 4 else 64
+    return str(ipaddress.ip_network(f"{ip}/{prefix}", strict=False))
+
+
 def start(conn: psycopg.Connection, phone: str, purpose: str, ip: str | None) -> str:
     """Отправляет код и возвращает flow для следующего шага."""
     # Счётчики и запись шага — под общей блокировкой и до отправки SMS: иначе пачка
     # одновременных запросов видит одни и те же старые счётчики и обходит лимиты.
     conn.execute("SELECT pg_advisory_xact_lock(%s)", (OTP_LOCK,))
-    ip_count, phone_count, total = conn.execute(
-        """SELECT count(*) FILTER (WHERE ip = %s AND created_at > now() - interval '1 hour'),
-                  count(*) FILTER (WHERE phone = %s AND created_at > now() - interval '1 day'),
-                  count(*) FILTER (WHERE created_at > now() - interval '1 day')
+    ip_count, net_count, phone_count, total = conn.execute(
+        """SELECT count(*) FILTER (WHERE ip = %(ip)s AND created_at > now() - interval '1 hour'),
+                  count(*) FILTER (WHERE %(net)s::cidr IS NOT NULL AND ip IS NOT NULL
+                                   AND ip::inet <<= %(net)s::cidr AND created_at > now() - interval '1 hour'),
+                  count(*) FILTER (WHERE phone = %(phone)s),
+                  count(*) FILTER (WHERE purpose = %(purpose)s)
            FROM otp_requests WHERE created_at > now() - interval '1 day'""",
-        (ip, phone),
+        {"ip": ip, "net": _network(ip), "phone": phone, "purpose": purpose},
     ).fetchone()
-    if ip_count >= PER_IP_HOUR or phone_count >= PER_PHONE_DAY:
+    if ip_count >= PER_IP_HOUR or net_count >= PER_NET_HOUR or phone_count >= PER_PHONE_DAY:
         conn.rollback()
         raise SignupError("Слишком много кодов. Попробуйте позже.")
-    if total >= PER_DAY:
+    budget = PER_DAY[purpose]
+    if total >= budget:
         conn.rollback()
         raise SignupError("Отправка кодов временно недоступна. Попробуйте завтра.")
+    if total + 1 == budget // 2:
+        notify.send(f"zakup: за сутки отправлено {total + 1} SMS-кодов ({purpose}) — половина "
+                    f"дневного лимита {budget}. Если клиентов столько не было — похоже на перебор.")
     flow = secrets.token_urlsafe(24)
     conn.execute(
         """INSERT INTO otp_requests (flow, purpose, phone, request_id, ip)
