@@ -146,12 +146,10 @@
   <div class="pw-wrap">
     <button type="button" class="pw-close" data-pw-close aria-label="{{ _("Закрыть") }}">✕</button>
     <h2 id="paywall-title">🔒 {{ _("Это платная функция") }}</h2>
-    <p>{{ _("Тариф «Zakup» — 9 900 ₸ в месяц:") }}</p>
+    {% set t = tariff() %}
+    <p>{{ _("Тариф") }} «{{ pick(t.name_ru, t.name_kk) }}» — {{ "{:,}".format(t.price).replace(",", " ") }} ₸ {{ _("в месяц") }}:</p>
     <ul>
-      <li>{{ _("уведомления в Telegram о новых лотах и объявлениях по вашим условиям поиска;") }}</li>
-      <li>{{ _("избранное с напоминаниями о сроках и итогами;") }}</li>
-      <li>{{ _("краткая выжимка техспецификации и чек-лист вопросов поставщику — без ограничений;") }}</li>
-      <li>{{ _("совпадения по подпискам и выгрузка в Excel.") }}</li>
+      {% for item in (t.features_kk if lang() == "kk" else t.features_ru) %}<li>{{ item }}</li>{% endfor %}
     </ul>
     <p class="muted">{{ _("Поиск товаров под лот с ИИ — отдельно: 250 ₸ за поиск, пакетами.") }}</p>
     <div class="pw-actions">

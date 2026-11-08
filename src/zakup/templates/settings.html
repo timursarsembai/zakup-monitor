@@ -25,6 +25,7 @@
   .provider:has(input:checked) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
   .provider b { display: block; }
   [data-tab-panel][hidden], [data-provider-fields][hidden] { display: none; }
+  .tariff-form textarea { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); font: inherit; }
   .row-actions { display: flex; flex-wrap: wrap; gap: 6px; }
   .row-actions form, td form { margin: 0; }
   td select { padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); font: inherit; }
@@ -46,6 +47,7 @@
   {% if is_admin %}
   <a href="#ai" role="tab" data-tab="ai">{{ _("Искусственный интеллект") }}</a>
   <a href="#company" role="tab" data-tab="company">{{ _("Организация") }}</a>
+  <a href="#tariff" role="tab" data-tab="tariff">{{ _("Тариф") }}</a>
   {% endif %}
   {% if is_staff %}
   <a href="#users" role="tab" data-tab="users">{{ _("Пользователи") }}</a>
@@ -151,6 +153,24 @@
   </form>
   {% if saved == "proxy" %}<p class="note">{{ _("Сохранено.") }}</p>{% endif %}
   <p class="note muted">{{ _("Логин и пароль прокси хранятся зашифрованными и на страницу не выводятся.") }}</p>
+</section>
+</div>
+
+{% set t = tariff() %}
+<div data-tab-panel="tariff" hidden>
+<section class="panel wide">
+  <h2>{{ _("Тариф") }}</h2>
+  <p class="muted">{{ _("Название, цена и пункты описания — так их видят клиенты на странице тарифа и в окне «Это платная функция». Каждый пункт — с новой строки.") }}</p>
+  <form method="post" action="/settings/tariff" class="tariff-form">
+    <label class="field"><span>{{ _("Название") }}</span><input name="name_ru" value="{{ t.name_ru }}" maxlength="60" required></label>
+    <label class="field"><span>{{ _("Название на казахском") }}</span><input name="name_kk" value="{{ t.name_kk }}" maxlength="60"></label>
+    <label class="field"><span>{{ _("Цена в месяц, ₸") }}</span><input name="price" value="{{ t.price }}" inputmode="numeric" required></label>
+    <label class="field"><span>{{ _("Что входит — по пункту в строке") }}</span><textarea name="features_ru" rows="8" required>{{ t.features_ru | join("\n") }}</textarea></label>
+    <label class="field"><span>{{ _("То же на казахском") }}</span><textarea name="features_kk" rows="8">{{ t.features_kk | join("\n") }}</textarea></label>
+    <button class="primary">{{ _("Сохранить") }}</button>
+    {% if saved == "tariff" %}<p class="note">{{ _("Сохранено.") }}</p>{% endif %}
+  </form>
+  <p class="muted"><a href="/pricing" target="_blank">{{ _("Открыть страницу тарифа →") }}</a></p>
 </section>
 </div>
 

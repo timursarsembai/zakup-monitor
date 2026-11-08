@@ -46,6 +46,7 @@ from zakup import (
     sources,
     spec,
     subjects,
+    tariff,
     telegram,
 )
 from zakup.filters import (
@@ -103,6 +104,18 @@ def _time_left(end: datetime | None) -> str:
 
 templates.env.globals["time_left"] = _time_left
 templates.env.globals["site_url"] = SITE_URL
+
+
+def _tariff() -> dict:
+    """Тариф для шаблонов (окно «платная функция», страница тарифа) — из настроек."""
+    try:
+        with pool.connection() as conn:
+            return tariff.get(conn)
+    except psycopg.Error:
+        return tariff.DEFAULT
+
+
+templates.env.globals["tariff"] = _tariff
 templates.env.globals["_"] = i18n.gettext
 templates.env.filters["tr"] = i18n.gettext
 templates.env.globals["lang"] = i18n.language
@@ -1662,7 +1675,7 @@ def _settings_page(request: Request, user: int, *, sent: str = "", saved: str = 
             "default_models": research.DEFAULT_MODELS,
             "models": research.MODELS,
             "light_defaults": research.SUMMARY_MODELS,
-            "tab": tab or {"ai": "ai", "bin": "company"}.get(saved),
+            "tab": tab or {"ai": "ai", "bin": "company", "tariff": "tariff"}.get(saved),
             "users": users,
             "me": user,
             "now": datetime.now(UTC),
@@ -1885,6 +1898,23 @@ def save_ai(
     _audit(request, user, "settings_ai", provider, model=chosen, model_light=light,
            new_key=bool(api_key.strip()))
     return RedirectResponse("/settings?saved=ai#ai", status_code=303)
+
+
+@app.post("/settings/tariff", dependencies=[Depends(same_origin)])
+def save_tariff(request: Request, admin: Admin, name_ru: Annotated[str, Form()],
+                price: Annotated[str, Form()], features_ru: Annotated[str, Form()],
+                name_kk: Annotated[str, Form()] = "", features_kk: Annotated[str, Form()] = ""):
+    digits = "".join(c for c in price if c.isdigit())
+    if not digits or not 0 < int(digits) <= 10_000_000 or not name_ru.strip() or not tariff.lines(features_ru):
+        return _settings_page(request, admin, error="Укажите название, цену в тенге и хотя бы один пункт.",
+                              status_code=422, tab="tariff")
+    data = {"name_ru": name_ru.strip()[:60], "name_kk": (name_kk.strip() or name_ru.strip())[:60],
+            "price": int(digits), "features_ru": tariff.lines(features_ru),
+            "features_kk": tariff.lines(features_kk) or tariff.lines(features_ru)}
+    with pool.connection() as conn:
+        tariff.save(conn, data)
+    _audit(request, admin, "settings_tariff", data["name_ru"], price=data["price"])
+    return RedirectResponse("/settings?saved=tariff#tariff", status_code=303)
 
 
 @app.post("/settings/proxy", dependencies=[Depends(same_origin)])

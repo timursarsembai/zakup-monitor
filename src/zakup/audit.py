@@ -42,6 +42,7 @@ ACTIONS = {
     "settings_ai": "Настройки ИИ",
     "settings_company": "Настройки организации",
     "settings_proxy": "Настройки прокси",
+    "settings_tariff": "Изменил тариф",
     "settings_registration": "Регистрация открыта/закрыта",
     "user_add": "Добавил пользователя",
     "user_reset": "Сбросил пароль пользователю",

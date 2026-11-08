@@ -21,14 +21,12 @@
 <p class="muted">{{ _("Поиск объявлений и лотов, страницы закупок и аналитика — бесплатно и без регистрации.") }}</p>
 {% if paid_until %}<p class="status">✓ {{ _("Тариф оплачен до") }} <b>{{ (paid_until|local).strftime("%d.%m.%Y") }}</b></p>{% endif %}
 <div class="plans">
+  {% set t = tariff() %}
   <section class="plan">
-    <h2>{{ _("Тариф «Zakup»") }}</h2>
-    <div class="price">9 900 ₸ <small>{{ _("в месяц") }}</small></div>
+    <h2>{{ _("Тариф") }} «{{ pick(t.name_ru, t.name_kk) }}»</h2>
+    <div class="price">{{ "{:,}".format(t.price).replace(",", " ") }} ₸ <small>{{ _("в месяц") }}</small></div>
     <ul>
-      <li>{{ _("уведомления в Telegram о новых лотах и объявлениях по вашим условиям поиска;") }}</li>
-      <li>{{ _("избранное с напоминаниями о сроках и итогами;") }}</li>
-      <li>{{ _("краткая выжимка техспецификации и чек-лист вопросов поставщику — без ограничений;") }}</li>
-      <li>{{ _("совпадения по подпискам и выгрузка в Excel.") }}</li>
+      {% for item in (t.features_kk if lang() == "kk" else t.features_ru) %}<li>{{ item }}</li>{% endfor %}
     </ul>
     <p class="muted">{{ _("Без пробного периода. Отменить можно в любой момент.") }}</p>
   </section>

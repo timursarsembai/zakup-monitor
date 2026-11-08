@@ -895,3 +895,21 @@ def test_search_balance_charge_refund_history(client, conn):
     assert conn.execute("SELECT count(*) FROM search_ledger WHERE kind = 'search'").fetchone()[0] == 1
     assert "поисков на балансе — 40" in client.post(f"/settings/users/{client_id}/searches",
                                                   data={"count": "20"}, headers=ORIGIN).text
+
+
+def test_admin_edits_tariff_shown_to_clients(client, conn):
+    from zakup import tariff
+
+    page = client.get("/pricing").text
+    assert "краткая выжимка техспецификации — без ограничений" in page and "выгрузка в Excel" in page
+    _login(client)
+    assert "Цена в месяц" in client.get("/settings").text
+    saved = client.post("/settings/tariff", data={"name_ru": "Профи", "price": "12 900",
+                                                  "features_ru": "• уведомления\n- избранное;\n\n"},
+                        headers=ORIGIN, follow_redirects=False)
+    assert saved.headers["location"] == "/settings?saved=tariff#tariff"
+    assert tariff.get(conn)["features_ru"] == ["уведомления", "избранное"]
+    page = client.get("/pricing").text
+    assert "«Профи»" in page and "12 900 ₸" in page and "<li>избранное</li>" in page
+    assert client.post("/settings/tariff", data={"name_ru": "x", "price": "0", "features_ru": "a"},
+                       headers=ORIGIN).status_code == 422
