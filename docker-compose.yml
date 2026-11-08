@@ -1,17 +1,28 @@
-x-app-env: &app-env
+# Каждой службе — только её секреты: утечка из одной службы не раскрывает остальные.
+x-db-env: &db-env
   # Приложение — под zakup_app (владелец таблиц, не суперпользователь): scripts/db-app-role.sh.
   DATABASE_URL: postgresql://zakup_app:${APP_DB_PASSWORD:?run scripts/db-app-role.sh}@postgres:5432/zakup
   # libpq показывает даты по времени Астаны.
   PGTZ: Asia/Almaty
-  GOSZAKUP_TOKEN: ${GOSZAKUP_TOKEN:-}
-  GOSZAKUP_REQUEST_DELAY: ${GOSZAKUP_REQUEST_DELAY:-0.5}
+
+# Уведомления в Telegram (оба бота: клиентские чаты — через клиентского).
+x-telegram-env: &telegram-env
   ZAKUP_TELEGRAM_BOT_TOKEN: ${ZAKUP_TELEGRAM_BOT_TOKEN:-}
   ZAKUP_TELEGRAM_BOT_USERNAME: ${ZAKUP_TELEGRAM_BOT_USERNAME:-}
   ZAKUP_TELEGRAM_CHAT_ID: ${ZAKUP_TELEGRAM_CHAT_ID:-}
-  ZAKUP_SECRET_KEY: ${ZAKUP_SECRET_KEY:-}
   ZAKUP_CLIENT_BOT_TOKEN: ${ZAKUP_CLIENT_BOT_TOKEN:-}
-  KAZPAYMENT_API_KEY: ${KAZPAYMENT_API_KEY:-}
-  KAZPAYMENT_WEBHOOK_SECRET: ${KAZPAYMENT_WEBHOOK_SECRET:-}
+
+x-portal-env: &portal-env
+  GOSZAKUP_TOKEN: ${GOSZAKUP_TOKEN:-}
+  GOSZAKUP_REQUEST_DELAY: ${GOSZAKUP_REQUEST_DELAY:-0.5}
+
+# Контейнерам приложения права root не нужны (работают от nobody).
+x-hardening: &hardening
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  pids_limit: 256
 
 x-logging: &logging
   driver: json-file
@@ -40,6 +51,7 @@ services:
     logging: *logging
 
   worker:
+    <<: *hardening
     build: .
     image: zakup
     container_name: zakup-worker
@@ -54,13 +66,16 @@ services:
       # Быстрый круг — раз в 2 минуты: новые объявления, их подробности (без них не
       # работают фильтры), совпадения и рассылка. Тяжёлое — в сервисе archive.
       - zakup migrate; while true; do zakup sync; zakup rescan --days 3 --max-pages 4; zakup details --part open --limit 500; zakup payments; sleep 120; done
-    environment: *app-env
+    environment:
+      <<: [*db-env, *telegram-env, *portal-env]
+      KAZPAYMENT_API_KEY: ${KAZPAYMENT_API_KEY:-}
     mem_limit: 256m
     logging: *logging
 
   # Медленный круг — раз в 15 минут: перечитать месяц (поздние публикации,
   # смена статусов), подробности завершённых и протоколы итогов.
   archive:
+    <<: *hardening
     image: zakup
     container_name: zakup-archive
     restart: unless-stopped
@@ -71,13 +86,15 @@ services:
     entrypoint: ["sh", "-c"]
     command:
       - while true; do zakup rescan; zakup details --part finished; zakup subjects; zakup tidy; sleep 900; done
-    environment: *app-env
+    environment:
+      <<: [*db-env, *telegram-env, *portal-env]
     mem_limit: 256m
     logging: *logging
 
   # Заранее разбирает техспецификации открытых лотов в текст: страницы лотов
   # открываются без обращения к порталу.
   specs:
+    <<: *hardening
     image: zakup
     container_name: zakup-specs
     restart: unless-stopped
@@ -86,13 +103,14 @@ services:
       worker:
         condition: service_started
     entrypoint: ["zakup", "specs", "--loop"]
-    environment: *app-env
+    environment: *db-env
     mem_limit: 512m  # разбор PDF — в отдельном процессе, до ~200 МБ (zakup.spec)
     logging: *logging
 
   # Поиск товаров под лоты через API OpenAI/Anthropic (ключи пользователей).
   # Claude Code по подписке работает не здесь, а на хосте: deploy/zakup-research.service.
   research:
+    <<: *hardening
     image: zakup
     container_name: zakup-research
     restart: unless-stopped
@@ -101,11 +119,14 @@ services:
       worker:
         condition: service_started
     entrypoint: ["zakup", "research", "--providers", "anthropic,openai"]
-    environment: *app-env
+    environment:
+      <<: [*db-env, *telegram-env]
+      ZAKUP_SECRET_KEY: ${ZAKUP_SECRET_KEY:-}
     mem_limit: 256m
     logging: *logging
 
   bot:
+    <<: *hardening
     image: zakup
     container_name: zakup-bot
     restart: unless-stopped
@@ -114,11 +135,13 @@ services:
       worker:
         condition: service_started
     entrypoint: ["zakup", "bot"]
-    environment: *app-env
+    environment:
+      <<: [*db-env, *telegram-env]
     mem_limit: 128m
     logging: *logging
 
   client-bot:
+    <<: *hardening
     image: zakup
     container_name: zakup-client-bot
     restart: unless-stopped
@@ -127,13 +150,15 @@ services:
       worker:
         condition: service_started
     entrypoint: ["zakup", "client-bot"]
-    environment: *app-env
+    environment:
+      <<: [*db-env, *telegram-env]
     mem_limit: 128m
     logging: *logging
 
   # Сайт — две одинаковые копии за шлюзом (см. deploy/gateway/default.conf): выкладка
   # перезапускает их по очереди, и сайт не пропадает.
   web: &web
+    <<: *hardening
     image: zakup
     container_name: zakup-web-1
     restart: unless-stopped
@@ -149,7 +174,11 @@ services:
       # X-Forwarded-For принимаем только от шлюза (его адрес постоянный): иначе клиент
       # сам подставляет «свой» IP и обходит ограничение попыток входа.
       - --forwarded-allow-ips=172.31.96.10
-    environment: *app-env
+    environment:
+      <<: [*db-env, *telegram-env, *portal-env]
+      ZAKUP_SECRET_KEY: ${ZAKUP_SECRET_KEY:-}
+      KAZPAYMENT_API_KEY: ${KAZPAYMENT_API_KEY:-}
+      KAZPAYMENT_WEBHOOK_SECRET: ${KAZPAYMENT_WEBHOOK_SECRET:-}
     networks:
       default:
       webnet:
