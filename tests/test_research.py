@@ -255,3 +255,15 @@ def test_spec_from_excel_and_word_files():
                    '<w:tc><w:p><w:r><w:t>190x90</w:t></w:r></w:p></w:tc></w:tr></w:tbl></w:body></w:document>')
     text = spec.extract(doc.getvalue())
     assert "Кровать металлическая" in text and "Размер | 190x90" in text
+
+
+def test_price_column_numbers_only_and_estimated_unit():
+    from zakup import research
+
+    found = research.clean({"items": [{"url": "https://m.kz/1", "price": 6466,
+                                       "price_unit": "не указано (в объявлении «от 1 шт»)", "note": "Уточнить"}]})
+    item = found["items"][0]
+    assert item["unit_price"] == 6466 and item["unit_estimated"] is True
+    assert item["price_unit"] == "" and "от 1 шт" in item["note"]
+    exact = research.clean({"items": [{"url": "https://m.kz/2", "price": 100, "price_unit": "м", "unit_price": 100}]})
+    assert exact["items"][0]["unit_estimated"] is False and exact["items"][0]["price_unit"] == "м"

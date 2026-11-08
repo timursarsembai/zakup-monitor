@@ -129,8 +129,11 @@ PROMPT = """Ты помогаешь поставщику, который уча�
    - name — название товара у продавца; seller — магазин или компания; city — город;
    - in_region — true, если продавец в регионе поставки ({region});
    - price — цена на странице в тенге (если в другой валюте — переведи по курсу и
-     напиши об этом в note); price_unit — за что эта цена (шт, упаковка 10 шт, м и т.д.);
-   - unit_price — цена за ту же единицу, что в лоте ({unit}), в тенге;
+     напиши об этом в note); price_unit — за что эта цена, КОРОТКО: «шт», «м»,
+     «кг», «упак. 10 шт» — без пояснений (пояснения только в note);
+   - unit_price — ЧИСЛО: цена за ту же единицу, что в лоте ({unit}), в тенге. Единицы
+     разные — пересчитай (упаковка → штука и т.п.); не уверен в единице — поставь
+     цену со страницы и объясни сомнение в note. Не оставляй пустым, если цена есть;
    - url — прямая ссылка на страницу товара (обязательно — чтобы перепроверить);
    - phone — телефон продавца (несколько — через запятую). Ищи по-настоящему:
      на странице товара, затем на странице продавца (ссылка «Продавец …»,
@@ -517,21 +520,33 @@ def clean(result: dict[str, Any]) -> dict[str, Any]:
         if not url.startswith(("https://", "http://")):
             continue
         image = str(item.get("image") or "")
+        price, unit_price = _number(item.get("price")), _number(item.get("unit_price"))
+        price_unit = str(item.get("price_unit") or "").strip()
+        note = str(item.get("note") or "").strip()
+        estimated = False
+        if unit_price is None and price is not None:
+            # Единицу ИИ не сопоставил — считаем по цене со страницы, помечаем «≈».
+            unit_price, estimated = price, True
+        if len(price_unit) > 20:
+            # В колонке цены — только число и короткая единица; пояснения — в заметку.
+            note = f"{note} Цена: {price_unit}.".strip() if price_unit not in note else note
+            price_unit = ""
         items.append({
             "name": str(item.get("name") or "")[:300],
             "seller": str(item.get("seller") or "")[:150],
             "city": str(item.get("city") or "")[:100],
             "in_region": bool(item.get("in_region")),
-            "price": _number(item.get("price")),
-            "price_unit": str(item.get("price_unit") or "")[:60],
-            "unit_price": _number(item.get("unit_price")),
+            "price": price,
+            "price_unit": price_unit[:20],
+            "unit_price": unit_price,
+            "unit_estimated": estimated,
             "url": url[:1000],
             "phone": _phone(item.get("phone")),
             "image": image[:1000] if image.startswith(("https://", "http://")) else None,
             "fit": str(item.get("fit") or "")[:20],
             "matches": _strings(item.get("matches")),
             "mismatches": _strings(item.get("mismatches")),
-            "note": str(item.get("note") or "")[:400],
+            "note": note[:500],
         })
     items.sort(key=lambda i: (not i["in_region"], i["unit_price"] is None, i["unit_price"] or 0))
     return {

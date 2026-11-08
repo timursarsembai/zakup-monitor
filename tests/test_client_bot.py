@@ -47,3 +47,11 @@ def test_link_group_join_requests_and_expiry(conn, monkeypatch):
     assert client_bot.maintenance(conn, datetime.now(UTC) + timedelta(days=3)) == (0, 1)
     assert [c[0] for c in calls[-3:]] == ["banChatMember", "unbanChatMember", "sendMessage"]
     assert conn.execute("SELECT count(*) FROM client_group_members").fetchone()[0] == 0
+
+
+def test_group_migration_to_supergroup(conn, monkeypatch):
+    _calls(monkeypatch)
+    client_bot._set_group(conn, "-5538", "Клиенты")
+    client_bot.handle_message(conn, {"chat": {"id": -5538, "type": "group", "title": "Клиенты"},
+                                     "migrate_to_chat_id": -1005538})
+    assert client_bot.group_id(conn) == "-1005538"

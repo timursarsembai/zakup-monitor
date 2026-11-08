@@ -72,6 +72,10 @@ def handle_message(conn: psycopg.Connection, message: dict) -> str | None:
     command, _, argument = text.partition(" ")
     command = command.partition("@")[0]
     if chat.get("type") in ("group", "supergroup"):
+        # Группа стала супергруппой (нужно для заявок) — у неё новый id.
+        if (new_id := message.get("migrate_to_chat_id")) and str(chat["id"]) == group_id(conn):
+            _set_group(conn, str(new_id), chat.get("title") or "")
+            return None
         if command != "/start":
             return None
         sender = (message.get("from") or {}).get("id")

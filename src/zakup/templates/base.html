@@ -39,7 +39,13 @@
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.45 system-ui, sans-serif; }
   header, main { max-width: 1600px; margin: 0 auto; padding: 12px 24px; }
-  header { display: flex; gap: 18px; align-items: center; border-bottom: 1px solid var(--line); }
+  header { display: flex; gap: 18px; align-items: center; border-bottom: 1px solid var(--line);
+           position: sticky; top: 0; z-index: 50; background: var(--bg); }
+  .to-top { position: fixed; right: 18px; bottom: 22px; z-index: 45; width: 46px; height: 46px; border-radius: 50%;
+            border: 1px solid var(--line); background: var(--bg); color: var(--fg); font-size: 22px; line-height: 1;
+            box-shadow: 0 6px 18px rgb(0 0 0 / 25%); opacity: 0; pointer-events: none; transition: opacity .2s; }
+  .to-top.show { opacity: .92; pointer-events: auto; }
+  @media (max-width: 760px) { .to-top { right: 12px; bottom: calc(76px + env(safe-area-inset-bottom)); } }
   .brand { display: inline-flex; align-items: center; gap: 8px; color: var(--fg); font-weight: 800; font-size: 20px; letter-spacing: -0.02em; }
   .brand img { width: auto; height: 30px; display: block; }
   /* Логотип: тёмные буквы на светлых темах, светлые — на тёмной и синей. */
@@ -177,6 +183,7 @@
 </header>
 {% endblock %}
 <main{% block main_class %}{% endblock %}>{% block main %}{% endblock %}</main>
+<button type="button" class="to-top" data-to-top aria-label="{{ _("Наверх") }}" title="{{ _("Наверх") }}">↑</button>
 {# Платные функции: кнопки видны всем, без доступа открывают это окно. #}
 <dialog class="paywall" id="paywall" aria-labelledby="paywall-title">
   <div class="pw-wrap">
@@ -247,6 +254,15 @@
       delete root.dataset.contrast; store("zakup-contrast", "");
       setZoom(1);
     });
+  })();
+  // Кнопка «наверх»: появляется, когда страницу прокрутили.
+  (() => {
+    const button = document.querySelector("[data-to-top]");
+    if (!button) return;
+    const sync = () => button.classList.toggle("show", window.scrollY > 500);
+    window.addEventListener("scroll", sync, { passive: true });
+    button.addEventListener("click", () => window.scrollTo({ top: 0, behavior: "smooth" }));
+    sync();
   })();
   // Меню ☰ на телефоне: открыть/закрыть, закрыть по нажатию вне его.
   (() => {

@@ -21,21 +21,24 @@
   {% for in_region, title in ((true, _("В регионе поставки:") ~ " " ~ (r.region_searched or job.region)), (false, _("Другие регионы Казахстана"))) %}
   {% set group = r["items"] | selectattr("in_region", "equalto", in_region) | list %}
   {# Не дешевле цены лота — без маржи: не показываем (и в старых результатах). #}
-  {% set kept = namespace(items=[]) %}{% for item in group %}{% if not (lot_price and item.unit_price and item.unit_price >= lot_price) %}{% set kept.items = kept.items + [item] %}{% endif %}{% endfor %}
+  {% set kept = namespace(items=[]) %}{% for item in group %}{% set u = item.unit_price if item.unit_price is not none else item.price %}{% if not (lot_price and u and u >= lot_price) %}{% set kept.items = kept.items + [item] %}{% endif %}{% endfor %}
   {% set group = kept.items %}
   {% if group %}
   <h3>{{ title }} <span class="muted">{{ group|length }}</span></h3>
   <div class="table-wrap"><table class="research">
     <tr><th></th><th>{{ _("Товар и продавец") }}</th><th>{{ _("За ед. у продавца, ₸") }}</th><th>{{ _("За ед. в лоте, ₸") }}</th><th>{{ _("Кол-во по лоту") }}</th><th>{{ _("Маржа за ед.") }}</th><th>{{ _("Маржа на лот, ₸") }}</th><th>{{ _("Соответствует ТС") }}</th><th>{{ _("Не соответствует") }}</th><th>{{ _("Телефон") }}</th></tr>
     {% for item in group %}
-    {% set margin = (lot_price - item.unit_price) if (lot_price and item.unit_price) else none %}
+    {% set unit = item.unit_price if item.unit_price is not none else item.price %}
+    {% set margin = (lot_price - unit) if (lot_price and unit) else none %}
     <tr>
       <td class="photo">{% if item.image %}<a href="{{ item.url | safe_url }}" target="_blank" rel="noopener noreferrer"><img src="{{ item.image | safe_url }}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()"></a>{% endif %}</td>
       <td class="product"><a href="{{ item.url | safe_url }}" target="_blank" rel="noopener noreferrer">{{ item.name }}</a>{% if item.new %} <span class="badge hot">{{ _("новое") }}</span>{% endif %}
         <div class="muted">{{ item.seller }}{% if item.city %} · {{ item.city }}{% endif %}</div>
         <div class="muted url"><a href="{{ item.url | safe_url }}" target="_blank" rel="noopener noreferrer">{{ (item.url | replace("https://", "") | replace("http://", "")) | truncate(48) }}</a></div>
         {% if item.note %}<div class="muted">{{ item.note }}</div>{% endif %}</td>
-      <td class="num"><b>{{ item.unit_price | money }}</b>{% if item.price and item.price != item.unit_price %}<div class="muted">{{ item.price | money }} {{ _("за") }} {{ item.price_unit }}</div>{% endif %}</td>
+      {# Только число. Старые результаты: цены за единицу нет — берём цену со страницы, «≈». #}
+      {% set estimated = item.unit_estimated or (item.unit_price is none and item.price is not none) %}
+      <td class="num"><b>{% if estimated %}≈ {% endif %}{{ (item.unit_price if item.unit_price is not none else item.price) | money }}</b>{% if item.price and item.unit_price and item.price != item.unit_price and item.price_unit | length <= 20 %}<div class="muted">{{ item.price | money }} / {{ item.price_unit }}</div>{% endif %}{% if estimated %}<div class="muted">{{ _("уточнить единицу") }}</div>{% endif %}</td>
       <td class="num">{{ lot_price | money }}</td>
       <td class="num">{% if count %}{{ '%g'|format(count) }} {{ (lot_info.unit or "") }}{% endif %}</td>
       <td class="num">{% if margin is not none %}<span class="{{ 'plus' if margin > 0 else 'minus' }}">{{ margin | money }} ₸<br>{{ '%.1f'|format(margin / lot_price * 100) }}%</span>{% endif %}</td>
