@@ -328,7 +328,7 @@ def test_roles_users_and_passwords(client, conn):
                                                  "repeat": "new-password-1"},
                      headers=ORIGIN, follow_redirects=False)
     assert ok.headers["location"] == "/login"
-    assert client.get("/settings", follow_redirects=False).status_code == 303  # сессия сброшена
+    assert "Мой пароль" not in client.get("/settings").text  # гостю — только «Интерфейс»  # сессия сброшена
     amir = conn.execute("SELECT id FROM users WHERE email = 'amir'").fetchone()[0]
     _login(client)
     reset = client.post(f"/settings/users/{amir}/reset", headers=ORIGIN).text
@@ -1006,3 +1006,12 @@ def test_admin_logs_in_as_user_and_returns(client, conn):
     client.post("/logout", headers=ORIGIN)
     client.post("/login", data={"email": "amir", "password": "amir-password-1"}, headers=ORIGIN)
     assert client.post(f"/settings/users/{ids['client']}/impersonate", headers=ORIGIN).status_code == 403
+
+
+def test_guest_settings_only_interface_and_header_order(client):
+    page = client.get("/settings")
+    assert page.status_code == 200 and "Интерфейс" in page.text and "Высокий контраст" in page.text
+    assert "Уведомления в Telegram" not in page.text and "Мой пароль" not in page.text
+    header = page.text.split("<header>", 1)[1].split("</header>", 1)[0]
+    assert header.index(">Регистрация<") < header.index(">Вход<") < header.index("data-burger")
+    assert 'href="/settings"' in header

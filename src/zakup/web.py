@@ -1734,7 +1734,12 @@ def matches(request: Request, user: Paid):
 
 
 @app.get("/settings")
-def settings(request: Request, user: User, sent: str = "", saved: str = ""):
+def settings(request: Request, user: Viewer, sent: str = "", saved: str = ""):
+    if user is None:
+        # Гостю — только вкладка «Интерфейс»: тема, язык, режим для слабовидящих.
+        return templates.TemplateResponse(request, "settings.html", {
+            "guest": True, "is_admin": False, "is_staff": False, "tab": "interface",
+            "notice": None, "error": None, "saved": "", "sent": ""})
     return _settings_page(request, user, sent=sent, saved=saved)
 
 
@@ -1774,6 +1779,7 @@ def _settings_page(request: Request, user: int, *, sent: str = "", saved: str = 
         {
             "is_admin": is_admin,
             "is_staff": is_staff,
+            "guest": False,
             "roles": auth.ROLES,
             "deleted": deleted,
             "registration_open": registration_open,

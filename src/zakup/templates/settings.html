@@ -57,8 +57,10 @@
 
 <nav class="tabs" role="tablist">
   <a href="#interface" role="tab" data-tab="interface">{{ _("Интерфейс") }}</a>
+  {% if not guest %}
   <a href="#notify" role="tab" data-tab="notify">{{ _("Уведомления") }}</a>
   <a href="#account" role="tab" data-tab="account">{{ _("Аккаунт") }}</a>
+  {% endif %}
   {% if is_admin %}
   <a href="#ai" role="tab" data-tab="ai">{{ _("Искусственный интеллект") }}</a>
   <a href="#company" role="tab" data-tab="company">{{ _("Организация") }}</a>
@@ -103,6 +105,7 @@
 </section>
 </div>
 
+{% if not guest %}
 <div data-tab-panel="notify" hidden>
 <section class="panel">
   <h2>{{ _("Уведомления в Telegram") }}</h2>
@@ -153,6 +156,7 @@
   <p class="note muted">{{ _("После смены пароля нужно войти заново — на всех устройствах.") }}</p>
 </section>
 </div>
+{% endif %}
 
 {% if is_admin %}
 <div data-tab-panel="ai" hidden>
