@@ -738,6 +738,13 @@ def balance_page(request: Request, user: User):
         "rows": rows, "balance": left, "kinds": credits.KINDS})
 
 
+@app.get("/favicon.ico")
+def favicon() -> Response:
+    """Браузеры и поисковики спрашивают иконку по этому адресу без ссылки на странице."""
+    return Response(files("zakup").joinpath("static/favicon.ico").read_bytes(),
+                    media_type="image/x-icon", headers={"Cache-Control": "public, max-age=86400"})
+
+
 @app.get("/robots.txt")
 def robots() -> Response:
     lines = ["User-agent: *", "Allow: /",

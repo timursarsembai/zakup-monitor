@@ -6,7 +6,9 @@
 <title>{% block title %}{{ _("Закупки") }}{% endblock %} · Zakup</title>
 <meta name="description" content="{% block description %}{{ _("Госзакупки Казахстана: поиск объявлений и лотов goszakup.gov.kz, итоги, победители, аналитика рынка.") }}{% endblock %}">
 <link rel="canonical" href="{{ site_url }}{{ request.url.path }}">
-<link rel="icon" type="image/png" href="/static/favicon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/static/favicon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
 <script>
   // Тема: по умолчанию тёмная, выбор запоминается в браузере. До отрисовки, чтобы не мигало.
   (function () {
@@ -39,9 +41,14 @@
   header, main { max-width: 1600px; margin: 0 auto; padding: 12px 24px; }
   header { display: flex; gap: 18px; align-items: center; border-bottom: 1px solid var(--line); }
   .brand { display: inline-flex; align-items: center; gap: 8px; color: var(--fg); font-weight: 800; font-size: 20px; letter-spacing: -0.02em; }
-  .brand img { width: auto; height: 32px; border-radius: 6px; display: block; }
+  .brand img { width: auto; height: 30px; display: block; }
+  /* Логотип: тёмные буквы на светлых темах, светлые — на тёмной и синей. */
+  .logo-dark-bg { display: none !important; }
+  :root[data-theme=dark] .logo-light-bg, :root[data-theme=navy] .logo-light-bg { display: none !important; }
+  :root[data-theme=dark] .logo-dark-bg, :root[data-theme=navy] .logo-dark-bg { display: block !important; }
   .main-nav { display: flex; gap: 22px; }
-  .main-nav a { display: inline-flex; align-items: center; gap: 6px; }
+  .main-nav a { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+  @media (min-width: 761px) and (max-width: 1180px) { .main-nav { gap: 12px; } .main-nav svg { display: none; } header { gap: 12px; } }
   .main-nav a.on { color: var(--fg); font-weight: 600; }
   .main-nav svg, .icon-button svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
   .icon-button { display: inline-flex; align-items: center; justify-content: center; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; color: inherit; }
@@ -99,12 +106,10 @@
   .burger { display: none; font-size: 20px; line-height: 1; padding: 4px 10px; }
   .tools { display: flex; gap: 10px; align-items: center; }
   .tool-label { display: none; }
-  @media (max-width: 760px) {
+  @media (max-width: 1180px) {
     .burger { display: inline-flex; }
     .tools { display: none; position: fixed; top: 52px; right: 8px; z-index: 70; flex-direction: column; align-items: stretch; gap: 6px; min-width: 230px; padding: 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 10px 30px rgb(0 0 0 / 30%); }
     .tools.open { display: flex; }
-    /* Тема, язык и режим для слабовидящих на телефоне — в «Настройки» → «Интерфейс». */
-    .tools .ui-ctl { display: none !important; }
     header .logout > a.icon-button { padding: 4px 8px; font-size: 14px; white-space: nowrap; }
     .brand img { height: 26px; }
     .tools .tool-row { display: flex; align-items: center; gap: 10px; justify-content: flex-start; padding: 6px 8px; border: 0; border-radius: 8px; color: var(--fg); }
@@ -112,6 +117,10 @@
     .tools form.tool-row { padding: 0; margin-top: 4px; }
     .tools form.tool-row button { width: 100%; text-align: center; padding: 10px; font-size: 16px; font-weight: 600; color: var(--bad); border: 1.5px solid var(--bad); border-radius: 10px; }
     .tools .primary-link { justify-content: center; }
+  }
+  @media (max-width: 760px) {
+    /* Тема, язык и режим для слабовидящих на телефоне — в «Настройки» → «Интерфейс». */
+    .tools .ui-ctl { display: none !important; }
   }
   {% block style %}{% endblock %}
 </style>
@@ -125,7 +134,7 @@
 {% endif %}
 {% block header %}
 <header>
-  <a href="/" class="brand" aria-label="{{ _("Tenderim — на главную") }}"><img src="/static/logo-tenderim.png" alt="Tenderim" width="162" height="30"></a>
+  <a href="/" class="brand" aria-label="{{ _("Tenderim — на главную") }}"><img class="logo-light-bg" src="/static/logo-tenderim.png" alt="Tenderim" width="173" height="30"><img class="logo-dark-bg" src="/static/logo-tenderim-light.png" alt="Tenderim" width="173" height="30"></a>
   {% set path = request.url.path %}
   <nav class="main-nav" aria-label="{{ _("Разделы") }}">
     <a href="/announcements" class="{{ 'on' if path in ('/', '/lots', '/announcements') or path.startswith('/lots/') or path.startswith('/a/') }}"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span>{{ _("nav:Закупки") }}</span></a>
