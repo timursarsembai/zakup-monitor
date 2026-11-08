@@ -31,6 +31,10 @@ class GoszakupError(Exception):
         self.status = status
 
 
+class PortalUnavailable(GoszakupError):
+    """Портал не ответил ни на одну попытку: сбой на их стороне, не ошибка в коде."""
+
+
 class Page(NamedTuple):
     items: list[dict[str, Any]]
     next_after: int | None
@@ -109,7 +113,7 @@ class Client:
                     response.status_code,
                 )
             return response.json()
-        raise GoszakupError(f"{path}: no successful response after retries")
+        raise PortalUnavailable(f"{path}: no successful response after retries")
 
     def _pause(self, attempt: int, seconds: float) -> None:
         if attempt + 1 < self._attempts:

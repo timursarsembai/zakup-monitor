@@ -27,4 +27,8 @@ fi
 
 docker compose up -d
 systemctl --user restart zakup-research
+# Дежурного не перезапускаем, если выкладку запустил он сам: иначе прервёт свой же разбор.
+if [ -z "${ZAKUP_AUTOFIX:-}" ]; then
+  systemctl --user try-restart zakup-autofix || true
+fi
 echo "Готово: $(git log --oneline -1)"

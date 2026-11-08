@@ -490,3 +490,21 @@ CREATE TABLE IF NOT EXISTS client_group_members (
     joined_at timestamptz NOT NULL DEFAULT now(),
     warned_at timestamptz
 );
+-- Сбои сборщиков: их разбирает и по возможности исправляет `zakup autofix` на хосте.
+CREATE TABLE IF NOT EXISTS incidents (
+    id          bigserial PRIMARY KEY,
+    fingerprint text NOT NULL,
+    stage       text NOT NULL,
+    error_type  text NOT NULL,
+    trace       text NOT NULL DEFAULT '',
+    count       integer NOT NULL DEFAULT 1,
+    first_at    timestamptz NOT NULL DEFAULT now(),
+    last_at     timestamptz NOT NULL DEFAULT now(),
+    -- new → working → fixed | external | owner | failed
+    status      text NOT NULL DEFAULT 'new',
+    report      text,
+    commit      text,
+    started_at  timestamptz,
+    finished_at timestamptz
+);
+CREATE INDEX IF NOT EXISTS incidents_status ON incidents (status, id);

@@ -1,0 +1,12 @@
+# Дежурный zakup: разбирает сбои сборщиков и сам исправляет ошибки в коде (Claude Code).
+[Unit]
+Description=zakup: автоисправление сбоев (Claude Code)
+After=network-online.target
+
+[Service]
+ExecStart=%h/apps/zakup/scripts/autofix-host.sh
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=default.target

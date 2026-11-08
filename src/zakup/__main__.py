@@ -8,7 +8,7 @@ import time
 from datetime import date, datetime, timedelta
 from datetime import time as day_time
 
-from zakup import audit, auth, bot, db, details, marks, matcher, notify, results, sync
+from zakup import audit, auth, bot, db, details, incidents, marks, matcher, results, sync
 from zakup.goszakup import ENTITIES, PORTAL_TZ, Client
 
 # Сколько истории грузить, если start-from не запускали.
@@ -37,6 +37,7 @@ def main() -> int:
     orgs = sub.add_parser("subjects", help="догрузить контакты заказчиков открытых объявлений")
     orgs.add_argument("--limit", type=int, default=600)
     sub.add_parser("client-bot", help="клиентский Telegram-бот и группа клиентов (постоянно)")
+    sub.add_parser("autofix", help="дежурный: разбирает и исправляет сбои (на хосте, постоянно)")
     sub.add_parser("bot", help="Telegram-бот: привязка чатов (работает постоянно)")
     specs_cmd = sub.add_parser("specs", help="заранее разобрать техспецификации открытых лотов")
     specs_cmd.add_argument("--limit", type=int, default=200)
@@ -65,6 +66,11 @@ def main() -> int:
         with db.connect(os.environ["DATABASE_URL"]) as conn:
             if os.environ.get("KAZPAYMENT_API_KEY"):
                 print(f"payments: {payments.poll(conn)}")
+        return 0
+    if args.command == "autofix":
+        from zakup import autofix
+
+        autofix.run()
         return 0
     if args.command == "client-bot":
         from zakup import client_bot
@@ -195,9 +201,11 @@ def _sync(conn, client: Client, max_pages: int) -> int:
             print(sync.sync(conn, client, entity, max_pages))
         _match_and_deliver(conn)
     except Exception as error:
-        # Only the type: database errors can quote the connection string.
-        notify.send(f"zakup: синхронизация упала с ошибкой {type(error).__name__}.")
+        # Недоступность портала — одно сообщение за перерыв; остальное — на автоисправление.
+        conn.rollback()
+        incidents.failed("синхронизация", error)
         raise
+    incidents.portal_ok(conn)
     return 0
 
 
@@ -228,8 +236,9 @@ def _rescan(conn, client: Client, days: int, max_pages: int) -> int:
             print(f"lots rescanned: {sync.rescan(conn, client, 'lots', lot_floor, max_pages)}")
         _match_and_deliver(conn)
     except Exception as error:
-        # Only the type: database errors can quote the connection string.
-        notify.send(f"zakup: повторный проход упал с ошибкой {type(error).__name__}.")
+        # Недоступность портала — одно сообщение за перерыв; остальное — на автоисправление.
+        conn.rollback()
+        incidents.failed("повторный проход", error)
         raise
     return 0
 
@@ -250,8 +259,9 @@ def _details(conn, client: Client, limit: int, part: str = "all") -> int:
                   f"protocols: {results.parse_pending(conn, PROTOCOLS_PER_RUN)}, "
                   f"old actions purged: {audit.purge(conn)}")
     except Exception as error:
-        # Only the type: database errors can quote the connection string.
-        notify.send(f"zakup: подробности объявлений упали с ошибкой {type(error).__name__}.")
+        # Недоступность портала — одно сообщение за перерыв; остальное — на автоисправление.
+        conn.rollback()
+        incidents.failed("подробности объявлений", error)
         raise
     return 0
 
