@@ -410,6 +410,7 @@ def _claude_code(prompt: str, model: str, schema: dict | None = None,
         raise ResearchError(f"Claude Code: {str(output.get('result') or output.get('subtype'))[:300]}")
     # Во сколько обошёлся бы запуск по API: считаем себестоимость запроса для тарифов.
     _last_usage.update(cost_usd=output.get("total_cost_usd"), usage=output.get("usage"),
+                       models=output.get("modelUsage"), duration_ms=output.get("duration_ms"),
                        turns=output.get("num_turns"))
     return output["structured_output"]
 
