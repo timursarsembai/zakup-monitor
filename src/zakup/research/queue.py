@@ -204,60 +204,76 @@ def work(database_url: str, providers: list[str], once: bool = False) -> None:
     first = True
     while True:
         with db.connect(database_url) as conn:
-            # На старте «running» своих провайдеров — точно мёртвые: исполнитель один.
-            reaped = conn.execute(
-                f"""UPDATE lot_research SET status = 'error', finished_at = now(),
-                       error = 'прервано: перезапуск службы'
-                    WHERE status = 'running' AND provider = ANY(%s)
-                      AND (%s OR started_at < now() - interval '{STALE_AFTER}')
-                    RETURNING id""",
-                (providers, first),
-            ).fetchall()
-            for (dead,) in reaped:
-                credits.refund(conn, dead)
+            _reap(conn, providers, first)
             first = False
-            for table in ("spec_summaries", "supplier_questions"):
-                conn.execute(
-                    f"""UPDATE {table} SET status = 'error', error = 'прервано'
-                        WHERE status = 'running' AND started_at < now() - interval '10 minutes'"""
-                )
-            conn.commit()
             # Выжимки короткие (секунды) — их вперёд длинных поисков товаров.
             while _work_summaries(conn, providers) or questions.work_one(conn, providers):
                 pass
-            row = conn.execute(
-                """UPDATE lot_research SET status = 'running', started_at = now()
-                   WHERE id = (SELECT id FROM lot_research
-                               WHERE status = 'queued' AND provider = ANY(%s)
-                               ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED)
-                   RETURNING id, lot_id, user_id, provider, model, region, whole_kz,
-                             target, base_id""",
-                (providers,),
-            ).fetchone()
-            conn.commit()
-            if row:
-                job = dict(zip(("id", "lot_id", "user_id", "provider", "model", "region",
-                                "whole_kz", "target", "base_id"), row, strict=True))
-                logger.info("research %s: lot %s via %s", job["id"], job["lot_id"], job["provider"])
-                prov._last_usage.clear()
-                try:
-                    result, error = run_job(conn, job), None
-                except Exception as exc:  # noqa: BLE001 — задача не должна зависнуть в running
-                    conn.rollback()
-                    logger.warning("research %s failed: %s", job["id"], exc)
-                    result, error = None, str(exc)[:500]
-                if result is None:
-                    # Не удалось — поиск возвращается на баланс клиента.
-                    credits.refund(conn, job["id"])
-                conn.execute(
-                    """UPDATE lot_research SET status = %s, result = %s, error = %s,
-                           finished_at = now(), usage = %s WHERE id = %s AND status = 'running'""",
-                    ("done" if result is not None else "error",
-                     Jsonb(result) if result is not None else None, error,
-                     Jsonb(dict(prov._last_usage)) if prov._last_usage else None, job["id"]),
-                )
-                conn.commit()
+            job = _take(conn, providers)
+            if job:
+                _run(conn, job)
         if once:
             return
-        if not row:
+        if not job:
             time.sleep(5)
+
+
+def _reap(conn: psycopg.Connection, providers: list[str], first: bool) -> None:
+    """Зависшие задачи — в ошибку (поиск возвращается на баланс). На старте «running»
+    своих провайдеров — точно мёртвые: исполнитель один."""
+    reaped = conn.execute(
+        f"""UPDATE lot_research SET status = 'error', finished_at = now(),
+               error = 'прервано: перезапуск службы'
+            WHERE status = 'running' AND provider = ANY(%s)
+              AND (%s OR started_at < now() - interval '{STALE_AFTER}')
+            RETURNING id""",
+        (providers, first),
+    ).fetchall()
+    for (dead,) in reaped:
+        credits.refund(conn, dead)
+    for table in ("spec_summaries", "supplier_questions"):
+        conn.execute(
+            f"""UPDATE {table} SET status = 'error', error = 'прервано'
+                WHERE status = 'running' AND started_at < now() - interval '10 minutes'"""
+        )
+    conn.commit()
+
+
+def _take(conn: psycopg.Connection, providers: list[str]) -> dict[str, Any] | None:
+    """Следующая задача из очереди (сразу помечается «в работе») или None."""
+    row = conn.execute(
+        """UPDATE lot_research SET status = 'running', started_at = now()
+           WHERE id = (SELECT id FROM lot_research
+                       WHERE status = 'queued' AND provider = ANY(%s)
+                       ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED)
+           RETURNING id, lot_id, user_id, provider, model, region, whole_kz,
+                     target, base_id""",
+        (providers,),
+    ).fetchone()
+    conn.commit()
+    if row is None:
+        return None
+    return dict(zip(("id", "lot_id", "user_id", "provider", "model", "region",
+                     "whole_kz", "target", "base_id"), row, strict=True))
+
+
+def _run(conn: psycopg.Connection, job: dict[str, Any]) -> None:
+    """Выполняет поиск и сохраняет итог; не удалось — поиск возвращается на баланс."""
+    logger.info("research %s: lot %s via %s", job["id"], job["lot_id"], job["provider"])
+    prov._last_usage.clear()
+    try:
+        result, error = run_job(conn, job), None
+    except Exception as exc:  # noqa: BLE001 — задача не должна зависнуть в running
+        conn.rollback()
+        logger.warning("research %s failed: %s", job["id"], exc)
+        result, error = None, str(exc)[:500]
+    if result is None:
+        credits.refund(conn, job["id"])
+    conn.execute(
+        """UPDATE lot_research SET status = %s, result = %s, error = %s,
+               finished_at = now(), usage = %s WHERE id = %s AND status = 'running'""",
+        ("done" if result is not None else "error",
+         Jsonb(result) if result is not None else None, error,
+         Jsonb(dict(prov._last_usage)) if prov._last_usage else None, job["id"]),
+    )
+    conn.commit()

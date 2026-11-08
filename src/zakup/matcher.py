@@ -306,25 +306,42 @@ def _remember_sent(conn: psycopg.Connection, chat_id: str, batch: list[Notice]) 
     )
 
 
-def deliver(conn: psycopg.Connection, pause: float = 1.1) -> int:
-    """Рассылает новые совпадения. Возвращает число отправленных лотов.
-
-    Лот приходит в чат один раз, даже если подошёл под несколько подписок.
-    """
-    found_lots = pending(conn)
+def _without_repeats(conn: psycopg.Connection, found_lots: list) -> list:
+    """Убирает лоты, которые уже были в этом чате или пришли по второй подписке в тот же
+    чат; такие совпадения сразу помечаются обработанными."""
     sent_before = _already_sent(conn, found_lots)
     fresh, repeated = [], []
     seen: set[tuple[str | None, int]] = set()
     for lot in found_lots:
         key = (lot.chat_id, lot.lot_id)
-        # Уже был в этом чате или пришёл по второй подписке в тот же чат — не повторяем.
         if lot.chat_id and (key in sent_before or key in seen):
             repeated.append((lot.subscription_id, lot.lot_id))
             continue
         seen.add(key)
         fresh.append(lot)
     _mark_notified(conn, [Notice(None, "", "", repeated)])
-    found = notices(fresh)
+    return fresh
+
+
+def _chat_gone(conn: psycopg.Connection, chat_id: str, chat_notices: list) -> None:
+    """Чат удалён или бот выгнан: отвязываем. Подписки группы теперь шлют в личку —
+    эти лоты уйдут туда; личные — считаются обработанными."""
+    logger.info("chat %s is gone, unlinking", chat_id)
+    conn.execute("UPDATE users SET telegram_chat_id = NULL WHERE telegram_chat_id = %s", (chat_id,))
+    is_group = conn.execute("SELECT 1 FROM telegram_groups WHERE chat_id = %s", (chat_id,)).fetchone()
+    bot.unlink_group(conn, chat_id)
+    if is_group:
+        conn.commit()
+    else:
+        _mark_notified(conn, chat_notices)
+
+
+def deliver(conn: psycopg.Connection, pause: float = 1.1) -> int:
+    """Рассылает новые совпадения. Возвращает число отправленных лотов.
+
+    Лот приходит в чат один раз, даже если подошёл под несколько подписок.
+    """
+    found = notices(_without_repeats(conn, pending(conn)))
     # Без подключённого Telegram совпадение видно только на сайте, но считается обработанным.
     _mark_notified(conn, [n for n in found if not n.chat_id])
     by_chat: dict[str, list[Notice]] = {}
@@ -347,20 +364,7 @@ def deliver(conn: psycopg.Connection, pause: float = 1.1) -> int:
                     # Telegram недоступен или лимит: остальное отправим в следующий раз.
                     logger.warning("delivery stopped: %s", error)
                     return sent
-                logger.info("chat %s is gone, unlinking", chat_id)
-                conn.execute(
-                    "UPDATE users SET telegram_chat_id = NULL WHERE telegram_chat_id = %s",
-                    (chat_id,),
-                )
-                is_group = conn.execute(
-                    "SELECT 1 FROM telegram_groups WHERE chat_id = %s", (chat_id,)
-                ).fetchone()
-                bot.unlink_group(conn, chat_id)
-                if is_group:
-                    # Подписки группы теперь шлют в личку: эти лоты уйдут туда.
-                    conn.commit()
-                else:
-                    _mark_notified(conn, chat_notices)
+                _chat_gone(conn, chat_id, chat_notices)
                 break
             _remember_sent(conn, chat_id, batch)
             _mark_notified(conn, batch)
