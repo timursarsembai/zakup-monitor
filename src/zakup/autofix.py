@@ -119,10 +119,19 @@ def _claude(prompt: str) -> dict:
     return output["structured_output"]
 
 
-def _dirty() -> bool:
+# Последний коммит моложе этого — в репозитории, скорее всего, работает человек.
+QUIET_AFTER_COMMIT = 20 * 60
+
+
+def _busy() -> bool:
+    """В репозитории работают руками: есть незакоммиченные правки или свежий коммит.
+    Дежурный в это время не начинает — иначе два редактора в одной папке."""
     status = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"],
                             cwd=REPO, capture_output=True, text=True)
-    return bool(status.stdout.strip())
+    if status.stdout.strip():
+        return True
+    last = subprocess.run(["git", "log", "-1", "--format=%ct"], cwd=REPO, capture_output=True, text=True)
+    return last.stdout.strip().isdigit() and time.time() - int(last.stdout.strip()) < QUIET_AFTER_COMMIT
 
 
 def _next(conn):
@@ -190,9 +199,9 @@ def run() -> None:
             _finish(conn, incident, "failed", "Разбор прервался (перезапуск дежурного). Нужен взгляд владельца.")
     waiting = False
     while True:
-        if _dirty():
+        if _busy():
             if not waiting:
-                logger.info("repo has uncommitted changes, waiting")
+                logger.info("repo is being worked on, waiting")
             waiting = True
             time.sleep(POLL)
             continue

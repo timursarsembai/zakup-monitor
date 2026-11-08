@@ -73,3 +73,12 @@ def test_autofix_gives_up_after_repeated_failures(conn, sent):
     assert autofix._next(conn) is None
     assert conn.execute("SELECT status FROM incidents ORDER BY id DESC LIMIT 1").fetchone()[0] == "owner"
     assert "нужно ваше решение" in sent[-1]
+
+
+def test_portal_refusal_is_outage_not_code_error(conn, sent):
+    from zakup.goszakup import GoszakupError
+
+    incidents.failed("синхронизация", _raise(GoszakupError("/v3/trd-buy: HTTP 403", 403)), conn)
+    assert sent == [] and conn.execute("SELECT count(*) FROM incidents").fetchone()[0] == 0
+    incidents.failed("синхронизация", _raise(GoszakupError("/v3/trd-buy: HTTP 400", 400)), conn)
+    assert conn.execute("SELECT count(*) FROM incidents").fetchone()[0] == 1

@@ -18,7 +18,7 @@ import httpx
 import psycopg
 
 from zakup import db, notify
-from zakup.goszakup import PortalUnavailable
+from zakup.goszakup import GoszakupError, PortalUnavailable
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +43,13 @@ def redact(text: str) -> str:
     return text
 
 
+# Портал временно отказывает (ограничение частоты, защита от ботов) — это не ошибка в коде.
+TEMPORARY_REFUSALS = (403, 429)
+
+
 def is_outage(error: BaseException) -> bool:
+    if isinstance(error, GoszakupError) and getattr(error, "status", None) in TEMPORARY_REFUSALS:
+        return True
     return isinstance(error, (PortalUnavailable, httpx.TransportError))
 
 
@@ -119,7 +125,8 @@ def _outage(conn) -> None:
         state = {"since": now.isoformat(), "notified": False}
     elif not state["notified"] and now - datetime.fromisoformat(state["since"]) >= OUTAGE_NOTICE:
         since = datetime.fromisoformat(state["since"]).astimezone(timezone(timedelta(hours=5)))
-        notify.send(f"zakup: портал goszakup не отвечает с {since:%H:%M}. Это сбой на их стороне; "
+        notify.send(f"zakup: портал goszakup не отвечает или отказывает в доступе с {since:%H:%M}. "
+                    "Это на их стороне; "
                     "сборщики повторяют сами, напишу, когда портал вернётся.")
         state["notified"] = True
     else:

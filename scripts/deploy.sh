@@ -51,7 +51,10 @@ docker compose exec -T gateway nginx -s reload >/dev/null 2>&1
 
 systemctl --user restart zakup-research
 # Дежурного не перезапускаем, если выкладку запустил он сам: иначе прервёт свой же разбор.
-if [ -z "${ZAKUP_AUTOFIX:-}" ]; then
+# И не перезапускаем, пока он разбирает сбой: перезапуск прервал бы разбор (подхватит позже).
+working=$(docker compose exec -T postgres psql -U zakup -Atc \
+  "SELECT count(*) FROM incidents WHERE status = 'working'" 2>/dev/null || echo 0)
+if [ -z "${ZAKUP_AUTOFIX:-}" ] && [ "$working" = "0" ]; then
   systemctl --user try-restart zakup-autofix || true
 fi
 echo "Готово: $(git log --oneline -1)"

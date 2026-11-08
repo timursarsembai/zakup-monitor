@@ -9,6 +9,7 @@ import io
 import json
 import logging
 import os
+import sys
 import threading
 import time
 from contextlib import asynccontextmanager
@@ -200,6 +201,10 @@ async def lifespan(_: FastAPI):
             db.migrate(conn, attempts=1)
     except (psycopg.errors.LockNotAvailable, psycopg.errors.DeadlockDetected):
         logger.warning("migration skipped at startup: tables are busy")
+    # Аналитику рынка считаем сразу (≈10 с), а не на первом посетителе. В тестах — нет:
+    # фоновый расчёт мешал бы пересозданию тестовой базы.
+    if "pytest" not in sys.modules:
+        _spawn(_recount_market)
     yield
     pool.close()
 
