@@ -437,7 +437,7 @@ def _job(conn: psycopg.Connection, job_id: int) -> dict[str, Any] | None:
         return None
     keys = ("id", "status", "provider", "model", "region", "whole_kz", "result", "error",
             "created_at", "finished_at", "email", "target", "base_id", "ahead")
-    return dict(zip(keys, row))
+    return dict(zip(keys, row, strict=True))
 
 
 # --- Выполнение ---------------------------------------------------------------------
@@ -787,7 +787,7 @@ def summary_of(conn: psycopg.Connection, lot_id: int) -> dict[str, Any] | None:
     row = conn.execute(
         "SELECT status, result, error FROM spec_summaries WHERE lot_id = %s", (lot_id,)
     ).fetchone()
-    return dict(zip(("status", "result", "error"), row)) if row else None
+    return dict(zip(("status", "result", "error"), row, strict=True)) if row else None
 
 
 def _summarize(conn: psycopg.Connection, lot_id: int, provider: str, model: str) -> dict[str, Any]:
@@ -883,7 +883,7 @@ def work(database_url: str, providers: list[str], once: bool = False) -> None:
             conn.commit()
             if row:
                 job = dict(zip(("id", "lot_id", "user_id", "provider", "model", "region",
-                                "whole_kz", "target", "base_id"), row))
+                                "whole_kz", "target", "base_id"), row, strict=True))
                 logger.info("research %s: lot %s via %s", job["id"], job["lot_id"], job["provider"])
                 _last_usage.clear()
                 try:

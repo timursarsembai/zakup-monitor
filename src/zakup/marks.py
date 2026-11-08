@@ -114,7 +114,7 @@ def remind(conn: psycopg.Connection, now: datetime | None = None, pause: float =
         (REMIND_STATUSES, now, now + timedelta(hours=max(REMIND_HOURS))),
     ).fetchall()
     sent = 0
-    for user_id, lot_id, status, status_at, reminded, note, chat_id, a_id, end, name, amount, customer in rows:
+    for user_id, lot_id, _status, status_at, reminded, note, chat_id, _a_id, end, name, amount, customer in rows:
         hours = _threshold(end, status_at, reminded, now)
         if hours is None:
             continue
@@ -170,8 +170,8 @@ def announce_results(conn: psycopg.Connection, pause: float = 1.1) -> int:
              AND """ + ENTITLED_SQL
     ).fetchall()
     sent = 0
-    for (user_id, lot_id, status, chat_id, company_bin, outcome, reason, winner_bin,
-         winner_name, winner_total, offers, a_id, name, amount) in rows:
+    for (user_id, lot_id, _status, chat_id, company_bin, outcome, reason, winner_bin,
+         winner_name, winner_total, offers, _a_id, name, amount) in rows:
         mine = company_bin and any(o.get("bin") == company_bin for o in offers or [])
         lines = [f"🏁 <b>{OUTCOME_TEXT.get(outcome, outcome)}</b>",
                  f"{html.escape(name or '—')} · {_money(amount)}"]

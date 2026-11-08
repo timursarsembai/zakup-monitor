@@ -12,7 +12,7 @@ import logging
 import os
 import re
 import traceback
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 
 import httpx
 import psycopg
@@ -119,7 +119,7 @@ def _get_outage(conn) -> dict | None:
 
 
 def _outage(conn) -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     state = _get_outage(conn)
     if state is None:
         state = {"since": now.isoformat(), "notified": False}
@@ -146,6 +146,6 @@ def portal_ok(conn: psycopg.Connection) -> None:
     conn.execute("DELETE FROM app_settings WHERE key = 'portal_outage'")
     conn.commit()
     if state["notified"]:
-        minutes = int((datetime.now(timezone.utc) - datetime.fromisoformat(state["since"])).total_seconds() // 60)
+        minutes = int((datetime.now(UTC) - datetime.fromisoformat(state["since"])).total_seconds() // 60)
         notify.send(f"zakup: портал goszakup снова отвечает (перерыв около {minutes} мин), "
                     "сборщики догружают пропущенное.")

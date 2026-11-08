@@ -11,8 +11,8 @@
 import ipaddress
 import logging
 import re
-from typing import Any
 import socket
+from typing import Any
 from urllib.parse import urlsplit
 
 import httpx
@@ -220,7 +220,8 @@ def enrich(result: dict, conn=None) -> int:
         key = seller_key(item.get("seller")) if marketplace else ""
         phones: list[dict] = []
 
-        def add(number: str | None, label: str = "", whatsapp: bool = False) -> None:
+        def add(number: str | None, label: str = "", whatsapp: bool = False,
+                phones: list[dict] = phones) -> None:
             if number and not any(p["number"] == number and p["label"] == label for p in phones):
                 phones.append({"number": number, "label": label[:90], "whatsapp": whatsapp})
 

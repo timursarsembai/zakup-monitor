@@ -166,7 +166,7 @@ def get(conn: psycopg.Connection, ref: str, user_id: int) -> dict[str, Any] | No
         (ref, user_id),
     ).fetchone()
     keys = ("ref", "kind", "quantity", "amount", "status", "pay_url", "created_at", "paid_at", "checked_at")
-    return dict(zip(keys, row)) if row else None
+    return dict(zip(keys, row, strict=True)) if row else None
 
 
 def check(conn: psycopg.Connection, ref: str) -> str:

@@ -84,7 +84,7 @@ def of(conn: psycopg.Connection, lot_id: int, url: str) -> dict[str, Any] | None
         "SELECT status, result, error FROM supplier_questions WHERE lot_id = %s AND url = %s",
         (lot_id, url),
     ).fetchone()
-    return dict(zip(("status", "result", "error"), row)) if row else None
+    return dict(zip(("status", "result", "error"), row, strict=True)) if row else None
 
 
 def _ask(conn: psycopg.Connection, lot_id: int, url: str, provider: str, model: str) -> dict:

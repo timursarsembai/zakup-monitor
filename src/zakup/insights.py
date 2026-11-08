@@ -213,7 +213,7 @@ def features(conn: psycopg.Connection, p: Period) -> dict[str, Any]:
     b = p.bounds
     paying = _one(conn, f"SELECT count(*) FROM users u WHERE {CLIENT} AND u.paid_until > now()") or 0
     rows = []
-    for key, label, condition in FEATURES:
+    for _key, label, condition in FEATURES:
         users_n, uses = _rows(conn, f"""SELECT count(DISTINCT x.user_id), count(*)
             FROM user_actions x JOIN users u ON u.id = x.user_id
             WHERE {CLIENT} AND {condition} AND x.at >= %(from)s AND x.at < %(to)s""", b)[0]

@@ -1,5 +1,5 @@
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -36,7 +36,7 @@ def test_portal_outage_notifies_once_after_delay(conn, sent):
     incidents.failed("синхронизация", _raise(PortalUnavailable("down")), conn)
     incidents.failed("синхронизация", _raise(PortalUnavailable("down")), conn)
     assert sent == [] and conn.execute("SELECT count(*) FROM incidents").fetchone()[0] == 0
-    since = datetime.now(timezone.utc) - timedelta(minutes=40)
+    since = datetime.now(UTC) - timedelta(minutes=40)
     conn.execute("UPDATE app_settings SET value = %s WHERE key = 'portal_outage'",
                  (json.dumps({"since": since.isoformat(), "notified": False}),))
     incidents.failed("синхронизация", _raise(PortalUnavailable("down")), conn)

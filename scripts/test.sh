@@ -14,8 +14,15 @@ docker compose run --rm --no-deps \
   -e KAZPAYMENT_API_KEY= -e KAZPAYMENT_WEBHOOK_SECRET= -e GOSZAKUP_TOKEN= \
   --entrypoint pytest worker -q -p no:cacheprovider > "$out" 2>&1
 code=$?
+# Проверка стиля и типичных ошибок (неиспользуемое, порядок импортов, недосмотры).
+docker compose run --rm --no-deps --entrypoint ruff worker check --no-cache -q src tests >> "$out" 2>&1
+lint=$?
 set -e
 tail -3 "$out"
+if [ $lint -ne 0 ]; then
+  echo "ПРОВЕРКА СТИЛЯ НЕ ПРОШЛА (ruff, подробности в $out)"
+  exit 1
+fi
 if [ $code -ne 0 ] || grep -qiE '[0-9]+ (failed|errors?)\b' "$out"; then
   echo "ТЕСТЫ НЕ ПРОШЛИ (подробности в $out)"
   exit 1

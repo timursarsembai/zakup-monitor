@@ -13,21 +13,21 @@ import sys
 import threading
 import time
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from importlib.resources import files
 from typing import Annotated, Any
-from datetime import UTC, datetime, timedelta
 from urllib.parse import parse_qs, quote, urlencode, urlsplit
 
 import httpx
+import psycopg
 from fastapi import BackgroundTasks, Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from starlette.concurrency import run_in_threadpool
-import psycopg
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
+from starlette.concurrency import run_in_threadpool
 
 from zakup import (
     SITE_URL,
@@ -1163,7 +1163,7 @@ def export(request: Request, user: Paid):
                       ", ".join(templates.env.globals["region_names"](row[14])), row[15], row[16],
                       f"{SITE_URL}/lots/{row[18]}"])
     for column, width in zip("ABCDEFGHIJKLMNOPQR", (14, 50, 40, 22, 22, 17, 16, 40, 50, 9, 9,
-                                                   14, 15, 9, 24, 36, 16, 40)):
+                                                   14, 15, 9, 24, 36, 16, 40), strict=True):
         sheet.column_dimensions[column].width = width
     for cell in sheet["F"][1:]:
         cell.number_format = "dd.mm.yyyy hh:mm"
@@ -1470,7 +1470,7 @@ def lot_spec(request: Request, viewer: Viewer, announcement_id: int, lot_id: int
             "SELECT detail FROM announcements WHERE id = %s", (announcement_id,)
         ).fetchone()
         lot = next(
-            (l for l in ((row[0] or {}).get("Lots") or []) if l.get("id") == lot_id), None
+            (item for item in ((row[0] or {}).get("Lots") or []) if item.get("id") == lot_id), None
         ) if row else None
         url = spec.spec_file(lot) if lot else None
         if url is None:

@@ -281,7 +281,7 @@ def by_lot(conn: psycopg.Connection, lot_ids: list[int]) -> dict[int, dict[str, 
     )
     keys = ("outcome", "reason", "winner_bin", "winner_name", "winner_total",
             "second_bin", "second_name", "offers", "protocol_url")
-    return {row[0]: dict(zip(keys, row[1:])) for row in rows}
+    return {row[0]: dict(zip(keys, row[1:], strict=True)) for row in rows}
 
 
 def contracts_by_lot(results: dict | None) -> dict[int, list[dict]]:
