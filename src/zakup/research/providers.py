@@ -71,11 +71,14 @@ _LOCAL_DENY = {"permissions": {"deny": [
     f"WebFetch(domain:{host})" for host in (
         "localhost", "127.0.0.1", "0.0.0.0", "[::1]", "161.97.156.44",
         "sarsembai.com", "*.sarsembai.com", "host.docker.internal",
+        # Имена, которые указывают на сам компьютер.
+        "localtest.me", "*.localtest.me", "*.nip.io", "*.sslip.io", "*.localhost",
     )
 ]}}
 
 
 _last_usage: dict[str, Any] = {}
+_ENV_KEEP = {"PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "SHELL", "TERM", "XDG_RUNTIME_DIR"}
 
 
 def _claude_code(prompt: str, model: str, schema: dict | None = None,
@@ -83,9 +86,11 @@ def _claude_code(prompt: str, model: str, schema: dict | None = None,
     binary = shutil.which("claude") or os.path.expanduser("~/.local/bin/claude")
     with tempfile.TemporaryDirectory(prefix="zakup-research-") as workdir:
         # Только веб-поиск и чтение страниц: ни файлов, ни команд.
+        tools = "WebSearch,WebFetch" if web else ""
         command = [
             binary, "-p", prompt, "--model", model, "--output-format", "json",
-            "--allowedTools", "WebSearch WebFetch" if web else "",
+            # Только перечисленные инструменты, файлы — только во временной папке.
+            "--restricted", "--tools", tools, "--allowedTools", tools,
             "--disallowedTools", "Bash Edit Write Read Glob Grep Task NotebookEdit"
             + ("" if web else " WebSearch WebFetch"),
             "--strict-mcp-config", "--setting-sources", "", "--no-session-persistence",
@@ -93,8 +98,10 @@ def _claude_code(prompt: str, model: str, schema: dict | None = None,
             "--max-turns", "60" if web else "3", "--json-schema", json.dumps(schema or RESULT_SCHEMA),
         ]
         try:
+            # Пароль базы и ключ шифрования нужны службе, а не Claude Code.
+            env = {k: v for k, v in os.environ.items() if k in _ENV_KEEP}
             done = subprocess.run(command, cwd=workdir, capture_output=True, text=True,
-                                  timeout=CLAUDE_TIMEOUT)
+                                  timeout=CLAUDE_TIMEOUT, env=env)
         except subprocess.TimeoutExpired:
             raise ResearchError("Claude не уложился в 15 минут") from None
     try:

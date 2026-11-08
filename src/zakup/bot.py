@@ -14,7 +14,7 @@ from datetime import timedelta
 
 import psycopg
 
-from zakup import SITE_URL, db, telegram
+from zakup import SITE_URL, config, db, telegram
 
 logger = logging.getLogger(__name__)
 
@@ -172,6 +172,50 @@ def handle(conn: psycopg.Connection, message: dict) -> str | None:
     return HELP
 
 
+def handle_callback(conn: psycopg.Connection, query: dict) -> str:
+    """Кнопки под отчётом дежурного: «Выложить» / «Отклонить». Только владелец, в своём чате."""
+    owner = config.owner_chat_id()
+    chat = ((query.get("message") or {}).get("chat") or {}).get("id")
+    sender = (query.get("from") or {}).get("id")
+    if not owner or str(chat) != owner or str(sender) != owner:
+        return "Это может только владелец."
+    kind, _, rest = (query.get("data") or "").partition(":")
+    action, _, incident = rest.partition(":")
+    if kind != "autofix" or action not in ("approve", "reject") or not incident.isdigit():
+        return "Неизвестная кнопка."
+    status = "approved" if action == "approve" else "rejected"
+    done = conn.execute("UPDATE incidents SET status = %s WHERE id = %s AND status = 'proposed'",
+                        (status, int(incident))).rowcount
+    conn.commit()
+    if not done:
+        return "Уже решено раньше."
+    return (f"Сбой №{incident}: выкладываю — пришлю итог." if status == "approved"
+            else f"Сбой №{incident}: правка отклонена.")
+
+
+def _answer(query: dict, text: str) -> None:
+    try:
+        telegram.call("answerCallbackQuery", callback_query_id=query["id"], text=text)
+        message = query.get("message") or {}
+        if message.get("message_id"):
+            telegram.call("editMessageReplyMarkup", chat_id=message["chat"]["id"],
+                          message_id=message["message_id"])
+            telegram.send_message(message["chat"]["id"], text)
+    except telegram.TelegramError as error:
+        logger.warning("callback answer not sent: %s", error)
+
+
+def _update(conn: psycopg.Connection, update: dict) -> None:
+    if query := update.get("callback_query"):
+        _answer(query, handle_callback(conn, query))
+    message = update.get("message")
+    if message and (reply := handle(conn, message)):
+        try:
+            telegram.send_message(message["chat"]["id"], reply)
+        except telegram.TelegramError as error:
+            logger.warning("reply not sent: %s", error)
+
+
 def run(database_url: str, poll_timeout: int = 50) -> None:
     telegram.call("deleteWebhook")
     logger.info("bot @%s is polling", telegram.bot_username())
@@ -187,15 +231,15 @@ def run(database_url: str, poll_timeout: int = 50) -> None:
                     http_timeout=poll_timeout + 10,
                     offset=state.last_id if state else 0,
                     timeout=poll_timeout,
-                    allowed_updates=["message"],
+                    allowed_updates=["message", "callback_query"],
                 )
                 for update in updates:
-                    message = update.get("message")
-                    if message and (reply := handle(conn, message)):
-                        try:
-                            telegram.send_message(message["chat"]["id"], reply)
-                        except telegram.TelegramError as error:
-                            logger.warning("reply not sent: %s", error)
+                    try:
+                        _update(conn, update)
+                    except Exception:
+                        # Одно «плохое» сообщение не должно ронять бота по кругу.
+                        conn.rollback()
+                        logger.exception("update %s failed", update.get("update_id"))
                     # Сдвигаем offset после каждого апдейта: упадём — не ответим дважды.
                     db.save_state(
                         conn, OFFSET_KEY, db.SyncState(update["update_id"] + 1, None, None)

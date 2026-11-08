@@ -1,23 +1,24 @@
 #!/usr/bin/env bash
-# Тесты в контейнере на отдельной базе zakup_test. Вывод — в файл (по умолчанию
-# /tmp/zakup-pytest.txt); код выхода — ненулевой, если хоть один тест упал.
+# Тесты в контейнере на своей временной базе, в сети без интернета (служба tests в
+# docker-compose.yml): ни боевой базы, ни секретов. Вывод — в файл (по умолчанию
+# .test-output.txt в корне проекта); код выхода ненулевой, если хоть один тест упал.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-out=${1:-/tmp/zakup-pytest.txt}
-password=$(grep -E '^POSTGRES_PASSWORD=' .env | cut -d= -f2- | tr -d '"')
-docker compose build -q worker
+out=${1:-$PWD/.test-output.txt}
+# Пароль боевой базы тестам не нужен; compose требует переменную только для разбора файла.
+export POSTGRES_PASSWORD=unused
+# Временная база общая: два прогона сразу (вы и дежурный) — по очереди.
+exec 9>/tmp/zakup-test.lock
+flock 9
+compose() { docker compose -p zakup --profile test "$@"; }
+compose build -q tests
 set +e
-# Адрес базы — через окружение по имени, не в командной строке (иначе пароль виден в ps).
-export TEST_DATABASE_URL="postgresql://zakup:${password}@postgres:5432/zakup_test"
-export DATABASE_URL="$TEST_DATABASE_URL"
-docker compose run --rm --no-deps -e TEST_DATABASE_URL -e DATABASE_URL \
-  -e ZAKUP_TELEGRAM_BOT_TOKEN= -e ZAKUP_CLIENT_BOT_TOKEN= -e ZAKUP_TELEGRAM_CHAT_ID= \
-  -e KAZPAYMENT_API_KEY= -e KAZPAYMENT_WEBHOOK_SECRET= -e GOSZAKUP_TOKEN= \
-  --entrypoint pytest worker -q -p no:cacheprovider > "$out" 2>&1
+compose run --rm tests > "$out" 2>&1
 code=$?
 # Проверка стиля и типичных ошибок (неиспользуемое, порядок импортов, недосмотры).
-docker compose run --rm --no-deps --entrypoint ruff worker check --no-cache -q src tests >> "$out" 2>&1
+compose run --rm --no-deps --entrypoint ruff tests check --no-cache -q src tests >> "$out" 2>&1
 lint=$?
+compose rm -sf postgres-test >/dev/null 2>&1
 set -e
 tail -3 "$out"
 if [ $lint -ne 0 ]; then

@@ -88,8 +88,9 @@ def call(method: str, http_timeout: float = 15, bot: str = "main", **params: Any
     return payload["result"]
 
 
-def send_message(chat_id: str | int, text: str) -> None:
+def send_message(chat_id: str | int, text: str, buttons: list[list[dict]] | None = None) -> None:
     bot, real_id = route(chat_id)
+    extra = {"reply_markup": {"inline_keyboard": buttons}} if buttons else {}
     call(
         "sendMessage",
         bot=bot,
@@ -97,4 +98,5 @@ def send_message(chat_id: str | int, text: str) -> None:
         text=text,
         parse_mode="HTML",
         link_preview_options={"is_disabled": True},
+        **extra,
     )

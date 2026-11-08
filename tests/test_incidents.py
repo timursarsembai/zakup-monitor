@@ -11,7 +11,7 @@ from zakup.goszakup import PortalUnavailable
 def sent(monkeypatch):
     messages = []
     monkeypatch.setattr(incidents.notify, "send", messages.append)
-    monkeypatch.setattr(autofix.notify, "send", messages.append)
+    monkeypatch.setattr(autofix.notify, "send", lambda text, buttons=None: messages.append(text))
     return messages
 
 
@@ -54,15 +54,55 @@ def test_short_outage_is_silent(conn, sent):
     assert sent == []
 
 
-def test_autofix_reports_result(conn, sent, monkeypatch):
+PATCH = """diff --git a/src/zakup/sync.py b/src/zakup/sync.py
+--- a/src/zakup/sync.py
++++ b/src/zakup/sync.py
+@@ -1 +1 @@
+-old
++new
+"""
+
+
+def test_autofix_proposes_fix_for_approval(conn, sent, monkeypatch):
     incidents.failed("синхронизация", _raise(ValueError("bad")), conn)
-    monkeypatch.setattr(autofix, "_claude", lambda prompt: {
-        "verdict": "fixed", "summary": "Исправил разбор даты.", "commit": "abcdef1234567"})
+    buttons = []
+
+    def send(text, buttons=None, _pressed=buttons):
+        sent.append(text)
+        _pressed.extend(buttons or [])
+    monkeypatch.setattr(autofix.notify, "send", send)
     row = autofix._next(conn)
-    autofix._finish(conn, row[0], *autofix.handle(row))
-    status, commit = conn.execute("SELECT status, commit FROM incidents").fetchone()
-    assert status == "fixed" and commit == "abcdef1234567"
-    assert "исправлено и выложено" in sent[-1] and "abcdef1234" in sent[-1]
+    autofix._finish(conn, row[0], "proposed", "Исправил разбор даты.", patch=PATCH)
+    status, patch = conn.execute("SELECT status, patch FROM incidents").fetchone()
+    assert status == "proposed" and patch == PATCH
+    assert "выложить?" in sent[-1] and "src/zakup/sync.py: +1 −1" in sent[-1]
+    assert buttons[0][0]["callback_data"] == f"autofix:approve:{row[0]}"
+
+
+def test_autofix_patch_only_in_code_and_tests():
+    assert autofix.allowed_patch(PATCH)
+    assert not autofix.allowed_patch(PATCH.replace("src/zakup/sync.py", "scripts/deploy.sh"))
+    assert not autofix.allowed_patch(PATCH.replace("src/zakup/sync.py", "src/zakup/autofix.py"))
+    assert not autofix.allowed_patch(PATCH + PATCH.replace("src/zakup/sync.py", "docker-compose.yml"))
+    assert not autofix.allowed_patch("")
+
+
+def test_only_owner_approves_fix(conn, monkeypatch):
+    from zakup import bot
+
+    monkeypatch.setattr(bot.config, "owner_chat_id", lambda: "42")
+    conn.execute("INSERT INTO incidents (fingerprint, stage, error_type, status, patch) "
+                 "VALUES ('E@x', 's', 'E', 'proposed', 'p')")
+
+    def press(chat, sender, data="autofix:approve:1"):
+        return bot.handle_callback(conn, {"id": "q", "data": data, "from": {"id": sender},
+                                          "message": {"chat": {"id": chat}}})
+    assert press(42, 7) == "Это может только владелец."
+    assert press(7, 42) == "Это может только владелец."
+    assert conn.execute("SELECT status FROM incidents").fetchone()[0] == "proposed"
+    assert "выкладываю" in press(42, 42)
+    assert conn.execute("SELECT status FROM incidents").fetchone()[0] == "approved"
+    assert press(42, 42, "autofix:reject:1") == "Уже решено раньше."
 
 
 def test_autofix_gives_up_after_repeated_failures(conn, sent):

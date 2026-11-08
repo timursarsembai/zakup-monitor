@@ -187,12 +187,51 @@ services:
     mem_limit: 64m
     logging: *logging
 
+  # Тесты — на своей временной базе в сети без интернета: ни боевой базы, ни секретов
+  # (scripts/test.sh). Код тестов может быть чужим — правки дежурного до одобрения.
+  postgres-test:
+    image: postgres:16-alpine
+    profiles: ["test"]
+    environment:
+      POSTGRES_USER: zakup
+      POSTGRES_PASSWORD: zakup
+      POSTGRES_DB: zakup_test
+    tmpfs:
+      - /var/lib/postgresql/data
+    networks:
+      - testnet
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zakup"]
+      interval: 1s
+      retries: 30
+    mem_limit: 256m
+    logging: *logging
+
+  tests:
+    build: .
+    image: zakup-test
+    profiles: ["test"]
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+    entrypoint: ["pytest", "-q", "-p", "no:cacheprovider"]
+    environment:
+      TEST_DATABASE_URL: postgresql://zakup:zakup@postgres-test:5432/zakup_test
+      DATABASE_URL: postgresql://zakup:zakup@postgres-test:5432/zakup_test
+      PGTZ: Asia/Almaty
+    networks:
+      - testnet
+    mem_limit: 768m
+    logging: *logging
+
 volumes:
   pgdata:
 
 networks:
   proxy-network:
     external: true
+  testnet:
+    internal: true
   webnet:
     ipam:
       config:
