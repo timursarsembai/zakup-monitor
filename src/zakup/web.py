@@ -17,7 +17,7 @@ from urllib.parse import parse_qs, quote, urlencode, urlsplit
 
 import httpx
 from fastapi import BackgroundTasks, Depends, FastAPI, Form, HTTPException, Request
-from fastapi.responses import RedirectResponse, Response
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
@@ -213,18 +213,48 @@ def _to_login(request: Request, _: LoginRequired):
     return RedirectResponse(f"/login?next={quote(target)}", status_code=303)
 
 
-def current_user(request: Request) -> int:
+def optional_user(request: Request) -> int | None:
+    """Кто смотрит: пользователь или гость (None). Открытые страницы доступны всем."""
     with pool.connection() as conn:
         user = auth.user_by_session(conn, request.cookies.get(SESSION_COOKIE))
+    request.state.email = user[1] if user else ""
+    request.state.role = user[2] if user else ""
+    request.state.user_id = user[0] if user else None
+    # Платные функции: сотрудники всегда, клиенты — пока оплачено.
+    request.state.paid = bool(user and user[3])
+    request.state.staff = bool(user and user[2] in auth.STAFF_ROLES)
+    return user[0] if user else None
+
+
+def current_user(request: Request) -> int:
+    user = optional_user(request)
     if user is None:
         raise LoginRequired()
-    request.state.email = user[1]
-    request.state.role = user[2]
-    request.state.user_id = user[0]
-    return user[0]
+    return user
 
 
+Viewer = Annotated[int | None, Depends(optional_user)]
 User = Annotated[int, Depends(current_user)]
+
+
+class PaymentRequired(Exception):
+    pass
+
+
+@app.exception_handler(PaymentRequired)
+def _to_pricing(request: Request, _: PaymentRequired):
+    if request.method == "GET":
+        return RedirectResponse("/pricing", status_code=303)
+    return JSONResponse({"paywall": True, "detail": "Платная функция"}, status_code=402)
+
+
+def current_paid(request: Request, user: User) -> int:
+    if not request.state.paid:
+        raise PaymentRequired()
+    return user
+
+
+Paid = Annotated[int, Depends(current_paid)]
 
 
 def current_admin(request: Request, user: User) -> int:
@@ -532,10 +562,92 @@ def healthz() -> dict:
 
 
 @app.get("/")
-def home(request: Request, user: User, background: BackgroundTasks):
-    # Старые ссылки вида /?applied=1&… вели на поиск — туда и отправляем.
-    if request.url.query:
+def home(request: Request, user: Viewer, page: int = 1, per_page: int = PAGE_SIZE):
+    """Главная — поиск закупок (лоты), открыт всем, как на портале."""
+    if request.url.query and "applied" in request.url.query and "page" not in request.url.query:
+        # Старые ссылки вида /?applied=1&… вели на поиск объявлений.
         return RedirectResponse(f"/announcements?{request.url.query}", status_code=307)
+    return lots_search(request, user, page, per_page)
+
+
+# Пакеты поисков с ИИ: (сколько, цена ₸). Одиночный поиск — 250 ₸.
+SEARCH_PACKS = [(20, 4900), (50, 11900), (100, 22900)]
+
+
+@app.get("/pricing")
+def pricing(request: Request, user: Viewer):
+    paid_until = None
+    if user:
+        with pool.connection() as conn:
+            paid_until = conn.execute("SELECT paid_until FROM users WHERE id = %s AND paid_until > now()",
+                                      (user,)).fetchone()
+    return templates.TemplateResponse(request, "pricing.html", {
+        "packs": SEARCH_PACKS, "paid_until": paid_until[0] if paid_until else None})
+
+
+@app.get("/robots.txt")
+def robots() -> Response:
+    lines = ["User-agent: *", "Allow: /",
+             *[f"Disallow: {path}" for path in ("/settings", "/log", "/my", "/matches",
+                                                "/subscriptions", "/research", "/welcome",
+                                                "/staff", "/export.xlsx", "/lang/")],
+             "Disallow: /lots/*/research", "Disallow: /lots/*/questions",
+             f"Sitemap: {SITE_URL}/sitemap.xml"]
+    return Response("\n".join(lines) + "\n", media_type="text/plain")
+
+
+SITEMAP_CHUNK = 20_000
+
+
+@app.get("/sitemap.xml")
+def sitemap_index() -> Response:
+    """Открытые объявления и лоты — для поисковиков. Индекс ведёт на части по 20 000."""
+    with pool.connection() as conn:
+        anns, lots_n = conn.execute(
+            """SELECT (SELECT count(*) FROM announcements WHERE end_date > now() AND detail IS NOT NULL),
+                      (SELECT count(*) FROM lots l JOIN announcements a ON a.id = l.trd_buy_id
+                       WHERE a.end_date > now() AND a.detail IS NOT NULL)"""
+        ).fetchone()
+    parts = [f"{SITE_URL}/sitemap-static.xml"]
+    parts += [f"{SITE_URL}/sitemap-a-{i}.xml" for i in range((anns + SITEMAP_CHUNK - 1) // SITEMAP_CHUNK)]
+    parts += [f"{SITE_URL}/sitemap-l-{i}.xml" for i in range((lots_n + SITEMAP_CHUNK - 1) // SITEMAP_CHUNK)]
+    body = "".join(f"<sitemap><loc>{url}</loc></sitemap>" for url in parts)
+    return Response('<?xml version="1.0" encoding="UTF-8"?>'
+                    f'<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{body}</sitemapindex>',
+                    media_type="application/xml")
+
+
+@app.get("/sitemap-{kind}.xml")
+def sitemap_part(kind: str) -> Response:
+    if kind == "static":
+        urls = [(f"{SITE_URL}{path}", None) for path in ("/", "/announcements", "/analytics", "/pricing")]
+    else:
+        prefix, _, index = kind.partition("-")
+        if prefix not in ("a", "l") or not index.isdigit():
+            raise HTTPException(404, "Нет такой части")
+        offset = int(index) * SITEMAP_CHUNK
+        with pool.connection() as conn:
+            if prefix == "a":
+                rows = conn.execute(
+                    """SELECT id, last_update_date FROM announcements
+                       WHERE end_date > now() AND detail IS NOT NULL ORDER BY id
+                       LIMIT %s OFFSET %s""", (SITEMAP_CHUNK, offset)).fetchall()
+                urls = [(f"{SITE_URL}/a/{i}", d) for i, d in rows]
+            else:
+                rows = conn.execute(
+                    """SELECT l.id, l.last_update_date FROM lots l JOIN announcements a ON a.id = l.trd_buy_id
+                       WHERE a.end_date > now() AND a.detail IS NOT NULL ORDER BY l.id
+                       LIMIT %s OFFSET %s""", (SITEMAP_CHUNK, offset)).fetchall()
+                urls = [(f"{SITE_URL}/lots/{i}", d) for i, d in rows]
+    body = "".join(f"<url><loc>{url}</loc>{f'<lastmod>{d.date().isoformat()}</lastmod>' if d else ''}</url>"
+                   for url, d in urls)
+    return Response('<?xml version="1.0" encoding="UTF-8"?>'
+                    f'<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{body}</urlset>',
+                    media_type="application/xml")
+
+
+@app.get("/analytics")
+def analytics(request: Request, user: Viewer, background: BackgroundTasks):
     market, stale = dashboard.market_cached()
     with pool.connection() as conn:
         if market is None:
@@ -600,9 +712,9 @@ def _search_context(request: Request, current: Filters, scope: str, total: int, 
 
 
 @app.get("/lots")
-def lots_search(request: Request, user: User, page: int = 1, per_page: int = PAGE_SIZE):
+def lots_search(request: Request, user: Viewer, page: int = 1, per_page: int = PAGE_SIZE):
     form = parse_qs(request.url.query)
-    current = Filters.from_form(form)
+    current = Filters.from_form(form, staff=request.state.staff)
     page = max(page, 1)
     per_page = _per_page(per_page)
     now = datetime.now(UTC)
@@ -627,7 +739,7 @@ def lots_search(request: Request, user: User, page: int = 1, per_page: int = PAG
         total = conn.execute(
             f"SELECT count(*) FROM lots l, announcements a WHERE {where}", params
         ).fetchone()[0]
-        lot_marks = marks.of_user(conn, user, [row[0] for row in rows])
+        lot_marks = marks.of_user(conn, user, [row[0] for row in rows]) if user else {}
         stats = conn.execute(
             """SELECT (SELECT count(*) FROM announcements WHERE end_date > now()),
                       (SELECT count(*) FROM announcements
@@ -641,9 +753,9 @@ def lots_search(request: Request, user: User, page: int = 1, per_page: int = PAG
 
 
 @app.get("/announcements")
-def announcements_search(request: Request, user: User, page: int = 1, per_page: int = PAGE_SIZE):
+def announcements_search(request: Request, user: Viewer, page: int = 1, per_page: int = PAGE_SIZE):
     form = parse_qs(request.url.query)
-    current = Filters.from_form(form)
+    current = Filters.from_form(form, staff=request.state.staff)
     page = max(page, 1)
     per_page = _per_page(per_page)
     now = datetime.now(UTC)
@@ -680,11 +792,11 @@ EXPORT_LIMIT = 10_000
 
 
 @app.get("/export.xlsx")
-def export(request: Request, user: User):
+def export(request: Request, user: Paid):
     from openpyxl import Workbook
 
     _audit(request, user, "export", "/lots?" + request.url.query)
-    current = Filters.from_form(parse_qs(request.url.query))
+    current = Filters.from_form(parse_qs(request.url.query), staff=request.state.staff)
     where, params = current.where(datetime.now(UTC), "lots")
     with pool.connection() as conn:
         rows = conn.execute(
@@ -741,14 +853,15 @@ def _goszakup() -> Client:
 
 
 @app.get("/a/{announcement_id}")
-def announcement(request: Request, user: User, announcement_id: int, background: BackgroundTasks):
+def announcement(request: Request, user: Viewer, announcement_id: int, background: BackgroundTasks):
     context = _announcement_context(request, user, announcement_id, background)
-    _audit(request, user, "view_announcement", f"/a/{announcement_id}")
+    if user:
+        _audit(request, user, "view_announcement", f"/a/{announcement_id}")
     return templates.TemplateResponse(request, "announcement.html", context)
 
 
 @app.get("/lots/{lot_id}")
-def lot_page(request: Request, user: User, lot_id: int, background: BackgroundTasks):
+def lot_page(request: Request, user: Viewer, lot_id: int, background: BackgroundTasks):
     with pool.connection() as conn:
         row = conn.execute("SELECT trd_buy_id FROM lots WHERE id = %s", (lot_id,)).fetchone()
     if row is None or row[0] is None:
@@ -758,13 +871,15 @@ def lot_page(request: Request, user: User, lot_id: int, background: BackgroundTa
     if lot is None:
         raise HTTPException(404, "Лот удалён из объявления")
     with pool.connection() as conn:
-        job = research.latest(conn, lot_id)
-        done = research.latest_done(conn, lot_id)
+        # Результаты подбора — платная часть: без доступа их не показываем.
+        job = research.latest(conn, lot_id) if request.state.paid else None
+        done = research.latest_done(conn, lot_id) if request.state.paid else None
         lot_info = research.lot_context(conn, lot_id)
         provider = (conn.execute(
             "SELECT ai_provider FROM users WHERE role = 'admin' ORDER BY id LIMIT 1"
         ).fetchone() or ("claude_code",))[0]
-    _audit(request, user, "view_lot", f"/lots/{lot_id}")
+    if user:
+        _audit(request, user, "view_lot", f"/lots/{lot_id}")
     context.update(lot=lot, others=[other for other in context["lots"] if other["id"] != lot_id],
                    here=request.url.path, job=job, done=done, lot_info=lot_info,
                    region=research.default_region(lot_info) if lot_info else "",
@@ -779,7 +894,7 @@ def lot_page(request: Request, user: User, lot_id: int, background: BackgroundTa
 @app.post("/lots/{lot_id}/research", dependencies=[Depends(same_origin)])
 def start_research(
     request: Request,
-    user: User,
+    user: Paid,
     lot_id: int,
     region: Annotated[str, Form()] = "",
     whole_kz: Annotated[str, Form()] = "",
@@ -801,7 +916,7 @@ def start_research(
 
 
 @app.post("/lots/{lot_id}/spec-summary", dependencies=[Depends(same_origin)])
-def request_spec_summary(request: Request, user: User, lot_id: int):
+def request_spec_summary(request: Request, user: Paid, lot_id: int):
     with pool.connection() as conn:
         if not conn.execute("SELECT 1 FROM lot_specs WHERE lot_id = %s AND text IS NOT NULL",
                             (lot_id,)).fetchone():
@@ -812,14 +927,14 @@ def request_spec_summary(request: Request, user: User, lot_id: int):
 
 
 @app.get("/lots/{lot_id}/spec-summary")
-def spec_summary(request: Request, _: User, lot_id: int):
+def spec_summary(request: Request, _: Paid, lot_id: int):
     with pool.connection() as conn:
         summary = research.summary_of(conn, lot_id)
     return templates.TemplateResponse(request, "summary_fragment.html", {"s": summary})
 
 
 @app.post("/lots/{lot_id}/questions", dependencies=[Depends(same_origin)])
-def request_questions(request: Request, user: User, lot_id: int, url: Annotated[str, Form()]):
+def request_questions(request: Request, user: Paid, lot_id: int, url: Annotated[str, Form()]):
     with pool.connection() as conn:
         status = questions.request(conn, lot_id, url)
     if status is None:
@@ -829,14 +944,14 @@ def request_questions(request: Request, user: User, lot_id: int, url: Annotated[
 
 
 @app.get("/lots/{lot_id}/questions")
-def questions_fragment(request: Request, _: User, lot_id: int, url: str):
+def questions_fragment(request: Request, _: Paid, lot_id: int, url: str):
     with pool.connection() as conn:
         found = questions.of(conn, lot_id, url)
     return templates.TemplateResponse(request, "questions_fragment.html", {"q": found})
 
 
 @app.get("/lots/{lot_id}/research")
-def research_fragment(request: Request, _: User, lot_id: int):
+def research_fragment(request: Request, _: Paid, lot_id: int):
     with pool.connection() as conn:
         job = research.latest(conn, lot_id)
         done = research.latest_done(conn, lot_id)
@@ -882,8 +997,9 @@ def _subjects_in_background(bins: list[str]) -> None:
         logger.warning("background subjects %s failed: %s", bins, error)
 
 
-def _announcement_context(request: Request, user: int, announcement_id: int,
+def _announcement_context(request: Request, user: int | None, announcement_id: int,
                           background: BackgroundTasks) -> dict:
+    """user=None — гость или поисковый робот: только данные из базы, портал не трогаем."""
     with pool.connection() as conn:
         row = conn.execute(
             """SELECT detail, details_fetched_at, end_date, results, results_fetched_at
@@ -899,6 +1015,8 @@ def _announcement_context(request: Request, user: int, announcement_id: int,
         )
         ended = bool(end_date and end_date < now)
         refresh_error = None
+        if detail is None and user is None:
+            raise HTTPException(404, "Подробности объявления ещё загружаются")
         if detail is None:
             # Подробностей ещё нет совсем (сборщик не дошёл) — тут без портала никак.
             try:
@@ -914,7 +1032,7 @@ def _announcement_context(request: Request, user: int, announcement_id: int,
             ).fetchone()
             if detail is None:
                 raise HTTPException(502, "Портал сейчас не отвечает, попробуйте через минуту")
-        elif stale or (ended and results.stale(results_at, now)):
+        elif user is not None and (stale or (ended and results.stale(results_at, now))):
             background.add_task(_refresh_in_background, announcement_id, stale,
                                 ended and results.stale(results_at, now))
         subscribed = {
@@ -946,14 +1064,15 @@ def _announcement_context(request: Request, user: int, announcement_id: int,
         specs = {r[0]: (r[1], r[2], r[3]) for r in conn.execute(
             "SELECT lot_id, text, error, text_kk FROM lot_specs WHERE lot_id = ANY(%s)",
             (list(info),))}
+        # Готовые выжимки — тоже платная часть.
         summaries = {r[0]: {"status": r[1], "result": r[2], "error": r[3]} for r in conn.execute(
             "SELECT lot_id, status, result, error FROM spec_summaries WHERE lot_id = ANY(%s)",
-            (list(info),))}
-        lot_marks = marks.of_user(conn, user, list(info))
+            (list(info),))} if request.state.paid else {}
+        lot_marks = marks.of_user(conn, user, list(info)) if user else {}
         lot_results = results.by_lot(conn, list(info))
-        company_bin = conn.execute(
+        company_bin = (conn.execute(
             "SELECT company_bin FROM users WHERE id = %s", (user,)
-        ).fetchone()[0]
+        ).fetchone() or (None,))[0]
         org_bins = [detail.get("customerBin"), detail.get("orgBin")] + [
             lot.get("customerBin") for lot in lots]
         org_cards = {b: subjects.card(conn, b) for b in dict.fromkeys(filter(None, org_bins))}
@@ -998,7 +1117,7 @@ def _announcement_context(request: Request, user: int, announcement_id: int,
 
 
 @app.get("/a/{announcement_id}/lots/{lot_id}/spec")
-def lot_spec(request: Request, _: User, announcement_id: int, lot_id: int, refresh: int = 0):
+def lot_spec(request: Request, viewer: Viewer, announcement_id: int, lot_id: int, refresh: int = 0):
     with pool.connection() as conn:
         row = conn.execute(
             "SELECT detail FROM announcements WHERE id = %s", (announcement_id,)
@@ -1010,12 +1129,19 @@ def lot_spec(request: Request, _: User, announcement_id: int, lot_id: int, refre
         if url is None:
             text, error = None, "У лота нет файла технической спецификации."
         else:
-            if refresh:
+            if refresh and viewer:
                 # Повтор после ошибки: прошлую ошибку из кэша не берём.
                 conn.execute(
                     "DELETE FROM lot_specs WHERE lot_id = %s AND text IS NULL", (lot_id,)
                 )
-            text, error = spec.get(conn, lot_id, url)
+            if viewer:
+                text, error = spec.get(conn, lot_id, url)
+            else:
+                # Гостям и роботам — только уже сохранённый текст, без скачивания с портала.
+                cached = conn.execute("SELECT text FROM lot_specs WHERE lot_id = %s",
+                                      (lot_id,)).fetchone()
+                text = cached[0] if cached else None
+                error = None if text else i18n.gettext("Текст ещё не загружен — откройте PDF.")
             if i18n.language() == "kk":
                 kazakh = conn.execute(
                     "SELECT text_kk FROM lot_specs WHERE lot_id = %s", (lot_id,)
@@ -1029,7 +1155,7 @@ def lot_spec(request: Request, _: User, announcement_id: int, lot_id: int, refre
 @app.post("/lots/{lot_id}/mark", dependencies=[Depends(same_origin)])
 def mark_lot(
     request: Request,
-    user: User,
+    user: Paid,
     lot_id: int,
     status: Annotated[str, Form()] = "",
     note: Annotated[str | None, Form()] = None,
@@ -1053,7 +1179,7 @@ def mark_lot(
 
 
 @app.get("/research")
-def research_list(request: Request, user: User, q: str = "", sources_open: int = 0):
+def research_list(request: Request, user: Paid, q: str = "", sources_open: int = 0):
     """Сохранённые подборки товаров: последний готовый поиск по каждому лоту."""
     with pool.connection() as conn:
         rows = conn.execute(
@@ -1112,7 +1238,7 @@ def research_list(request: Request, user: User, q: str = "", sources_open: int =
 @app.post("/sources", dependencies=[Depends(same_origin)])
 def add_source(
     request: Request,
-    user: User,
+    user: Paid,
     url: Annotated[str, Form()],
     name: Annotated[str, Form()] = "",
     categories: Annotated[str, Form()] = "",
@@ -1128,7 +1254,7 @@ def add_source(
 
 
 @app.get("/sources/{source_id}/contacts")
-def source_contacts(request: Request, _: User, source_id: int):
+def source_contacts(request: Request, _: Paid, source_id: int):
     with pool.connection() as conn:
         row = conn.execute("SELECT domain, name FROM sources WHERE id = %s", (source_id,)).fetchone()
         if row is None:
@@ -1140,7 +1266,7 @@ def source_contacts(request: Request, _: User, source_id: int):
 
 
 @app.post("/sources/{source_id}/toggle", dependencies=[Depends(same_origin)])
-def toggle_source(request: Request, user: User, source_id: int):
+def toggle_source(request: Request, user: Paid, source_id: int):
     with pool.connection() as conn:
         row = conn.execute(
             """UPDATE sources SET active = NOT active
@@ -1214,7 +1340,7 @@ def action_log(request: Request, _: Staff, page: int = 1, per_page: int = 50):
 
 
 @app.get("/my")
-def my_lots(request: Request, user: User):
+def my_lots(request: Request, user: Paid):
     with pool.connection() as conn:
         rows = conn.execute(
             """SELECT m.status, m.note, m.status_at, l.id, l.trd_buy_id, l.name_ru,
@@ -1248,7 +1374,7 @@ def my_lots(request: Request, user: User):
 
 
 @app.post("/subscriptions/filter", dependencies=[Depends(same_origin)])
-async def create_filter_subscription(request: Request, user: User):
+async def create_filter_subscription(request: Request, user: Paid):
     form = await request.form()
     data = {key: form.getlist(key) for key in form.keys()}
     current = Filters.from_form(data)
@@ -1283,7 +1409,7 @@ def _own_chat(conn, user: int, chat_id: str) -> str | None:
 
 
 @app.post("/subscriptions/{sub_id}/chat", dependencies=[Depends(same_origin)])
-def subscription_chat(request: Request, user: User, sub_id: int,
+def subscription_chat(request: Request, user: Paid, sub_id: int,
                       chat_id: Annotated[str, Form()] = ""):
     with pool.connection() as conn:
         name = conn.execute(
@@ -1296,7 +1422,7 @@ def subscription_chat(request: Request, user: User, sub_id: int,
 
 
 @app.get("/subscriptions")
-def subscriptions(request: Request, user: User):
+def subscriptions(request: Request, user: Paid):
     with pool.connection() as conn:
         rows = conn.execute(
             """SELECT s.id, s.name, s.query, s.min_amount, s.max_amount, s.active,
@@ -1316,7 +1442,7 @@ def subscriptions(request: Request, user: User):
 @app.post("/subscriptions", dependencies=[Depends(same_origin)])
 def create_subscription(
     request: Request,
-    user: User,
+    user: Paid,
     name: Annotated[str, Form()],
     query: Annotated[str, Form()],
     min_amount: Annotated[str, Form()] = "",
@@ -1337,7 +1463,7 @@ def create_subscription(
 
 
 @app.post("/subscriptions/{sub_id}/toggle", dependencies=[Depends(same_origin)])
-def toggle_subscription(request: Request, user: User, sub_id: int):
+def toggle_subscription(request: Request, user: Paid, sub_id: int):
     with pool.connection() as conn:
         row = conn.execute(
             """UPDATE subscriptions SET active = NOT active WHERE id = %s AND user_id = %s
@@ -1350,7 +1476,7 @@ def toggle_subscription(request: Request, user: User, sub_id: int):
 
 
 @app.post("/subscriptions/{sub_id}/delete", dependencies=[Depends(same_origin)])
-def delete_subscription(request: Request, user: User, sub_id: int):
+def delete_subscription(request: Request, user: Paid, sub_id: int):
     with pool.connection() as conn:
         row = conn.execute(
             "DELETE FROM subscriptions WHERE id = %s AND user_id = %s RETURNING name",
@@ -1362,7 +1488,7 @@ def delete_subscription(request: Request, user: User, sub_id: int):
 
 
 @app.get("/matches")
-def matches(request: Request, user: User):
+def matches(request: Request, user: Paid):
     query = parse_qs(request.url.query)
     chosen = [int(v) for v in query.get("sub", []) if v.isdigit()]
     with pool.connection() as conn:
@@ -1416,7 +1542,7 @@ def _settings_page(request: Request, user: int, *, sent: str = "", saved: str = 
         users = conn.execute(
             """SELECT u.id, u.email, u.role, u.telegram_chat_id IS NOT NULL,
                       (SELECT max(created_at) FROM sessions s WHERE s.user_id = u.id),
-                      u.disabled, o.name, o.bin
+                      u.disabled, o.name, o.bin, u.paid_until
                FROM users u LEFT JOIN client_orgs o ON o.user_id = u.id WHERE u.deleted_at IS NULL AND (%s OR u.role <> 'admin' OR u.id = %s)
                ORDER BY array_position(ARRAY['admin', 'moderator', 'user'], u.role), u.email""",
             (is_admin, user),
@@ -1457,6 +1583,7 @@ def _settings_page(request: Request, user: int, *, sent: str = "", saved: str = 
             "tab": tab or {"ai": "ai", "bin": "company"}.get(saved),
             "users": users,
             "me": user,
+            "now": datetime.now(UTC),
             "min_password": auth.MIN_PASSWORD_LENGTH,
         },
         status_code=status_code,
@@ -1529,6 +1656,26 @@ def toggle_registration(request: Request, admin: Admin):
     return _settings_page(request, admin, tab="users", notice=(
         "Регистрация открыта: любой может зарегистрироваться по телефону (SMS — 40 ₸)."
         if now_open else "Регистрация закрыта."))
+
+
+@app.post("/settings/users/{user_id}/access", dependencies=[Depends(same_origin)])
+def grant_access(request: Request, admin: Admin, user_id: int, days: Annotated[int, Form()] = 30):
+    """Доступ к платному вручную (до подключения оплаты, для проверки, по договорённости).
+    days=0 — снять доступ."""
+    if not 0 <= days <= 400:
+        raise HTTPException(422, "от 0 до 400 дней")
+    with pool.connection() as conn:
+        login = _other_user(conn, request, admin, user_id)
+        until = conn.execute(
+            """UPDATE users SET paid_until = CASE WHEN %s = 0 THEN NULL
+                   ELSE greatest(coalesce(paid_until, now()), now()) + make_interval(days => %s) END
+               WHERE id = %s RETURNING paid_until""",
+            (days, days, user_id),
+        ).fetchone()[0]
+    _audit(request, admin, "user_access", login, days=days)
+    text = (f"{login}: доступ к платному до {until.astimezone(PORTAL_TZ):%d.%m.%Y}." if until
+            else f"{login}: доступ к платному снят.")
+    return _settings_page(request, admin, tab="users", notice=text)
 
 
 @app.post("/settings/users/{user_id}/role", dependencies=[Depends(same_origin)])

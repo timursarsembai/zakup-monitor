@@ -58,7 +58,10 @@ def test_login_sets_secure_cookie_and_opens_pages(client):
     assert page.status_code == 200 and "owner@mail.kz" in page.text
     assert client.get("/login", follow_redirects=False).status_code == 303
     client.post("/logout", headers=ORIGIN)
-    assert client.get("/", follow_redirects=False).status_code == 303
+    # Главная (поиск закупок) открыта всем, личные разделы — только после входа.
+    guest = client.get("/", follow_redirects=False)
+    assert guest.status_code == 200 and "Регистрация" in guest.text
+    assert client.get("/my", follow_redirects=False).headers["location"].startswith("/login")
 
 
 @pytest.mark.parametrize("target", ["https://evil.example", "//evil.example", "/\\\\evil.example"])
@@ -452,8 +455,7 @@ def test_pagination_and_per_page(client, conn):
 
 def test_dashboard_is_home(client, conn):
     _announcement_with_lots(conn)
-    _login(client)
-    page = client.get("/")
+    page = client.get("/analytics")  # без входа: аналитика открыта
     assert page.status_code == 200
     for text in ("Обзор рынка", "Новые объявления по дням", "По дням недели", "Регионы", "Способы закупки",
                  "Самые дорогие открытые лоты", "Чаще всех побеждают", "Самые частые закупки"):
@@ -489,6 +491,7 @@ def test_kazakh_interface_and_data(client, conn):
 def test_users_can_send_own_subscriptions_to_shared_group(client, conn):
     conn.execute("INSERT INTO telegram_groups (chat_id, title) VALUES ('-100', 'ZAKUP GROUP')")
     auth.set_password(conn, "amir", "amir-password-1")
+    conn.execute("UPDATE users SET paid_until = now() + interval '30 days' WHERE email = 'amir'")
     conn.commit()
     client.post("/login", data={"email": "amir", "password": "amir-password-1"}, headers=ORIGIN)
     data = {"applied": "1", "deadline_mode": "rule", "scope": "lots", "chat_id": "-100", "name": "В группу"}
@@ -519,6 +522,7 @@ def test_research_list_page(client, conn):
 def test_action_log(client, conn):
     _announcement_with_lots(conn)
     auth.set_password(conn, "amir", "amir-password-1")
+    conn.execute("UPDATE users SET paid_until = now() + interval '30 days' WHERE email = 'amir'")
     conn.commit()
     client.post("/login", data={"email": "amir", "password": "wrong-password"}, headers=ORIGIN)
     client.post("/login", data={"email": "amir", "password": "amir-password-1"}, headers=ORIGIN)
@@ -788,3 +792,45 @@ def test_sms_limits_protect_balance(client, conn, monkeypatch):
         client.post("/forgot", data={"phone": "87011112233"}, headers=ORIGIN)
     blocked = client.post("/forgot", data={"phone": "87011112233"}, headers=ORIGIN)
     assert blocked.status_code == 429 and len(sent) == web.signup.PER_IP_HOUR
+
+
+
+def test_guest_sees_public_pages_and_paywall(client, conn):
+    _announcement_with_lots(conn)
+    conn.execute("INSERT INTO spec_summaries (lot_id, provider, model, status, result) VALUES "
+                 "(5001, 'claude_code', 'haiku', 'done', '{\"item\": \"Секретная выжимка\", \"params\": [], \"requirements\": []}')")
+    conn.commit()
+    web.app.dependency_overrides.clear()
+    page = client.get("/lots/5001")
+    assert page.status_code == 200 and "Бумага А4" in page.text and 'id="paywall"' in page.text
+    assert "Секретная выжимка" not in page.text  # платное содержимое гостю не показываем
+    assert 'data-paid' in page.text and "Войти" in page.text
+    assert client.get("/announcements").status_code == 200
+    assert client.post("/lots/5001/mark", data={"status": "interested"}, headers=ORIGIN,
+                       follow_redirects=False).headers["location"].startswith("/login")
+    assert "9 900 ₸" in client.get("/pricing").text
+    assert "Sitemap:" in client.get("/robots.txt").text
+    assert "/sitemap-a-0.xml" in client.get("/sitemap.xml").text
+    assert "/a/500" in client.get("/sitemap-a-0.xml").text and "/lots/5001" in client.get("/sitemap-l-0.xml").text
+
+
+def test_unpaid_client_gets_paywall_until_access_granted(client, conn):
+    _announcement_with_lots(conn)
+    auth.set_password(conn, "+77011112233", "client-password-1")
+    conn.execute("UPDATE users SET role = 'user', phone = email WHERE email = '+77011112233'")
+    conn.commit()
+    client.post("/login", data={"email": "87011112233", "password": "client-password-1"}, headers=ORIGIN)
+    assert client.post("/lots/5001/mark", data={"status": "interested"}, headers=ORIGIN).status_code == 402
+    assert client.get("/my", follow_redirects=False).headers["location"] == "/pricing"
+    # Клиенту по умолчанию — все открытые закупки, а не фильтр владельца.
+    page = client.get("/lots").text
+    assert "Бумага А4" in page
+    client.post("/logout", headers=ORIGIN)
+    _login(client)
+    client_id = conn.execute("SELECT id FROM users WHERE email = '+77011112233'").fetchone()[0]
+    assert "доступ к платному до" in client.post(f"/settings/users/{client_id}/access",
+                                                 data={"days": "30"}, headers=ORIGIN).text
+    client.post("/logout", headers=ORIGIN)
+    client.post("/login", data={"email": "87011112233", "password": "client-password-1"}, headers=ORIGIN)
+    assert client.post("/lots/5001/mark", data={"status": "interested"}, headers=ORIGIN,
+                       follow_redirects=False).status_code == 303

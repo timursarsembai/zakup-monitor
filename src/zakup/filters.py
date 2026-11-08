@@ -177,6 +177,12 @@ class Filters:
     advance_max: int = 100
     sort: str = "advance"
 
+    @classmethod
+    def public(cls) -> "Filters":
+        """Для гостей и клиентов: все закупки с открытым приёмом заявок, без ограничений."""
+        return cls(statuses=[], stages=["open"], disable_person="", regions=[], min_sum=None,
+                   deadline="", advance_min=0)
+
     def deadline_date(self, today: date) -> date | None:
         if self.deadline == DEADLINE_RULE:
             return deadline_by_rule(today)
@@ -207,10 +213,11 @@ class Filters:
         return cls(**known)
 
     @classmethod
-    def from_form(cls, form: dict[str, list[str]]) -> "Filters":
-        """Из параметров запроса. Пустая форма (первый заход) — значения по умолчанию."""
+    def from_form(cls, form: dict[str, list[str]], staff: bool = True) -> "Filters":
+        """Из параметров запроса. Пустая форма (первый заход) — значения по умолчанию:
+        у сотрудников — фильтр владельца, у остальных — все открытые, как на портале."""
         if "applied" not in form:
-            return cls()
+            return cls() if staff else cls.public()
 
         def one(name: str) -> str:
             return (form.get(name) or [""])[0].strip()

@@ -129,12 +129,16 @@ def login(
     return token
 
 
-def user_by_session(conn: psycopg.Connection, token: str | None) -> tuple[int, str, str] | None:
-    """(id, логин, роль) по cookie сессии."""
+def user_by_session(conn: psycopg.Connection, token: str | None) -> tuple | None:
+    """(id, логин, роль, есть ли доступ к платному) по cookie сессии.
+
+    Платное доступно сотрудникам всегда, клиентам — пока оплачено (paid_until)."""
     if not token:
         return None
     return conn.execute(
-        """SELECT u.id, u.email, u.role FROM sessions s JOIN users u ON u.id = s.user_id
+        """SELECT u.id, u.email, u.role,
+                  u.role IN ('admin', 'moderator') OR coalesce(u.paid_until > now(), false)
+           FROM sessions s JOIN users u ON u.id = s.user_id
            WHERE s.token_hash = %s AND s.expires_at > now() AND NOT u.disabled
              AND u.deleted_at IS NULL""",
         (_token_hash(token),),

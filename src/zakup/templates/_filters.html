@@ -201,7 +201,7 @@
   <div class="panel-actions">
     <button class="primary">{{ _("Найти") }}</button>
     <a href="/{{ scope }}">{{ _("Сбросить") }}</a>
-    {% if lots %}<button formaction="/export.xlsx" title="{{ _("Все найденные лоты в Excel") }}">Excel</button>{% endif %}
+    {% if lots %}<button data-paid formaction="/export.xlsx" title="{{ _("Все найденные лоты в Excel") }}">Excel</button>{% endif %}
   </div>
   </div>
   <aside class="subscribe">
@@ -213,7 +213,7 @@
       <option value="">{{ _("в мой Telegram") }}</option>
       {% for chat_id, title in groups %}<option value="{{ chat_id }}">{{ _("в группу «") }}{{ title }}»</option>{% endfor %}
     </select>
-    <button formmethod="post" formaction="/subscriptions/filter" class="primary">{{ _("Подписаться на этот поиск") }}</button>
+    <button data-paid formmethod="post" formaction="/subscriptions/filter" class="primary">{{ _("Подписаться на этот поиск") }}</button>
     <span class="muted">{{ _("Новые") }} {{ _("лоты") if lots else _("объявления") }} {{ _("по этим условиям придут в Telegram. Подписок может быть несколько —") }} <a href="/subscriptions">{{ _("мои подписки") }}</a>.</span>
     {% else %}
     <span class="muted">{{ _("Подписаться можно, когда в фильтре нет конкретных дат: окончание «в течение 2 рабочих дней» или без ограничения — тогда условия сами сдвигаются каждый день.") }}</span>

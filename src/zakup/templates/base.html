@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}{{ _("Закупки") }}{% endblock %} · Zakup</title>
+<meta name="description" content="{% block description %}{{ _("Госзакупки Казахстана: поиск объявлений и лотов goszakup.gov.kz, итоги, победители, аналитика рынка.") }}{% endblock %}">
+<link rel="canonical" href="{{ site_url }}{{ request.url.path }}">
 <link rel="icon" type="image/png" href="/static/favicon.png">
 <script>
   // Тема: по умолчанию тёмная, выбор запоминается в браузере. До отрисовки, чтобы не мигало.
@@ -83,6 +85,16 @@
     header .who { display: none; }
     .table-wrap table { min-width: 760px; }
   }
+  dialog.paywall { width: min(480px, calc(100vw - 32px)); border: 1px solid var(--line); border-radius: 14px; padding: 0; background: var(--bg); color: var(--fg); }
+  dialog.paywall::backdrop { background: rgba(0, 0, 0, .55); }
+  .pw-wrap { padding: 22px 22px 18px; position: relative; }
+  .pw-wrap h2 { margin: 0 0 10px; font-size: 20px; }
+  .pw-wrap ul { padding-left: 20px; margin: 8px 0 12px; } .pw-wrap li { margin: 4px 0; }
+  .pw-close { position: absolute; top: 10px; right: 10px; }
+  .pw-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 14px; }
+  .pw-buy { padding: 10px 16px; border-radius: 8px; background: var(--accent); color: var(--on-accent); font-weight: 600; }
+  .primary-link { background: var(--accent); color: var(--on-accent) !important; border-color: transparent !important; }
+  @media (max-width: 560px) { .primary-link { display: none !important; } }
   {% block style %}{% endblock %}
 </style>
 </head>
@@ -99,7 +111,7 @@
     <a href="/matches" class="{{ 'on' if path == '/matches' }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg><span>{{ _("nav:Совпадения") }}</span></a>
   </nav>
   <div class="logout">
-    <span class="muted who">{{ request.state.email }}</span>
+    {% if request.state.user_id %}<span class="muted who">{{ request.state.email }}</span>{% endif %}
     <span class="a11y">
       <button type="button" class="a11y-toggle" data-a11y-toggle title="{{ _("Режим для слабовидящих") }}" aria-label="{{ _("Режим для слабовидящих") }}" aria-expanded="false">Aa</button>
       <div class="a11y-panel" data-a11y-panel hidden>
@@ -116,12 +128,53 @@
     {% set other = "ru" if lang() == "kk" else "kk" %}
     <a class="icon-button lang-switch" href="/lang/{{ other }}" hreflang="{{ other }}" title="{{ 'Русский' if other == 'ru' else 'Қазақша' }}">{{ languages[other] }}</a>
     <button type="button" class="theme-toggle" data-theme-toggle title="{{ _("Сменить тему") }}" aria-label="{{ _("Сменить тему") }}"></button>
+    <a href="/analytics" class="icon-button {{ 'on' if path == '/analytics' }}" title="{{ _("Аналитика рынка") }}" aria-label="{{ _("Аналитика рынка") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg></a>
+    {% if request.state.user_id %}
     <a href="/settings" class="icon-button {{ 'on' if path == '/settings' }}" title="{{ _("Настройки") }}" aria-label="{{ _("Настройки") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></a>
     <form method="post" action="/logout" data-confirm="{{ _("Выйти из аккаунта?") }}"><button>{{ _("Выйти") }}</button></form>
+    {% else %}
+    <a class="icon-button" href="/login?next={{ request.url.path | urlencode }}">{{ _("Войти") }}</a>
+    <a class="icon-button primary-link" href="/register">{{ _("Регистрация") }}</a>
+    {% endif %}
   </div>
 </header>
 {% endblock %}
 <main{% block main_class %}{% endblock %}>{% block main %}{% endblock %}</main>
+{# Платные функции: кнопки видны всем, без доступа открывают это окно. #}
+<dialog class="paywall" id="paywall" aria-labelledby="paywall-title">
+  <div class="pw-wrap">
+    <button type="button" class="pw-close" data-pw-close aria-label="{{ _("Закрыть") }}">✕</button>
+    <h2 id="paywall-title">🔒 {{ _("Это платная функция") }}</h2>
+    <p>{{ _("Тариф «Zakup» — 9 900 ₸ в месяц:") }}</p>
+    <ul>
+      <li>{{ _("уведомления в Telegram о новых лотах и объявлениях по вашим условиям поиска;") }}</li>
+      <li>{{ _("избранное с напоминаниями о сроках и итогами;") }}</li>
+      <li>{{ _("краткая выжимка техспецификации и чек-лист вопросов поставщику — без ограничений;") }}</li>
+      <li>{{ _("совпадения по подпискам и выгрузка в Excel.") }}</li>
+    </ul>
+    <p class="muted">{{ _("Поиск товаров под лот с ИИ — отдельно: 250 ₸ за поиск, пакетами.") }}</p>
+    <div class="pw-actions">
+      {% if request.state.user_id %}<a class="pw-buy" href="/pricing">{{ _("Подключить тариф") }}</a>
+      {% else %}<a class="pw-buy" href="/register">{{ _("Зарегистрироваться") }}</a>
+      <a href="/login?next={{ request.url.path | urlencode }}">{{ _("Уже есть аккаунт? Войти") }}</a>{% endif %}
+    </div>
+  </div>
+</dialog>
+<script>
+  // Без оплаченного тарифа элементы с data-paid не срабатывают, а открывают окно.
+  (() => {
+    const PAID = {{ "true" if request.state.paid else "false" }};
+    const dialog = document.getElementById("paywall");
+    if (PAID || !dialog) return;
+    const stop = (event) => {
+      if (!event.target.closest || !event.target.closest("[data-paid]")) return;
+      event.preventDefault(); event.stopImmediatePropagation(); dialog.showModal();
+    };
+    document.addEventListener("click", stop, true);
+    document.addEventListener("submit", stop, true);
+    dialog.querySelector("[data-pw-close]").addEventListener("click", () => dialog.close());
+  })();
+</script>
 <script>
   (() => {
     const root = document.documentElement;

@@ -447,3 +447,5 @@ CREATE TABLE IF NOT EXISTS app_settings (
     key   text PRIMARY KEY,
     value text NOT NULL
 );
+-- Оплаченный доступ к платным функциям (тариф); NULL или в прошлом — не оплачено.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS paid_until timestamptz;
