@@ -39,7 +39,7 @@
   header, main { max-width: 1600px; margin: 0 auto; padding: 12px 24px; }
   header { display: flex; gap: 18px; align-items: center; border-bottom: 1px solid var(--line); }
   .brand { display: inline-flex; align-items: center; gap: 8px; color: var(--fg); font-weight: 800; font-size: 20px; letter-spacing: -0.02em; }
-  .brand img { width: 30px; height: 30px; }
+  .brand img { width: auto; height: 32px; border-radius: 6px; display: block; }
   .main-nav { display: flex; gap: 22px; }
   .main-nav a { display: inline-flex; align-items: center; gap: 6px; }
   .main-nav a.on { color: var(--fg); font-weight: 600; }
@@ -106,6 +106,7 @@
     /* Тема, язык и режим для слабовидящих на телефоне — в «Настройки» → «Интерфейс». */
     .tools .ui-ctl { display: none !important; }
     header .logout > a.icon-button { padding: 4px 8px; font-size: 14px; white-space: nowrap; }
+    .brand img { height: 26px; }
     .tools .tool-row { display: flex; align-items: center; gap: 10px; justify-content: flex-start; padding: 6px 8px; border: 0; border-radius: 8px; color: var(--fg); }
     .tools .tool-label { display: inline; font-size: 15px; font-weight: 400; }
     .tools form.tool-row { padding: 0; margin-top: 4px; }
@@ -124,7 +125,7 @@
 {% endif %}
 {% block header %}
 <header>
-  <a href="/" class="brand" aria-label="{{ _("Zakup — на главную") }}"><img src="/static/logo-mark.png" alt="" width="30" height="30"><span>Zakup</span></a>
+  <a href="/" class="brand" aria-label="{{ _("Tenderim — на главную") }}"><img src="/static/logo-tenderim.png" alt="Tenderim" width="162" height="30"></a>
   {% set path = request.url.path %}
   <nav class="main-nav" aria-label="{{ _("Разделы") }}">
     <a href="/announcements" class="{{ 'on' if path in ('/', '/lots', '/announcements') or path.startswith('/lots/') or path.startswith('/a/') }}"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span>{{ _("nav:Закупки") }}</span></a>
