@@ -116,16 +116,20 @@ def login(
     # Отключённый и удалённый аккаунт не входит даже с верным паролем.
     ok = verify_password(password, row[1] if row else None) and not row[2] and row[3] is None
     log_attempt(conn, email, ip, ok)
-    token = None
-    if ok:
-        token = secrets.token_urlsafe(32)
-        conn.execute(
-            """INSERT INTO sessions (token_hash, user_id, expires_at, user_agent)
-               VALUES (%s, %s, now() + %s, %s)""",
-            (_token_hash(token), row[0], SESSION_TTL, (user_agent or "")[:300]),
-        )
-        conn.execute("DELETE FROM sessions WHERE expires_at < now()")
+    token = create_session(conn, row[0], user_agent) if ok else None
     conn.commit()
+    return token
+
+
+def create_session(conn: psycopg.Connection, user_id: int, user_agent: str | None,
+                   ttl=None) -> str:
+    token = secrets.token_urlsafe(32)
+    conn.execute(
+        """INSERT INTO sessions (token_hash, user_id, expires_at, user_agent)
+           VALUES (%s, %s, now() + %s, %s)""",
+        (_token_hash(token), user_id, ttl or SESSION_TTL, (user_agent or "")[:300]),
+    )
+    conn.execute("DELETE FROM sessions WHERE expires_at < now()")
     return token
 
 

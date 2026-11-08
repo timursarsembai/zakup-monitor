@@ -262,7 +262,18 @@ def optional_user(request: Request) -> int | None:
     request.state.paid = bool(user and user[3])
     request.state.staff = bool(user and user[2] in auth.STAFF_ROLES)
     request.state.searches = user[4] if user else 0
+    # Администратор вошёл как этот пользователь: его собственная сессия — в отдельной cookie.
+    request.state.impersonator = None
+    if user and request.cookies.get(RETURN_COOKIE):
+        with pool.connection() as conn:
+            admin = auth.user_by_session(conn, request.cookies.get(RETURN_COOKIE))
+        if admin and admin[2] == "admin" and admin[0] != user[0]:
+            request.state.impersonator = admin[1]
     return user[0] if user else None
+
+
+RETURN_COOKIE = "zakup_return"
+IMPERSONATE_TTL = timedelta(hours=2)
 
 
 def current_user(request: Request) -> int:
@@ -592,6 +603,7 @@ def logout(request: Request):
         _audit(request, who[0], "logout")
     response = RedirectResponse("/login", status_code=303)
     response.delete_cookie(SESSION_COOKIE, httponly=True, secure=True, samesite="lax")
+    response.delete_cookie(RETURN_COOKIE, httponly=True, secure=True, samesite="lax")
     return response
 
 
@@ -1850,6 +1862,43 @@ def grant_searches(request: Request, admin: Admin, user_id: int, count: Annotate
         left = credits.balance(conn, user_id)
     _audit(request, admin, "user_searches", login, count=count)
     return _settings_page(request, admin, tab="users", notice=f"{login}: поисков на балансе — {left}.")
+
+
+@app.post("/settings/users/{user_id}/impersonate", dependencies=[Depends(same_origin)])
+def impersonate(request: Request, admin: Admin, user_id: int):
+    """Войти как пользователь, не зная пароля: увидеть сайт его глазами.
+    Своя сессия администратора остаётся и возвращается кнопкой на плашке."""
+    with pool.connection() as conn:
+        login = _other_user(conn, request, admin, user_id)
+        role = conn.execute("SELECT role FROM users WHERE id = %s", (user_id,)).fetchone()[0]
+        if role == "admin":
+            raise HTTPException(403, "Входить как другой администратор нельзя")
+        token = auth.create_session(conn, user_id, request.headers.get("user-agent"), IMPERSONATE_TTL)
+        conn.commit()
+    _audit(request, admin, "impersonate", login)
+    response = _with_session(RedirectResponse("/", status_code=303), token)
+    response.set_cookie(RETURN_COOKIE, request.cookies.get(SESSION_COOKIE, ""),
+                        max_age=int(IMPERSONATE_TTL.total_seconds()), httponly=True, secure=True,
+                        samesite="lax")
+    return response
+
+
+@app.post("/impersonate/stop", dependencies=[Depends(same_origin)])
+def impersonate_stop(request: Request):
+    """Вернуться в свой аккаунт: сессию «под пользователем» закрываем."""
+    back = request.cookies.get(RETURN_COOKIE)
+    with pool.connection() as conn:
+        admin = auth.user_by_session(conn, back) if back else None
+        who = auth.user_by_session(conn, request.cookies.get(SESSION_COOKIE))
+        auth.logout(conn, request.cookies.get(SESSION_COOKIE))
+    if admin is None or admin[2] != "admin":
+        response = RedirectResponse("/login", status_code=303)
+    else:
+        if who:
+            _audit(request, admin[0], "impersonate_stop", who[1])
+        response = _with_session(RedirectResponse("/settings#users", status_code=303), back)
+    response.delete_cookie(RETURN_COOKIE, httponly=True, secure=True, samesite="lax")
+    return response
 
 
 @app.post("/settings/users/{user_id}/role", dependencies=[Depends(same_origin)])

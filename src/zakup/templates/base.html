@@ -94,6 +94,8 @@
   .pw-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 14px; }
   .pw-buy { padding: 10px 16px; border-radius: 8px; background: var(--accent); color: var(--on-accent); font-weight: 600; }
   .primary-link { background: var(--accent); color: var(--on-accent) !important; border-color: transparent !important; }
+  .impersonating { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: center; padding: 8px 12px; background: #b45309; color: #fff; font-size: 14px; }
+  .impersonating button { background: #fff; color: #7c2d12; border: 0; font-weight: 600; padding: 4px 10px; }
   .burger { display: none; font-size: 20px; line-height: 1; padding: 4px 10px; }
   .tools { display: flex; gap: 10px; align-items: center; }
   .tool-label { display: none; }
@@ -110,6 +112,12 @@
 </style>
 </head>
 <body>
+{% if request.state.impersonator %}
+<form class="impersonating" method="post" action="/impersonate/stop">
+  👁 {{ _("Вы вошли как") }} <b>{{ request.state.email }}</b> ({{ _("администратор") }} {{ request.state.impersonator }}).
+  <button>{{ _("Вернуться в свой аккаунт") }}</button>
+</form>
+{% endif %}
 {% block header %}
 <header>
   <a href="/" class="brand" aria-label="{{ _("Zakup — на главную") }}"><img src="/static/logo-mark.png" alt="" width="30" height="30"><span>Zakup</span></a>

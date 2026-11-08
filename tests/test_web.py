@@ -974,3 +974,26 @@ def test_spec_tables_rendered_as_table():
     blocks = web._spec_blocks("Заголовок\nНаименование | Кол-во\nСтол | 5\nИтого")
     assert blocks == [("text", "Заголовок"), ("table", [["Наименование", "Кол-во"], ["Стол", "5"]]),
                       ("text", "Итого")]
+
+
+def test_admin_logs_in_as_user_and_returns(client, conn):
+    auth.set_password(conn, "client", "client-password-1")
+    auth.set_password(conn, "amir", "amir-password-1")
+    conn.execute("UPDATE users SET role = 'moderator' WHERE email = 'amir'")
+    conn.commit()
+    ids = dict(conn.execute("SELECT email, id FROM users").fetchall())
+    _login(client)
+    assert "Войти как" in client.get("/settings").text
+    go = client.post(f"/settings/users/{ids['client']}/impersonate", headers=ORIGIN, follow_redirects=False)
+    assert go.status_code == 303 and "zakup_return" in go.headers.get("set-cookie", "")
+    page = client.get("/pricing").text
+    assert "Вы вошли как" in page and "<b>client</b>" in page
+    assert client.get("/settings").status_code == 200 and "Пользователи" not in client.get("/settings").text
+    back = client.post("/impersonate/stop", headers=ORIGIN, follow_redirects=False)
+    assert back.headers["location"] == "/settings#users"
+    page = client.get("/settings").text
+    assert "Пользователи" in page and "Вы вошли как" not in page
+    # Модератор так не может, а администратор не входит под другим администратором.
+    client.post("/logout", headers=ORIGIN)
+    client.post("/login", data={"email": "amir", "password": "amir-password-1"}, headers=ORIGIN)
+    assert client.post(f"/settings/users/{ids['client']}/impersonate", headers=ORIGIN).status_code == 403
