@@ -17,6 +17,7 @@ from zakup import (
     credits,
     kaspi,
     legal,
+    matcher,
     research,
     secrets_box,
     signup,
@@ -83,7 +84,7 @@ def _settings_page(request: Request, user: int, *, sent: str = "", saved: str = 
         "notice": notice,
         "error": error,
         "company_bin": company_bin,
-        "tab": tab or {"ai": "ai", "bin": "company", "tariff": "tariff",
+        "tab": tab or {"ai": "ai", "bin": "company", "tariff": "tariff", "notify": "notify",
                        "requisites": "requisites"}.get(saved),
         "requisite_fields": legal.FIELDS,
         "me": user,
@@ -101,7 +102,10 @@ def _telegram_tab(conn, request: Request, user: int, chat_id: str | None, is_sta
                                     (user,)).fetchone()),
         "linked": bool(chat_id and str(chat_id).startswith(telegram.CLIENT_PREFIX)),
         "paid": request.state.paid}
-    return {"connected": bool(chat_id), "client_group": client_group}
+    notify_lang = conn.execute("SELECT notify_lang FROM users WHERE id = %s", (user,)).fetchone()[0]
+    group_langs = dict(conn.execute("SELECT chat_id, notify_lang FROM telegram_groups")) if is_staff else {}
+    return {"connected": bool(chat_id), "client_group": client_group, "notify_lang": notify_lang or "",
+            "group_langs": group_langs}
 
 
 def _telegram_bot(is_staff: bool) -> dict:
@@ -553,6 +557,31 @@ def telegram_group_link(request: Request, user: Admin):
         code = bot.create_link_code(conn, user, "group")
     _audit(request, user, "group_link")
     return RedirectResponse(bot.group_link_url(code), status_code=303)
+
+
+@router.post("/settings/notify-lang", dependencies=[Depends(same_origin)])
+def notify_language(request: Request, user: User, lang: Annotated[str, Form()] = ""):
+    """Язык уведомлений в личку: пусто — как язык сайта, ru / kk / both."""
+    if lang not in ("", *matcher.LANGS):
+        raise HTTPException(422, "неизвестный язык")
+    with core.pool.connection() as conn:
+        conn.execute("UPDATE users SET notify_lang = %s WHERE id = %s", (lang or None, user))
+    _audit(request, user, "notify_lang", lang or "site")
+    return RedirectResponse("/settings?saved=notify#notify", status_code=303)
+
+
+@router.post("/settings/groups/lang", dependencies=[Depends(same_origin)])
+def group_language(request: Request, user: Admin, chat_id: Annotated[str, Form()],
+                   lang: Annotated[str, Form()]):
+    if lang not in matcher.LANGS:
+        raise HTTPException(422, "неизвестный язык")
+    with core.pool.connection() as conn:
+        title = conn.execute("UPDATE telegram_groups SET notify_lang = %s WHERE chat_id = %s RETURNING title",
+                             (lang, chat_id)).fetchone()
+    if title is None:
+        raise HTTPException(404, "Нет такой группы")
+    _audit(request, user, "group_lang", title[0] or chat_id, lang=lang)
+    return RedirectResponse("/settings?saved=notify#notify", status_code=303)
 
 
 @router.post("/settings/groups/remove", dependencies=[Depends(same_origin)])

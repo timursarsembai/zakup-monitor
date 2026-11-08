@@ -189,13 +189,12 @@ def test_review_fixes_status_scope_seed_and_rejected_message(conn, monkeypatch):
         """INSERT INTO subscriptions (user_id, name, query, kind, filters)
            VALUES (%s, 'x', '', 'announcements', %s) RETURNING id""",
         (user, db.Jsonb(Filters().to_json()))).fetchone()[0]
-    monkeypatch.setattr(matcher, "FIRST_BATCH_LIMIT", 0)
     matcher.seed(conn, sub, Filters(), "lots", NOW)
     assert matcher.run_filters(conn, NOW) == 0  # уже увиденные при создании
     _announcement(conn, 2)
     assert matcher.run_filters(conn, NOW) == 1
 
-    def reject(chat, text):
+    def reject(chat, text, buttons=None):
         raise matcher.telegram.TelegramError(400, "Bad Request: message is too long")
     monkeypatch.setattr(matcher.telegram, "send_message", reject)
     assert matcher.deliver(conn, pause=0) == 0
@@ -238,3 +237,67 @@ def test_huge_or_infinite_sums_are_ignored():
     for value in ("1e200000000", "Infinity", "NaN", "1e16"):
         assert _decimal(value) is None
     assert _decimal("5 000 000") == 5_000_000 and _decimal("-1,5") == Decimal("-1.5")
+
+
+def _paid_user(conn, chat="42", **columns):
+    user = conn.execute(
+        "INSERT INTO users (email, telegram_chat_id, paid_until) VALUES ('p', %s, now() + interval '30 days') "
+        "RETURNING id", (chat,)).fetchone()[0]
+    for column, value in columns.items():
+        conn.execute(f"UPDATE users SET {column} = %s WHERE id = %s", (value, user))
+    return user
+
+
+def test_first_batch_comes_as_one_message_with_pages(conn, monkeypatch):
+    for ident in range(1, 26):
+        _announcement(conn, ident)
+    user = _paid_user(conn)
+    sub = conn.execute(
+        """INSERT INTO subscriptions (user_id, name, query, kind, filters)
+           VALUES (%s, 'Мебель', '', 'announcements', %s) RETURNING id""",
+        (user, db.Jsonb(Filters(deadline="").to_json()))).fetchone()[0]
+    matcher.seed(conn, sub, Filters(deadline=""), "lots", NOW)
+    sent, calls = [], []
+    monkeypatch.setattr(matcher.telegram, "send_message",
+                        lambda chat, text, buttons=None: sent.append((chat, text, buttons)) or {"message_id": 7})
+    monkeypatch.setattr(matcher.telegram, "call", lambda method, **kw: calls.append((method, kw)))
+    assert matcher.deliver(conn, pause=0) == 0  # отдельных сообщений нет — всё в одном
+    assert len(sent) == 1
+    chat, text, buttons = sent[0]
+    assert "стр. 1 из 3" in text and text.count("Закупка ") == 10
+    assert [b["callback_data"] for b in buttons[0]] == ["mp:1:1"]
+    assert conn.execute("SELECT count(*) FROM matches WHERE notified_at IS NULL").fetchone()[0] == 0
+    # «Дальше» из этого чата — следующая страница; из чужого — нет.
+    query = {"id": "q", "data": "mp:1:2", "message": {"chat": {"id": 42}, "message_id": 7}}
+    matcher.turn_page(conn, query)
+    edited = [kw for method, kw in calls if method == "editMessageText"][0]
+    assert "стр. 3 из 3" in edited["text"] and edited["text"].count("Закупка ") == 5
+    assert [b["text"] for b in edited["reply_markup"]["inline_keyboard"][0]] == ["◀ Назад"]
+    calls.clear()
+    matcher.turn_page(conn, {**query, "message": {"chat": {"id": 99}, "message_id": 7}})
+    assert [method for method, _ in calls] == ["answerCallbackQuery"]
+    # Повторно в тот же чат лоты не придут ни выборкой, ни по второй подписке.
+    assert matcher.send_pages(conn) == 0
+
+
+def test_notification_language_follows_settings(conn):
+    _announcement(conn, 1)
+    user = _paid_user(conn, ui_lang="kk")
+    sub = conn.execute(
+        """INSERT INTO subscriptions (user_id, name, query, kind, filters)
+           VALUES (%s, 'x', '', 'announcements', %s) RETURNING id""",
+        (user, db.Jsonb(Filters(deadline="").to_json()))).fetchone()[0]
+    conn.execute("INSERT INTO matches (subscription_id, lot_id) VALUES (%s, 10)", (sub,))
+
+    def text():
+        return matcher.format_block(matcher.pending(conn))
+    # По умолчанию — язык сайта (казахский): только казахская часть.
+    assert "🇷🇺" not in text() and "Мүгедектер" in text() and "Среди организаций" not in text()
+    conn.execute("UPDATE users SET notify_lang = 'both'")
+    assert "🇰🇿" in text() and "🇷🇺" in text()
+    conn.execute("UPDATE users SET notify_lang = 'ru'")
+    assert "Среди организаций" in text() and "Мүгедектер" not in text()
+    # В группе — язык группы.
+    conn.execute("INSERT INTO telegram_groups (chat_id, title, notify_lang) VALUES ('-1', 'g', 'kk')")
+    conn.execute("UPDATE subscriptions SET chat_id = '-1'")
+    assert "Мүгедектер" in text() and "Среди организаций" not in text()

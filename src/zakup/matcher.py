@@ -95,20 +95,27 @@ def insert_matches(conn: psycopg.Connection, sub_id: int, current: Filters, scop
     ).rowcount
 
 
-# Новая подписка сразу присылает подходящее сейчас, но не больше стольких лотов;
-# если подходит больше — считаем их увиденными и шлём только новые.
-FIRST_BATCH_LIMIT = 40
+# Новая (или изменённая) подписка присылает всё, что подходит сейчас, одним сообщением
+# с листанием: по PAGE_SIZE объявлений на странице, кнопки «Назад» / «Дальше».
+PAGE_SIZE = 10
 
 
 def seed(conn: psycopg.Connection, sub_id: int, current: Filters, scope: str,
          now: datetime | None = None) -> None:
+    """Подходящее сейчас — сразу «увиденным», а список — в первую выборку для листания."""
     now = now or datetime.now(UTC)
     where, params = current.where(now, scope, subscription=True)
     source = ("lots l, announcements a" if scope == "lots"
               else "announcements a JOIN lots l ON l.trd_buy_id = a.id")
-    count = conn.execute(f"SELECT count(*) FROM {source} WHERE {where}", params).fetchone()[0]
-    if count > FIRST_BATCH_LIMIT:
-        insert_matches(conn, sub_id, current, scope, now, notified=True)
+    rows = conn.execute(
+        f"""INSERT INTO matches (subscription_id, lot_id, notified_at)
+            SELECT %(sub_id)s, l.id, now() FROM {source} WHERE {where}
+            ON CONFLICT DO NOTHING RETURNING lot_id""",
+        {**params, "sub_id": sub_id},
+    ).fetchall()
+    if rows:
+        conn.execute("INSERT INTO match_pages (subscription_id, lot_ids) VALUES (%s, %s)",
+                     (sub_id, [r[0] for r in rows]))
 
 
 class PendingLot(NamedTuple):
@@ -133,6 +140,22 @@ class PendingLot(NamedTuple):
     announcement_name_kz: str | None = None
     price: Decimal | None = None
     disable_person: bool | None = None
+    langs: str = "both"  # ru | kk | both
+
+
+# Язык уведомлений: у группы — свой, в личку — выбранный в настройках, иначе язык сайта.
+_LANGS_SQL = """CASE WHEN s.chat_id IS NOT NULL THEN coalesce(g.notify_lang, 'both')
+                     ELSE coalesce(u.notify_lang, u.ui_lang, 'ru') END"""
+_LOT_COLUMNS = """s.id,
+                  -- В общей группе видно, чья это подписка.
+                  CASE WHEN s.chat_id IS NULL THEN s.name ELSE s.name || ' · ' || u.email END,
+                  coalesce(s.chat_id, u.telegram_chat_id), l.id, l.name_ru,
+                  coalesce(l.extra_desc, l.description_ru), l.amount, l.count, l.unit_name,
+                  l.prepayment, l.kato, l.trd_buy_id, coalesce(a.number_anno, l.number_anno),
+                  a.name_ru, a.end_date,
+                  coalesce(a.customer_name_ru, l.customer_name_ru, a.org_name_ru), a.kato,
+                  l.name_kz, a.name_kz, l.price, a.disable_person, """ + _LANGS_SQL
+LANGS = ("ru", "kk", "both")
 
 
 def pending(conn: psycopg.Connection, limit: int = 2000) -> list[PendingLot]:
@@ -144,20 +167,13 @@ def pending(conn: psycopg.Connection, limit: int = 2000) -> list[PendingLot]:
            WHERE m.subscription_id = s.id AND m.notified_at IS NULL AND NOT (""" + ENTITLED_SQL + ")"
     )
     rows = conn.execute(
-        """SELECT s.id,
-                  -- В общей группе видно, чья это подписка.
-                  CASE WHEN s.chat_id IS NULL THEN s.name ELSE s.name || ' · ' || u.email END,
-                  coalesce(s.chat_id, u.telegram_chat_id), l.id, l.name_ru,
-                  coalesce(l.extra_desc, l.description_ru), l.amount, l.count, l.unit_name,
-                  l.prepayment, l.kato, l.trd_buy_id, coalesce(a.number_anno, l.number_anno),
-                  a.name_ru, a.end_date,
-                  coalesce(a.customer_name_ru, l.customer_name_ru, a.org_name_ru), a.kato,
-                  l.name_kz, a.name_kz, l.price, a.disable_person
+        f"""SELECT {_LOT_COLUMNS}
            FROM matches m
            JOIN subscriptions s ON s.id = m.subscription_id
            JOIN users u ON u.id = s.user_id
            JOIN lots l ON l.id = m.lot_id
            LEFT JOIN announcements a ON a.id = l.trd_buy_id
+           LEFT JOIN telegram_groups g ON g.chat_id = s.chat_id
            WHERE m.notified_at IS NULL
            ORDER BY s.id, a.end_date NULLS LAST, l.trd_buy_id, l.prepayment DESC NULLS LAST, l.id
            LIMIT %s""",
@@ -220,9 +236,15 @@ def _part(lots: list[PendingLot], kazakh: bool) -> list[str]:
 
 
 def format_block(lots: list[PendingLot]) -> str:
-    """Блок одного объявления: сначала целиком по-казахски, потом целиком по-русски,
-    в конце — ссылка на наш сайт."""
-    lines = ["🇰🇿", *_part(lots, kazakh=True), "", "🇷🇺", *_part(lots, kazakh=False)]
+    """Блок одного объявления на языке уведомлений; оба языка — сначала целиком
+    по-казахски, потом целиком по-русски. В конце — ссылка на наш сайт."""
+    langs = lots[0].langs
+    if langs == "ru":
+        lines = _part(lots, kazakh=False)
+    elif langs == "kk":
+        lines = _part(lots, kazakh=True)
+    else:
+        lines = ["🇰🇿", *_part(lots, kazakh=True), "", "🇷🇺", *_part(lots, kazakh=False)]
     if lots[0].announcement_id:
         lines += ["", announcement_url(lots[0].announcement_id)]
     return "\n".join(lines)
@@ -341,6 +363,7 @@ def deliver(conn: psycopg.Connection, pause: float = 1.1) -> int:
 
     Лот приходит в чат один раз, даже если подошёл под несколько подписок.
     """
+    send_pages(conn)
     found = notices(_without_repeats(conn, pending(conn)))
     # Без подключённого Telegram совпадение видно только на сайте, но считается обработанным.
     _mark_notified(conn, [n for n in found if not n.chat_id])
@@ -372,3 +395,141 @@ def deliver(conn: psycopg.Connection, pause: float = 1.1) -> int:
             # Telegram разрешает в один чат около сообщения в секунду.
             time.sleep(pause)
     return sent
+
+
+# --- Первая выборка подписки: одно сообщение с листанием -----------------------------
+
+ENTITLED_PAGES = "SELECT 1 FROM users u WHERE u.id = s.user_id AND " + ENTITLED_SQL
+
+
+def _page_lots(conn: psycopg.Connection, sub_id: int, lot_ids: list[int]) -> list[PendingLot]:
+    rows = conn.execute(
+        f"""SELECT {_LOT_COLUMNS}
+           FROM subscriptions s
+           JOIN users u ON u.id = s.user_id
+           JOIN lots l ON l.id = ANY(%(ids)s)
+           LEFT JOIN announcements a ON a.id = l.trd_buy_id
+           LEFT JOIN telegram_groups g ON g.chat_id = s.chat_id
+           WHERE s.id = %(sub)s
+           ORDER BY a.end_date NULLS LAST, l.trd_buy_id, l.prepayment DESC NULLS LAST, l.id""",
+        {"ids": lot_ids, "sub": sub_id},
+    ).fetchall()
+    return [PendingLot(*row) for row in rows]
+
+
+def _pages(blocks: list[Notice]) -> list[list[Notice]]:
+    """По PAGE_SIZE объявлений, но не длиннее одного сообщения Telegram."""
+    pages: list[list[Notice]] = []
+    page: list[Notice] = []
+    size = 0
+    for block in blocks:
+        if page and (len(page) >= PAGE_SIZE or size + len(block.text) + 2 > telegram.MESSAGE_LIMIT - 300):
+            pages.append(page)
+            page, size = [], 0
+        page.append(block)
+        size += len(block.text) + 2
+    if page:
+        pages.append(page)
+    return pages
+
+
+_NAV = {"ru": ("◀ Назад", "Дальше ▶"), "kk": ("◀ Артқа", "Әрі қарай ▶"),
+        "both": ("◀ Артқа · Назад", "Әрі қарай · Дальше ▶")}
+_FOUND = {"ru": "Подходит сейчас: {n} объявл. · стр. {p} из {t}",
+          "kk": "Қазір сәйкес: {n} хабарландыру · {p}/{t} бет",
+          "both": "Қазір сәйкес / подходит сейчас: {n} · {p}/{t}"}
+
+
+def render_page(conn: psycopg.Connection, page_id: int, number: int) -> tuple[str, list | None] | None:
+    """Текст и кнопки страницы number (с нуля) первой выборки; None — выборки нет."""
+    row = conn.execute("SELECT subscription_id, lot_ids FROM match_pages WHERE id = %s",
+                       (page_id,)).fetchone()
+    if row is None:
+        return None
+    lots = _page_lots(conn, row[0], row[1])
+    if not lots:
+        return None
+    blocks = notices(lots)
+    pages = _pages(blocks)
+    number = min(max(number, 0), len(pages) - 1)
+    langs = lots[0].langs
+    head = f"🔔 <b>{html.escape(lots[0].subscription_name)}</b>"
+    if len(pages) > 1:
+        head += "\n" + _FOUND[langs].format(n=len(blocks), p=number + 1, t=len(pages))
+    text = head + "\n\n" + "\n\n".join(block.text for block in pages[number])
+    if len(pages) == 1:
+        return text, None
+    back, forward = _NAV[langs]
+    buttons = []
+    if number > 0:
+        buttons.append({"text": back, "callback_data": f"mp:{page_id}:{number - 1}"})
+    if number < len(pages) - 1:
+        buttons.append({"text": forward, "callback_data": f"mp:{page_id}:{number + 1}"})
+    return text, [buttons]
+
+
+def send_pages(conn: psycopg.Connection) -> int:
+    """Отправляет первые страницы новых выборок. Возвращает число отправленных."""
+    sent = 0
+    for page_id, sub_id, lot_ids in conn.execute(
+        """SELECT p.id, p.subscription_id, p.lot_ids FROM match_pages p
+           JOIN subscriptions s ON s.id = p.subscription_id
+           WHERE p.sent_at IS NULL AND EXISTS (""" + ENTITLED_PAGES + """) ORDER BY p.id"""
+    ).fetchall():
+        chat = conn.execute(
+            """SELECT coalesce(s.chat_id, u.telegram_chat_id) FROM subscriptions s
+               JOIN users u ON u.id = s.user_id WHERE s.id = %s""", (sub_id,)).fetchone()[0]
+        # Уже приходившие в этот чат лоты (по другой подписке) повторно не показываем.
+        sent_before = _already_sent(conn, [_Key(chat, i) for i in lot_ids]) if chat else set()
+        fresh = [i for i in lot_ids if (chat, i) not in sent_before] if chat else []
+        if fresh != lot_ids:
+            conn.execute("UPDATE match_pages SET lot_ids = %s WHERE id = %s", (fresh, page_id))
+        page = render_page(conn, page_id, 0) if fresh else None
+        if page is None:
+            conn.execute("UPDATE match_pages SET sent_at = now() WHERE id = %s", (page_id,))
+            conn.commit()
+            continue
+        conn.commit()
+        try:
+            message = telegram.send_message(chat, page[0], buttons=page[1])
+        except telegram.TelegramError as error:
+            if not error.chat_gone and error.code != 400:
+                logger.warning("pages stopped: %s", error)
+                return sent
+            logger.warning("page %s to %s not sent: %s", page_id, chat, error)
+            message = None
+        conn.execute("UPDATE match_pages SET sent_at = now(), chat_id = %s, message_id = %s WHERE id = %s",
+                     (chat, (message or {}).get("message_id"), page_id))
+        if message:
+            conn.execute("INSERT INTO chat_lots (chat_id, lot_id) SELECT %s, unnest(%s::bigint[]) "
+                         "ON CONFLICT DO NOTHING", (chat, fresh))
+            sent += 1
+        conn.commit()
+    return sent
+
+
+class _Key(NamedTuple):
+    chat_id: str
+    lot_id: int
+
+
+def turn_page(conn: psycopg.Connection, query: dict, bot_name: str = "main") -> None:
+    """Кнопка «Назад» / «Дальше» под первой выборкой: показать другую страницу."""
+    _, page_id, number = (query.get("data") or "").split(":")
+    message = query.get("message") or {}
+    chat = str((message.get("chat") or {}).get("id"))
+    if bot_name == "client":
+        chat = telegram.CLIENT_PREFIX + chat
+    owner = conn.execute("SELECT chat_id FROM match_pages WHERE id = %s", (int(page_id),)).fetchone()
+    page = render_page(conn, int(page_id), int(number)) if owner and owner[0] == chat else None
+    conn.commit()
+    try:
+        telegram.call("answerCallbackQuery", bot=bot_name, callback_query_id=query["id"],
+                      **({} if page else {"text": "Список устарел"}))
+        if page:
+            telegram.call("editMessageText", bot=bot_name, chat_id=message["chat"]["id"],
+                          message_id=message["message_id"], text=page[0], parse_mode="HTML",
+                          link_preview_options={"is_disabled": True},
+                          reply_markup={"inline_keyboard": page[1] or []})
+    except telegram.TelegramError as error:
+        logger.warning("page turn failed: %s", error)

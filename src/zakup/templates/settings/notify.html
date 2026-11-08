@@ -20,6 +20,17 @@
     </div>
     <p class="note muted">{{ _("Откроется бот @") }}{{ bot_username }} {{ _("— нажмите в нём «Start». Ссылка одноразовая и действует 30 минут. Потом обновите эту страницу.") }}</p>
   {% endif %}
+  <form method="post" action="/settings/notify-lang" class="actions">
+    <label>{{ _("Язык уведомлений") }}
+      <select name="lang" onchange="this.form.submit()">
+        <option value="" {{ "selected" if not notify_lang }}>{{ _("Как на сайте") }}</option>
+        <option value="ru" {{ "selected" if notify_lang == "ru" }}>Русский</option>
+        <option value="kk" {{ "selected" if notify_lang == "kk" }}>Қазақша</option>
+        <option value="both" {{ "selected" if notify_lang == "both" }}>{{ _("Оба языка") }}</option>
+      </select></label>
+    <noscript><button>{{ _("Сохранить") }}</button></noscript>
+  </form>
+  {% if saved == "notify" %}<p class="note">{{ _("Сохранено.") }}</p>{% endif %}
 </section>
 {% if client_group %}
 <section class="panel">
@@ -37,7 +48,14 @@
   <h2>{{ _("Telegram-группы") }}</h2>
   <p class="muted">{{ _("Результаты подписок можно присылать в общую группу, например с партнёрами: в подписке выберите «в группу». Если лот подошёл под несколько подписок, в группу он придёт один раз — с названием подписки и логином.") }} {{ _("Подключённые группы доступны всем пользователям: каждый сам решает, какие подписки слать в группу, а какие — себе в личку.") }}</p>
   {% for chat_id, title in groups %}
+  {% set glang = group_langs.get(chat_id, "both") %}
   <div class="status"><span class="dot on"></span>{{ title }}
+    <form method="post" action="/settings/groups/lang" style="display:inline"><input type="hidden" name="chat_id" value="{{ chat_id }}">
+      <select name="lang" aria-label="{{ _("Язык уведомлений") }}" onchange="this.form.submit()">
+        <option value="both" {{ "selected" if glang == "both" }}>{{ _("Оба языка") }}</option>
+        <option value="ru" {{ "selected" if glang == "ru" }}>Русский</option>
+        <option value="kk" {{ "selected" if glang == "kk" }}>Қазақша</option>
+      </select><noscript><button>{{ _("Сохранить") }}</button></noscript></form>
     <form method="post" action="/settings/groups/remove" style="display:inline"><input type="hidden" name="chat_id" value="{{ chat_id }}"><button>{{ _("Отключить") }}</button></form></div>
   {% endfor %}
   {% if configured %}

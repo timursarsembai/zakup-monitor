@@ -102,6 +102,7 @@ def _login_attempt(request: Request, email: str, password: str, next: str, staff
         )
     with core.pool.connection() as conn:
         user_id, role = conn.execute("SELECT id, role FROM users WHERE email = %s", (email_norm,)).fetchone()
+        conn.execute("UPDATE users SET ui_lang = %s WHERE id = %s", (i18n.language(), user_id))
     _audit(request, user_id, "login")
     target = _safe_next(next)
     if target == "/" and role in auth.STAFF_ROLES:
@@ -243,6 +244,7 @@ def _finish(request: Request, purpose: str, flow: str, code: str, password: str,
             conn.execute("UPDATE users SET phone = %s, role = 'user' WHERE id = %s", (phone, user_id))
         else:
             user_id = auth.set_password(conn, phone, password)
+        conn.execute("UPDATE users SET ui_lang = %s WHERE id = %s", (i18n.language(), user_id))
         conn.commit()
         token = auth.login(conn, phone, password, request.client.host if request.client else None,
                            request.headers.get("user-agent"))

@@ -14,7 +14,7 @@ from datetime import UTC, datetime, timedelta
 
 import psycopg
 
-from zakup import SITE_URL, bot, config, db, telegram
+from zakup import SITE_URL, bot, config, db, matcher, telegram
 
 logger = logging.getLogger(__name__)
 
@@ -271,7 +271,7 @@ def run(database_url: str, poll_timeout: int = 50) -> None:
                 updates = telegram.call(
                     "getUpdates", bot=BOT, http_timeout=poll_timeout + 10,
                     offset=state.last_id if state else 0, timeout=poll_timeout,
-                    allowed_updates=["message", "chat_join_request"],
+                    allowed_updates=["message", "chat_join_request", "callback_query"],
                 )
                 for update in updates:
                     # Ошибка на одном обновлении (заявку уже разобрал человек, отменили) не
@@ -282,6 +282,9 @@ def run(database_url: str, poll_timeout: int = 50) -> None:
                                 _send(message["chat"]["id"], reply)
                         elif request := update.get("chat_join_request"):
                             logger.info("join request: %s", handle_join_request(conn, request))
+                        elif (query := update.get("callback_query")) and \
+                                (query.get("data") or "").startswith("mp:"):
+                            matcher.turn_page(conn, query, BOT)
                     except telegram.TelegramError as error:
                         conn.rollback()
                         logger.warning("client bot: update %s skipped: %s", update.get("update_id"), error)

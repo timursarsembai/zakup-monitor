@@ -59,10 +59,14 @@ router = APIRouter()
 
 
 @router.get("/lang/{code}")
-def switch_language(request: Request, code: str):
+def switch_language(request: Request, user: Viewer, code: str):
     """Переключатель Рус/Қаз: запоминает выбор и возвращает на ту же страницу."""
     if code not in i18n.LANGUAGES:
         raise HTTPException(404, "нет такого языка")
+    if user:
+        # Язык сайта — язык уведомлений в Telegram, пока в настройках не выбран другой.
+        with core.pool.connection() as conn:
+            conn.execute("UPDATE users SET ui_lang = %s WHERE id = %s", (code, user))
     back = request.headers.get("referer") or "/"
     parts = urlsplit(back)
     target = _safe_next(parts.path + (f"?{parts.query}" if parts.query else ""))

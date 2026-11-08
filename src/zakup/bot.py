@@ -207,7 +207,12 @@ def _answer(query: dict, text: str) -> None:
 
 def _update(conn: psycopg.Connection, update: dict) -> None:
     if query := update.get("callback_query"):
-        _answer(query, handle_callback(conn, query))
+        if (query.get("data") or "").startswith("mp:"):
+            from zakup import matcher  # matcher сам импортирует bot
+
+            matcher.turn_page(conn, query)
+        else:
+            _answer(query, handle_callback(conn, query))
     message = update.get("message")
     if message and (reply := handle(conn, message)):
         try:

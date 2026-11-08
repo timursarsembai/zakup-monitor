@@ -88,10 +88,11 @@ def call(method: str, http_timeout: float = 15, bot: str = "main", **params: Any
     return payload["result"]
 
 
-def send_message(chat_id: str | int, text: str, buttons: list[list[dict]] | None = None) -> None:
+def send_message(chat_id: str | int, text: str, buttons: list[list[dict]] | None = None) -> dict:
+    """Отправляет сообщение; возвращает его (message_id — чтобы потом изменить)."""
     bot, real_id = route(chat_id)
     extra = {"reply_markup": {"inline_keyboard": buttons}} if buttons else {}
-    call(
+    return call(
         "sendMessage",
         bot=bot,
         chat_id=real_id,

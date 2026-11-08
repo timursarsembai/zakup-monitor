@@ -108,8 +108,8 @@ def test_deliver_respects_message_limit_and_names_subscription(conn, outbox, mon
     assert matcher.deliver(conn, pause=0) == 7
     assert len(sent) > 1
     assert all(text.startswith("🔔 <b>Картриджи</b>") for _, text in sent)
-    # Каждый лот — дважды: в казахской и русской частях (казахского названия нет — русское).
-    assert sum(text.count("• <b>Картриджи партия") for _, text in sent) == 14
+    # Язык сайта не известен — по-русски, каждый лот один раз.
+    assert sum(text.count("• <b>Картриджи партия") for _, text in sent) == 7
     assert matcher.pending(conn) == []
 
 
