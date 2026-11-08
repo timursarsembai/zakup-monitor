@@ -857,3 +857,41 @@ def test_edit_subscription_conditions_and_name(client, conn):
     client.post("/logout", headers=ORIGIN)
     client.post("/login", data={"email": "other", "password": "other-password-1"}, headers=ORIGIN)
     assert client.post(f"/subscriptions/{sub}/update", data=data, headers=ORIGIN).status_code == 404
+
+
+def test_search_balance_charge_refund_history(client, conn):
+    from zakup import credits, research
+
+    _announcement_with_lots(conn)
+    auth.set_password(conn, "+77011112233", "client-password-1")
+    conn.execute("UPDATE users SET role = 'user' WHERE email = '+77011112233'")
+    conn.commit()
+    client_id = conn.execute("SELECT id FROM users WHERE email = '+77011112233'").fetchone()[0]
+    client.post("/login", data={"email": "87011112233", "password": "client-password-1"}, headers=ORIGIN)
+    # Без поисков — на страницу покупки, ничего не ставится в очередь.
+    empty = client.post("/lots/5001/research", data={"region": "Алматы", "whole_kz": "1"}, headers=ORIGIN,
+                        follow_redirects=False)
+    assert empty.headers["location"] == "/pricing?need=searches"
+    assert conn.execute("SELECT count(*) FROM lot_research").fetchone()[0] == 0
+    credits.add(conn, client_id, 20, "grant")
+    conn.commit()
+    page = client.get("/lots/5001").text
+    assert "🔍 20" in page and "×1" in page and "Запустить поиск товаров?" in page
+    client.post("/lots/5001/research", data={"region": "Алматы", "whole_kz": "1"}, headers=ORIGIN)
+    job = conn.execute("SELECT id FROM lot_research").fetchone()[0]
+    assert credits.balance(conn, client_id) == 19
+    assert credits.refund(conn, job) and not credits.refund(conn, job)  # возврат — один раз
+    conn.commit()
+    assert credits.balance(conn, client_id) == 20
+    history = client.get("/balance").text
+    assert "Поиск товаров" in history and "Возврат" in history and "/lots/5001" in history
+    assert "+20" in history and "-1" in history
+    # Сотрудник ищет без баланса.
+    client.post("/logout", headers=ORIGIN)
+    _login(client)
+    conn.execute("UPDATE lot_research SET status = 'error'")
+    conn.commit()
+    client.post("/lots/5002/research", data={"region": "Алматы", "whole_kz": "1"}, headers=ORIGIN)
+    assert conn.execute("SELECT count(*) FROM search_ledger WHERE kind = 'search'").fetchone()[0] == 1
+    assert "поисков на балансе — 40" in client.post(f"/settings/users/{client_id}/searches",
+                                                  data={"count": "20"}, headers=ORIGIN).text

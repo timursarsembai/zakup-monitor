@@ -449,3 +449,16 @@ CREATE TABLE IF NOT EXISTS app_settings (
 );
 -- Оплаченный доступ к платным функциям (тариф); NULL или в прошлом — не оплачено.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS paid_until timestamptz;
+-- Баланс поисков с ИИ: журнал пополнений и списаний (сумма delta — остаток).
+CREATE TABLE IF NOT EXISTS search_ledger (
+    id          bigserial PRIMARY KEY,
+    user_id     bigint NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    delta       integer NOT NULL,
+    kind        text NOT NULL,                 -- purchase, grant, search, refund
+    lot_id      bigint,
+    research_id bigint,
+    note        text,
+    created_by  bigint,
+    created_at  timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS search_ledger_user ON search_ledger (user_id, created_at DESC);

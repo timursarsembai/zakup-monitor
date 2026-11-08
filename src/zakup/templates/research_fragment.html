@@ -58,9 +58,9 @@
   <p class="{{ 'muted' if r.exhausted else '' }}">{% if r.exhausted %}{{ _("Больше подходящих предложений не нашлось — показано всё, что есть.") }}{% else %}{{ _("Добавлено новых предложений:") }} <b>{{ r.added }}</b>{% endif %}</p>
   {% endif %}
   {% if r["items"] and not r.exhausted and not busy %}
-  <form class="more-form" method="post" action="/lots/{{ lot_id }}/research">
+  <form class="more-form" data-search method="post" action="/lots/{{ lot_id }}/research">
     <input type="hidden" name="more" value="1">
-    <button class="primary">➕ {{ _("Найти ещё") }}</button>
+    <button class="primary">➕ {{ _("Найти ещё") }}{% if not request.state.staff %} <span class="cost">×1</span>{% endif %}</button>
     <select name="target" aria-label="{{ _("Сколько ещё искать") }}">{% for n in targets %}<option value="{{ n }}" {% if n == 5 %}selected{% endif %}>{{ n }}</option>{% endfor %}</select>
     <span class="muted">{{ _("новых — уже найденные не повторяются, всё сохранится вместе") }}</span>
   </form>

@@ -112,6 +112,7 @@
   </nav>
   <div class="logout">
     {% if request.state.user_id %}<span class="muted who">{{ request.state.email }}</span>{% endif %}
+    {% if request.state.user_id and not request.state.staff %}<a href="/balance" class="icon-button searches {{ 'on' if path == '/balance' }}" title="{{ _("Осталось поисков товаров с ИИ — история") }}">🔍 {{ request.state.searches }}</a>{% endif %}
     <span class="a11y">
       <button type="button" class="a11y-toggle" data-a11y-toggle title="{{ _("Режим для слабовидящих") }}" aria-label="{{ _("Режим для слабовидящих") }}" aria-expanded="false">Aa</button>
       <div class="a11y-panel" data-a11y-panel hidden>

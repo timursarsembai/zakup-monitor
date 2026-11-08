@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}{{ _("Баланс поисков") }}{% endblock %}
+{% block style %}
+  .bal { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin: 6px 0 16px; }
+  .bal b { font-size: 34px; }
+  .plus { color: var(--ok); font-weight: 600; } .minus { color: var(--bad); font-weight: 600; }
+  td.when { white-space: nowrap; font-variant-numeric: tabular-nums; }
+{% endblock %}
+{% block main %}
+<h1>{{ _("Баланс поисков товаров с ИИ") }}</h1>
+<div class="bal"><span>{{ _("Осталось:") }}</span><b>{{ balance }}</b>
+  <a class="button primary" href="/pricing">{{ _("Купить поиски") }}</a></div>
+<p class="muted">{{ _("Каждый запуск поиска и «Найти ещё» — минус один поиск. Если поиск не удался, он возвращается. Купленные поиски не сгорают.") }}</p>
+{% if rows %}
+<div class="table-wrap"><table>
+  <tr><th>{{ _("Когда") }}</th><th>{{ _("Изменение") }}</th><th>{{ _("Что") }}</th><th>{{ _("Лот") }}</th><th>{{ _("Результат") }}</th></tr>
+  {% for r in rows %}
+  <tr>
+    <td class="when">{{ (r.at|local).strftime("%d.%m.%Y %H:%M:%S") }}</td>
+    <td class="{{ 'plus' if r.delta > 0 else 'minus' }}">{{ "+" if r.delta > 0 }}{{ r.delta }}</td>
+    <td>{{ _(kinds.get(r.kind, r.kind)) }}{% if r.note %} <span class="muted">· {{ r.note }}</span>{% endif %}</td>
+    <td>{% if r.lot_id %}<a href="/lots/{{ r.lot_id }}">{{ pick(r.lot_ru, r.lot_kz) or r.lot_id }}</a>{% if r.lot_number %}<div class="muted">{{ r.lot_number }}</div>{% endif %}{% else %}—{% endif %}</td>
+    <td>{% if r.lot_id and r.kind == "search" %}{% if r.status == "done" %}<a href="/lots/{{ r.lot_id }}#research">{{ _("найдено:") }} {{ r.found }}</a>{% elif r.status in ("queued", "running") %}<span class="muted">{{ _("идёт поиск…") }}</span>{% else %}<span class="muted">{{ _("не удался") }}</span>{% endif %}{% else %}—{% endif %}</td>
+  </tr>
+  {% endfor %}
+</table></div>
+{% else %}<p class="muted">{{ _("Пока ни одной операции.") }}</p>{% endif %}
+{% endblock %}

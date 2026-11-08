@@ -26,7 +26,7 @@ import httpx
 import psycopg
 from psycopg.types.json import Jsonb
 
-from zakup import contacts, details, kaspi, secrets_box, sources
+from zakup import contacts, credits, details, kaspi, secrets_box, sources
 
 logger = logging.getLogger(__name__)
 
@@ -318,8 +318,10 @@ TARGETS = (5, 10, 15, 20)
 
 
 def enqueue(conn: psycopg.Connection, user_id: int, lot_id: int, region: str,
-            whole_kz: bool, is_admin: bool = False, target: int = 10, more: bool = False) -> int:
-    """Ставит поиск в очередь. more=True — «найти ещё»: дополнить последний результат."""
+            whole_kz: bool, is_admin: bool = False, target: int = 10, more: bool = False,
+            charge: bool = False) -> int:
+    """Ставит поиск в очередь. more=True — «найти ещё»: дополнить последний результат.
+    charge=True — списать один поиск с баланса клиента (credits.NoCredits, если пусто)."""
     # Кто ищет — решает администратор в своих настройках, для всех пользователей.
     provider, model = conn.execute(
         "SELECT ai_provider, ai_model FROM users WHERE role = 'admin' ORDER BY id LIMIT 1"
@@ -355,6 +357,12 @@ def enqueue(conn: psycopg.Connection, user_id: int, lot_id: int, region: str,
         (lot_id, user_id, provider, model or DEFAULT_MODELS[provider], clean_region(region),
          whole_kz, target if target in TARGETS else 10, base_id),
     ).fetchone()[0]
+    if charge:
+        try:
+            credits.charge(conn, user_id, lot_id, job)
+        except credits.NoCredits:
+            conn.rollback()
+            raise
     conn.commit()
     return job
 
@@ -784,13 +792,16 @@ def work(database_url: str, providers: list[str], once: bool = False) -> None:
     while True:
         with db.connect(database_url) as conn:
             # На старте «running» своих провайдеров — точно мёртвые: исполнитель один.
-            conn.execute(
+            reaped = conn.execute(
                 f"""UPDATE lot_research SET status = 'error', finished_at = now(),
                        error = 'прервано: перезапуск службы'
                     WHERE status = 'running' AND provider = ANY(%s)
-                      AND (%s OR started_at < now() - interval '{STALE_AFTER}')""",
+                      AND (%s OR started_at < now() - interval '{STALE_AFTER}')
+                    RETURNING id""",
                 (providers, first),
-            )
+            ).fetchall()
+            for (dead,) in reaped:
+                credits.refund(conn, dead)
             first = False
             for table in ("spec_summaries", "supplier_questions"):
                 conn.execute(
@@ -822,6 +833,9 @@ def work(database_url: str, providers: list[str], once: bool = False) -> None:
                     conn.rollback()
                     logger.warning("research %s failed: %s", job["id"], exc)
                     result, error = None, str(exc)[:500]
+                if result is None:
+                    # Не удалось — поиск возвращается на баланс клиента.
+                    credits.refund(conn, job["id"])
                 conn.execute(
                     """UPDATE lot_research SET status = %s, result = %s, error = %s,
                            finished_at = now(), usage = %s WHERE id = %s""",

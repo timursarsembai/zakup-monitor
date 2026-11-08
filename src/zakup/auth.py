@@ -130,14 +130,15 @@ def login(
 
 
 def user_by_session(conn: psycopg.Connection, token: str | None) -> tuple | None:
-    """(id, логин, роль, есть ли доступ к платному) по cookie сессии.
+    """(id, логин, роль, есть ли доступ к платному, остаток поисков) по cookie сессии.
 
     Платное доступно сотрудникам всегда, клиентам — пока оплачено (paid_until)."""
     if not token:
         return None
     return conn.execute(
         """SELECT u.id, u.email, u.role,
-                  u.role IN ('admin', 'moderator') OR coalesce(u.paid_until > now(), false)
+                  u.role IN ('admin', 'moderator') OR coalesce(u.paid_until > now(), false),
+                  (SELECT coalesce(sum(g.delta), 0) FROM search_ledger g WHERE g.user_id = u.id)
            FROM sessions s JOIN users u ON u.id = s.user_id
            WHERE s.token_hash = %s AND s.expires_at > now() AND NOT u.disabled
              AND u.deleted_at IS NULL""",

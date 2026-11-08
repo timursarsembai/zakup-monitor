@@ -31,6 +31,7 @@ from zakup import (
     auth,
     bot,
     contacts,
+    credits,
     dashboard,
     details,
     i18n,
@@ -223,6 +224,7 @@ def optional_user(request: Request) -> int | None:
     # Платные функции: сотрудники всегда, клиенты — пока оплачено.
     request.state.paid = bool(user and user[3])
     request.state.staff = bool(user and user[2] in auth.STAFF_ROLES)
+    request.state.searches = user[4] if user else 0
     return user[0] if user else None
 
 
@@ -235,6 +237,15 @@ def current_user(request: Request) -> int:
 
 Viewer = Annotated[int | None, Depends(optional_user)]
 User = Annotated[int, Depends(current_user)]
+
+
+def _sees_research(request: Request, user: int, conn=None) -> bool:
+    if request.state.paid:
+        return True
+    if conn is not None:
+        return credits.has_access(conn, user)
+    with pool.connection() as own:
+        return credits.has_access(own, user)
 
 
 class PaymentRequired(Exception):
@@ -585,6 +596,15 @@ def pricing(request: Request, user: Viewer):
         "packs": SEARCH_PACKS, "paid_until": paid_until[0] if paid_until else None})
 
 
+@app.get("/balance")
+def balance_page(request: Request, user: User):
+    with pool.connection() as conn:
+        rows = credits.history(conn, user)
+        left = credits.balance(conn, user)
+    return templates.TemplateResponse(request, "balance.html", {
+        "rows": rows, "balance": left, "kinds": credits.KINDS})
+
+
 @app.get("/robots.txt")
 def robots() -> Response:
     lines = ["User-agent: *", "Allow: /",
@@ -873,9 +893,10 @@ def lot_page(request: Request, user: Viewer, lot_id: int, background: Background
     if lot is None:
         raise HTTPException(404, "Лот удалён из объявления")
     with pool.connection() as conn:
-        # Результаты подбора — платная часть: без доступа их не показываем.
-        job = research.latest(conn, lot_id) if request.state.paid else None
-        done = research.latest_done(conn, lot_id) if request.state.paid else None
+        # Результаты подбора — платная часть: тариф, сотрудник или купленные поиски.
+        sees = bool(user) and _sees_research(request, user, conn)
+        job = research.latest(conn, lot_id) if sees else None
+        done = research.latest_done(conn, lot_id) if sees else None
         lot_info = research.lot_context(conn, lot_id)
         provider = (conn.execute(
             "SELECT ai_provider FROM users WHERE role = 'admin' ORDER BY id LIMIT 1"
@@ -896,7 +917,7 @@ def lot_page(request: Request, user: Viewer, lot_id: int, background: Background
 @app.post("/lots/{lot_id}/research", dependencies=[Depends(same_origin)])
 def start_research(
     request: Request,
-    user: Paid,
+    user: User,
     lot_id: int,
     region: Annotated[str, Form()] = "",
     whole_kz: Annotated[str, Form()] = "",
@@ -906,14 +927,17 @@ def start_research(
     with pool.connection() as conn:
         if research.lot_context(conn, lot_id) is None:
             raise HTTPException(404, "Нет данных лота: откройте страницу объявления")
+        staff = request.state.staff
         try:
             research.enqueue(conn, user, lot_id, region, whole_kz == "1",
-                             is_admin=request.state.role in auth.STAFF_ROLES, target=target,
-                             more=more == "1")
+                             is_admin=staff, target=target, more=more == "1", charge=not staff)
             _audit(request, user, "research", f"/lots/{lot_id}", region=region[:120],
                    count=target, more=more == "1")
         except research.QuotaExceeded as error:
             raise HTTPException(429, f"Лимит поиска товаров: {error}") from None
+        except credits.NoCredits:
+            # Поисков на балансе нет — на страницу покупки.
+            return RedirectResponse("/pricing?need=searches", status_code=303)
     return RedirectResponse(f"/lots/{lot_id}#research", status_code=303)
 
 
@@ -953,7 +977,9 @@ def questions_fragment(request: Request, _: Paid, lot_id: int, url: str):
 
 
 @app.get("/lots/{lot_id}/research")
-def research_fragment(request: Request, _: Paid, lot_id: int):
+def research_fragment(request: Request, user: User, lot_id: int):
+    if not _sees_research(request, user):
+        raise PaymentRequired()
     with pool.connection() as conn:
         job = research.latest(conn, lot_id)
         done = research.latest_done(conn, lot_id)
@@ -1597,7 +1623,8 @@ def _settings_page(request: Request, user: int, *, sent: str = "", saved: str = 
         users = conn.execute(
             """SELECT u.id, u.email, u.role, u.telegram_chat_id IS NOT NULL,
                       (SELECT max(created_at) FROM sessions s WHERE s.user_id = u.id),
-                      u.disabled, o.name, o.bin, u.paid_until
+                      u.disabled, o.name, o.bin, u.paid_until,
+                      (SELECT coalesce(sum(g.delta), 0) FROM search_ledger g WHERE g.user_id = u.id)
                FROM users u LEFT JOIN client_orgs o ON o.user_id = u.id WHERE u.deleted_at IS NULL AND (%s OR u.role <> 'admin' OR u.id = %s)
                ORDER BY array_position(ARRAY['admin', 'moderator', 'user'], u.role), u.email""",
             (is_admin, user),
@@ -1731,6 +1758,19 @@ def grant_access(request: Request, admin: Admin, user_id: int, days: Annotated[i
     text = (f"{login}: доступ к платному до {until.astimezone(PORTAL_TZ):%d.%m.%Y}." if until
             else f"{login}: доступ к платному снят.")
     return _settings_page(request, admin, tab="users", notice=text)
+
+
+@app.post("/settings/users/{user_id}/searches", dependencies=[Depends(same_origin)])
+def grant_searches(request: Request, admin: Admin, user_id: int, count: Annotated[int, Form()] = 20):
+    """Начислить (или списать, если отрицательно) поиски вручную — до подключения оплаты."""
+    if not -1000 <= count <= 1000 or count == 0:
+        raise HTTPException(422, "от −1000 до 1000, не ноль")
+    with pool.connection() as conn:
+        login = _other_user(conn, request, admin, user_id)
+        credits.add(conn, user_id, count, "grant", by=admin, note="начислил администратор")
+        left = credits.balance(conn, user_id)
+    _audit(request, admin, "user_searches", login, count=count)
+    return _settings_page(request, admin, tab="users", notice=f"{login}: поисков на балансе — {left}.")
 
 
 @app.post("/settings/users/{user_id}/role", dependencies=[Depends(same_origin)])

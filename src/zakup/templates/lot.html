@@ -41,6 +41,11 @@
   .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin 1s linear infinite; vertical-align: -2px; }
   @keyframes spin { to { transform: rotate(360deg); } }
   table.research .ask-btn { display: block; margin-top: 6px; white-space: normal; text-align: left; font-size: 13px; padding: 5px 9px; }
+  .cost { font-size: .85em; opacity: .85; margin-left: 4px; padding: 0 6px; border-radius: 999px; background: rgba(0, 0, 0, .15); }
+  dialog.search-confirm { width: min(440px, calc(100vw - 32px)); border: 1px solid var(--line); border-radius: 14px; padding: 0; background: var(--bg); color: var(--fg); }
+  dialog.search-confirm::backdrop { background: rgba(0, 0, 0, .55); }
+  .sc-wrap { padding: 20px; } .sc-wrap h2 { margin: 0 0 10px; font-size: 19px; }
+  .sc-actions { display: flex; gap: 10px; align-items: center; margin-top: 14px; flex-wrap: wrap; }
   dialog.questions { width: 100vw; height: 100vh; max-width: none; max-height: none; margin: 0; border: 0; padding: 0; background: var(--bg); color: var(--fg); }
   dialog.questions::backdrop { background: rgba(0, 0, 0, .5); }
   .q-wrap { max-width: 820px; margin: 0 auto; padding: 16px 16px 40px; }
@@ -73,11 +78,11 @@
 <section class="research-box" id="research">
   <h2 style="margin-top:0">{{ _("Поиск товаров с ИИ") }}</h2>
   {% if lot_info %}
-  <form class="research-form" data-paid method="post" action="/lots/{{ lot.id }}/research">
+  <form class="research-form" data-search method="post" action="/lots/{{ lot.id }}/research">
     <input name="region" value="{{ region }}" aria-label="{{ _("Где искать в первую очередь") }}" placeholder="{{ _("Регион поставки") }}">
     <input type="hidden" name="whole_kz" value="1"><span class="muted">{{ _("и по всему Казахстану") }}</span>
     <label class="muted">{{ _("Найти") }} <select name="target" aria-label="{{ _("Сколько предложений искать") }}">{% for n in targets %}<option value="{{ n }}" {% if (job.target if job else 10) == n %}selected{% endif %}>{{ n }}</option>{% endfor %}</select> {{ _("предложений") }}</label>
-    <button class="primary" {% if job and job.status in ("queued", "running") %}disabled{% endif %}>{{ _("Найти заново") if job else _("Найти товары") }}</button>
+    <button class="primary" {% if job and job.status in ("queued", "running") %}disabled{% endif %}>{{ _("Найти заново") if job else _("Найти товары") }}{% if not request.state.staff %} <span class="cost">×1</span>{% endif %}</button>
   </form>
   <p class="muted">{{ _("Claude прочитает техспецификацию, найдёт в интернете подходящие товары — сначала в регионе поставки, потом по Казахстану — и посчитает маржу от цены в лоте. Сейчас ищет:") }} {{ provider_name }}{% if request.state.role == "admin" %} (<a href="/settings#ai">{{ _("настройки") }}</a>){% endif %}.</p>
   {% if manual_links %}<div class="manual"><span class="muted">{{ _("Искать самому:") }}</span>
@@ -116,6 +121,20 @@
 {% endif %}
 
 <p class="muted" style="margin-top:24px">{{ _("Данные с портала обновлены") }} {{ (fetched_at|local).strftime("%d.%m.%Y %H:%M") if fetched_at else "—" }}. <a href="{{ portal_url }}" target="_blank" rel="noopener">{{ _("Объявление на портале ↗") }}</a></p>
+<dialog class="search-confirm" id="search-confirm" aria-labelledby="sc-title">
+  <form method="dialog" class="sc-wrap">
+    <h2 id="sc-title">{{ _("Запустить поиск товаров?") }}</h2>
+    {% if request.state.user_id and request.state.searches > 0 %}
+    <p>{{ _("С баланса будет списан 1 поиск. Сейчас на балансе:") }} <b>{{ request.state.searches }}</b>.</p>
+    <p class="muted">{{ _("Если поиск не удастся, поиск вернётся на баланс.") }}</p>
+    <label class="muted"><input type="checkbox" data-sc-skip> {{ _("Больше не спрашивать") }}</label>
+    <div class="sc-actions"><button value="ok" class="primary">{{ _("Да, искать") }}</button><button value="cancel">{{ _("Отмена") }}</button></div>
+    {% else %}
+    <p>{{ _("На балансе нет поисков. Поиск товаров с ИИ — 250 ₸, пакеты выгоднее.") }}</p>
+    <div class="sc-actions"><a class="pw-buy" href="{{ '/pricing' if request.state.user_id else '/register' }}">{{ _("Купить поиски") if request.state.user_id else _("Зарегистрироваться") }}</a><button value="cancel">{{ _("Отмена") }}</button></div>
+    {% endif %}
+  </form>
+</dialog>
 <dialog class="questions" id="questions" aria-labelledby="questions-title">
   <div class="q-wrap">
     <div class="q-head"><div><h2 id="questions-title">{{ _("Что спросить у поставщика") }}</h2><div class="muted" data-q-title></div></div>
@@ -126,6 +145,34 @@
 </dialog>
 <script>
 {{ lot_scripts() }}
+  // Поиск с ИИ: клиенту — подтверждение списания (или предложение купить поиски).
+  (() => {
+    const STAFF = {{ "true" if request.state.staff else "false" }};
+    const HAS = {{ "true" if request.state.user_id and request.state.searches > 0 else "false" }};
+    const dialog = document.getElementById("search-confirm");
+    if (STAFF || !dialog) return;
+    let pending = null;
+    document.addEventListener("submit", (event) => {
+      const form = event.target.closest("[data-search]");
+      if (!form || form.dataset.confirmed) return;
+      let skip = false;
+      try { skip = HAS && localStorage.getItem("zakup-search-confirm") === "skip"; } catch (e) {}
+      if (skip) return;
+      event.preventDefault();
+      pending = form;
+      dialog.showModal();
+    }, true);
+    dialog.addEventListener("close", () => {
+      if (dialog.returnValue === "ok" && pending) {
+        if (dialog.querySelector("[data-sc-skip]")?.checked) {
+          try { localStorage.setItem("zakup-search-confirm", "skip"); } catch (e) {}
+        }
+        pending.dataset.confirmed = "1";
+        pending.requestSubmit();
+      }
+      pending = null;
+    });
+  })();
   // «Что спросить у поставщика»: чек-лист от ИИ по кнопке; готовый — общий для всех.
   const qDialog = document.getElementById("questions");
   const qBody = qDialog.querySelector("[data-q-body]");
