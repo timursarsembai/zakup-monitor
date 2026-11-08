@@ -121,6 +121,8 @@ PROMPT = """Ты помогаешь поставщику, который уча�
 3. Найди {target} разных предложений с ценой: интернет-магазины, Kaspi, сайты
    поставщиков, satu.kz и т.п. Открывай страницы, чтобы проверить цену и
    характеристики. Не выдумывай: только то, что реально видел на странице.
+   Цена за единицу у продавца должна быть НИЖЕ цены в лоте ({price} тенге): иначе
+   поставщик уйдёт в минус. Дороже или по той же цене — не бери, ищи дешевле.
    Если подходящих меньше — верни сколько есть: не добавляй неподходящее ради
    количества. Ничего не нашёл — пустой список items.{exclude}{kaspi}
 4. Для каждого предложения:
@@ -635,6 +637,20 @@ def _kaspi_candidates(conn: psycopg.Connection, context: dict[str, Any],
     return kaspi.candidates_for_prompt([i for i in found if i["url"] not in known][:kaspi.LIMIT])
 
 
+def without_loss(result: dict[str, Any], lot_price: Any) -> dict[str, Any]:
+    """Убирает предложения не дешевле цены лота за единицу: в них нет маржи.
+    Без цены у продавца (не удалось узнать) — оставляем, решит человек."""
+    try:
+        limit = float(lot_price)
+    except (TypeError, ValueError):
+        return result
+    if limit <= 0:
+        return result
+    kept = [i for i in result.get("items") or []
+            if not isinstance(i.get("unit_price"), (int, float)) or i["unit_price"] < limit]
+    return {**result, "items": kept, "dropped_no_margin": len(result.get("items") or []) - len(kept)}
+
+
 def run_job(conn: psycopg.Connection, job: dict[str, Any]) -> dict[str, Any]:
     context = lot_context(conn, job["lot_id"])
     if context is None:
@@ -659,6 +675,7 @@ def run_job(conn: psycopg.Connection, job: dict[str, Any]) -> dict[str, Any]:
     else:
         runner = _anthropic if job["provider"] == "anthropic" else _openai
         found = clean(runner(prompt, job["model"], key))
+    found = without_loss(found, context.get("price"))
     # Телефоны, которые ИИ не увидел (лежат в коде страницы), — достаём сами.
     contacts.enrich(found, conn)
     conn.commit()

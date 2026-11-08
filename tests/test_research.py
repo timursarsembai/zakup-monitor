@@ -211,3 +211,13 @@ def test_kaspi_candidates_use_buyer_query(monkeypatch):
     assert "Утюг утюг паровой" in text and "/shop/p/5/" not in text  # уже найденное — не повторяем
     monkeypatch.setattr(kaspi, "proxy_url", lambda conn: None)
     assert research._kaspi_candidates(Conn(), context, None) == ""
+
+
+def test_offers_without_margin_are_dropped():
+    from zakup import research
+
+    result = {"items": [{"url": "a", "unit_price": 900}, {"url": "b", "unit_price": 1000},
+                        {"url": "c", "unit_price": 1500}, {"url": "d", "unit_price": None}]}
+    kept = research.without_loss(result, "1000.00")
+    assert [i["url"] for i in kept["items"]] == ["a", "d"] and kept["dropped_no_margin"] == 2
+    assert research.without_loss(result, None) is result

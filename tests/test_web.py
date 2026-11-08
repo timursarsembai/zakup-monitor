@@ -699,3 +699,17 @@ def test_proxy_settings_hide_password(client, conn, monkeypatch):
     assert "Прокси работает" in client.post("/settings/proxy", data={"action": "test"}, headers=ORIGIN).text
     client.post("/settings/proxy", data={"action": "delete"}, headers=ORIGIN)
     assert "Прокси не задан" in client.get("/settings").text
+
+
+def test_research_hides_offers_without_margin(client, conn):
+    _announcement_with_lots(conn)  # лот 5001: 10 000 ₸ за единицу
+    conn.execute("""INSERT INTO lot_research (lot_id, user_id, provider, region, status, finished_at, result)
+        SELECT 5001, id, 'claude_code', 'г.Алматы', 'done', now(),
+        '{"summary": "s", "items": [
+          {"name": "Дешёвая бумага", "url": "https://m.kz/1", "in_region": true, "unit_price": 8000},
+          {"name": "Дорогая бумага", "url": "https://m.kz/2", "in_region": true, "unit_price": 12000}]}'
+        FROM users LIMIT 1""")
+    conn.commit()
+    _login(client)
+    page = client.get("/lots/5001").text
+    assert "Дешёвая бумага" in page and "Дорогая бумага" not in page
