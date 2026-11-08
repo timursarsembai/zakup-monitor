@@ -4,6 +4,7 @@
 
 import json
 import threading
+import time
 from datetime import UTC, datetime, timedelta
 from importlib.resources import files
 from urllib.parse import parse_qs, urlsplit
@@ -192,12 +193,31 @@ def analytics(request: Request, user: Viewer, background: BackgroundTasks):
     return templates.TemplateResponse(request, "dashboard.html", context)
 
 
+EVENTS_PER_HOUR = 120
+_recent_events: dict[str, list[float]] = {}
+
+
+def _event_allowed(visitor: str) -> bool:
+    now = time.monotonic()
+    if len(_recent_events) > 50_000:
+        _recent_events.clear()
+    recent = [t for t in _recent_events.get(visitor, []) if now - t < 3600]
+    recent.append(now)
+    _recent_events[visitor] = recent
+    return len(recent) <= EVENTS_PER_HOUR
+
+
 @router.post("/t/event", dependencies=[Depends(same_origin)])
 async def track_event(request: Request):
     """События из браузера: окно «платная функция» (какая функция), смена вида и т.п."""
     body = await request.body()
     if len(body) > 2000:
         raise HTTPException(413)
+    # Без метки посетителя и сверх лимита — молча не считаем: накрутить цифры дашборда
+    # скриптом без браузера нельзя.
+    visitor = request.cookies.get(visits.COOKIE, "")
+    if not visitor or not _event_allowed(visitor):
+        return Response(status_code=204)
     try:
         data = json.loads(body)
         name, props = str(data.get("name", "")), data.get("props") or {}

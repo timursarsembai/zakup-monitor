@@ -61,6 +61,15 @@ async def security_headers(request: Request, call_next):
     # Сайт не встраивается в чужие страницы (кнопки удаления и т.п. — в один клик).
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "same-origin")
+    # Только HTTPS (сайт целиком за HTTPS): первый же заход по http не перехватить.
+    response.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
+    # Тип файла — как сказал сервер, браузер не угадывает (картинка не станет скриптом).
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    # Скрипты на страницах пока встроенные — их CSP не ограничивает; закрываем остальное:
+    # встраивание к чужим, плагины, подмену базового адреса.
+    response.headers.setdefault("Content-Security-Policy",
+                                "frame-ancestors 'none'; object-src 'none'; base-uri 'self'")
+    response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()")
     if request.url.path.startswith("/settings"):
         # Здесь показываются выданные пароли: не кэшировать.
         response.headers["Cache-Control"] = "no-store"
