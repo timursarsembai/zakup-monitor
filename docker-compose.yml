@@ -1,5 +1,6 @@
 x-app-env: &app-env
-  DATABASE_URL: postgresql://zakup:${POSTGRES_PASSWORD}@postgres:5432/zakup
+  # Приложение — под zakup_app (владелец таблиц, не суперпользователь): scripts/db-app-role.sh.
+  DATABASE_URL: postgresql://zakup_app:${APP_DB_PASSWORD:?run scripts/db-app-role.sh}@postgres:5432/zakup
   # libpq показывает даты по времени Астаны.
   PGTZ: Asia/Almaty
   GOSZAKUP_TOKEN: ${GOSZAKUP_TOKEN:-}

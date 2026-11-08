@@ -6,7 +6,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 out=${1:-$PWD/.test-output.txt}
 # Пароль боевой базы тестам не нужен; compose требует переменную только для разбора файла.
-export POSTGRES_PASSWORD=unused
+export POSTGRES_PASSWORD=unused APP_DB_PASSWORD=unused
 # Временная база общая: два прогона сразу (вы и дежурный) — по очереди.
 exec 9>/tmp/zakup-test.lock
 flock 9
