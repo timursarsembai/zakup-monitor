@@ -13,6 +13,7 @@
     <input id="phone" name="phone" type="tel" inputmode="tel" placeholder="+7 7__ ___ __ __" value="{{ phone }}" autocomplete="tel" required autofocus>
   </div>
   <button class="submit">{{ _("Получить код по SMS") }}</button>
+  {% if action == "/register" %}<p class="hint" style="margin:12px 0 0;font-size:13px">{{ _("Регистрируясь, вы принимаете") }} <a href="/offer" target="_blank">{{ _("публичную оферту") }}</a> {{ _("и даёте согласие на обработку персональных данных по") }} <a href="/privacy" target="_blank">{{ _("политике конфиденциальности") }}</a>.</p>{% endif %}
 </form>
 {% endif %}
 {% endblock %}

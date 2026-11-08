@@ -48,6 +48,7 @@
   header, main { max-width: 1600px; margin: 0 auto; padding: 12px 24px; }
   header { display: flex; gap: 18px; align-items: center; border-bottom: 1px solid var(--line);
            position: sticky; top: 0; z-index: 50; background: var(--bg); }
+  .site-foot { max-width: 1400px; margin: 32px auto 0; padding: 18px 24px 28px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; text-align: center; }
   .to-top { position: fixed; right: 18px; bottom: 22px; z-index: 45; width: 46px; height: 46px; border-radius: 50%;
             border: 1px solid var(--line); background: var(--bg); color: var(--fg); font-size: 22px; line-height: 1;
             box-shadow: 0 6px 18px rgb(0 0 0 / 25%); opacity: 0; pointer-events: none; transition: opacity .2s; }
@@ -190,6 +191,7 @@
 </header>
 {% endblock %}
 <main{% block main_class %}{% endblock %}>{% block main %}{% endblock %}</main>
+<footer class="site-foot"><a href="/offer">{{ _("Публичная оферта") }}</a> · <a href="/privacy">{{ _("Политика конфиденциальности") }}</a> · <a href="/contacts">{{ _("Контакты") }}</a> · <a href="/pricing">{{ _("Тариф") }}</a></footer>
 <button type="button" class="to-top" data-to-top aria-label="{{ _("Наверх") }}" title="{{ _("Наверх") }}">↑</button>
 {# Платные функции: кнопки видны всем, без доступа открывают это окно. #}
 <dialog class="paywall" id="paywall" aria-labelledby="paywall-title">

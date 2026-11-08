@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% from "_legal.html" import req, legal_styles, requisites_table with context %}
+{% block title %}{{ _("Контакты и реквизиты") }}{% endblock %}
+{% block style %}{{ legal_styles() }}{% endblock %}
+{% block main %}
+<article class="doc">
+<h1>{{ _("Контакты и реквизиты") }}</h1>
+<p>{{ _("Сервис Tenderim — поиск и мониторинг государственных закупок Казахстана по открытым данным портала goszakup.gov.kz.") }}</p>
+{{ requisites_table(fields) }}
+<p><a href="/offer">{{ _("Публичная оферта") }}</a> · <a href="/privacy">{{ _("Политика конфиденциальности") }}</a></p>
+</article>
+{% endblock %}

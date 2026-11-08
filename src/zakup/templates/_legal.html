@@ -1,0 +1,17 @@
+{# Общее для документов: реквизит или заметная пометка «не заполнено». #}
+{% macro req(key) %}{% set v = requisites()[key] %}{% if v %}{{ v }}{% else %}<span class="unfilled">[{{ _("не заполнено") }}]</span>{% endif %}{% endmacro %}
+{% macro legal_styles() %}
+  .doc { max-width: 820px; line-height: 1.65; }
+  .doc h1 { margin-bottom: 4px; }
+  .doc h2 { font-size: 18px; margin: 26px 0 8px; }
+  .doc ol, .doc ul { padding-left: 22px; } .doc li { margin: 5px 0; }
+  .doc .unfilled { background: color-mix(in srgb, #d93025 18%, transparent); padding: 0 4px; border-radius: 4px; }
+  .doc .req-table td { padding: 6px 10px 6px 0; vertical-align: top; }
+  .doc .req-table td:first-child { color: var(--muted); white-space: nowrap; }
+{% endmacro %}
+{% macro requisites_table(fields) %}
+<table class="req-table">
+  {% for key, label in fields.items() %}<tr><td>{{ _(label) }}</td><td>{{ req(key) }}</td></tr>{% endfor %}
+  <tr><td>{{ _("Сайт") }}</td><td>{{ site_url }}</td></tr>
+</table>
+{% endmacro %}

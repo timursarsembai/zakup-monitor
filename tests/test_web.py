@@ -1037,3 +1037,20 @@ def test_client_settings_and_group_button(client, conn, monkeypatch):
     link = client.post("/settings/telegram/link", headers=origin, follow_redirects=False)
     assert link.headers["location"].startswith("https://t.me/tenderim_kz_bot?start=")
     assert web._user_groups(conn, uid) == []
+
+
+def test_legal_documents_use_requisites(client, conn):
+    from zakup import legal
+
+    legal._cache = None  # кэш реквизитов — между тестами сбрасываем
+    page = client.get("/offer").text
+    assert "Публичная оферта" in page and "статьёй 395" in page and "не заполнено" in page
+    assert "/privacy" in client.get("/").text  # ссылки внизу каждой страницы
+    _login(client)
+    client.post("/settings/requisites", data={"name": "ИП Тестов", "bin": "900101300123",
+                                              "email": "info@tenderim.kz"}, headers=ORIGIN)
+    page = client.get("/offer").text
+    assert "ИП Тестов" in page and "info@tenderim.kz" in page
+    assert "ИП Тестов" in client.get("/privacy").text and "900101300123" in client.get("/contacts").text
+    client.get("/lang/kk", headers={"referer": "https://testserver/offer"})
+    assert "Жария оферта" in client.get("/offer").text

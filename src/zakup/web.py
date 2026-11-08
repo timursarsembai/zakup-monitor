@@ -39,6 +39,7 @@ from zakup import (
     i18n,
     kaspi,
     kazpayment,
+    legal,
     marks,
     matcher,
     payments,
@@ -120,6 +121,17 @@ def _tariff() -> dict:
 
 
 templates.env.globals["tariff"] = _tariff
+
+
+def _requisites() -> dict:
+    try:
+        with pool.connection() as conn:
+            return legal.get(conn)
+    except psycopg.Error:
+        return {key: "" for key in legal.FIELDS}
+
+
+templates.env.globals["requisites"] = _requisites
 
 
 def _spec_blocks(text: str | None) -> list[tuple[str, Any]]:
@@ -746,6 +758,21 @@ def favicon() -> Response:
                     media_type="image/x-icon", headers={"Cache-Control": "public, max-age=86400"})
 
 
+@app.get("/offer")
+def offer_page(request: Request, user: Viewer):
+    return templates.TemplateResponse(request, "legal_offer.html", {"docs_date": legal.DOCS_DATE})
+
+
+@app.get("/privacy")
+def privacy_page(request: Request, user: Viewer):
+    return templates.TemplateResponse(request, "legal_privacy.html", {"docs_date": legal.DOCS_DATE})
+
+
+@app.get("/contacts")
+def contacts_page(request: Request, user: Viewer):
+    return templates.TemplateResponse(request, "legal_contacts.html", {"fields": legal.FIELDS})
+
+
 @app.get("/robots.txt")
 def robots() -> Response:
     lines = ["User-agent: *", "Allow: /",
@@ -781,7 +808,7 @@ def sitemap_index() -> Response:
 @app.get("/sitemap-{kind}.xml")
 def sitemap_part(kind: str) -> Response:
     if kind == "static":
-        urls = [(f"{SITE_URL}{path}", None) for path in ("/", "/announcements", "/analytics", "/pricing")]
+        urls = [(f"{SITE_URL}{path}", None) for path in ("/", "/announcements", "/analytics", "/pricing", "/offer", "/privacy", "/contacts")]
     else:
         prefix, _, index = kind.partition("-")
         if prefix not in ("a", "l") or not index.isdigit():
@@ -1821,7 +1848,9 @@ def _settings_page(request: Request, user: int, *, sent: str = "", saved: str = 
             "default_models": research.DEFAULT_MODELS,
             "models": research.MODELS,
             "light_defaults": research.SUMMARY_MODELS,
-            "tab": tab or {"ai": "ai", "bin": "company", "tariff": "tariff"}.get(saved),
+            "tab": tab or {"ai": "ai", "bin": "company", "tariff": "tariff",
+                           "requisites": "requisites"}.get(saved),
+            "requisite_fields": legal.FIELDS,
             "users": users,
             "me": user,
             "now": datetime.now(UTC),
@@ -2098,6 +2127,15 @@ def save_tariff(request: Request, admin: Admin, name_ru: Annotated[str, Form()],
         tariff.save(conn, data)
     _audit(request, admin, "settings_tariff", data["name_ru"], price=data["price"])
     return RedirectResponse("/settings?saved=tariff#tariff", status_code=303)
+
+
+@app.post("/settings/requisites", dependencies=[Depends(same_origin)])
+async def save_requisites(request: Request, admin: Admin):
+    form = await request.form()
+    with pool.connection() as conn:
+        legal.save(conn, {key: form.get(key, "") for key in legal.FIELDS})
+    _audit(request, admin, "settings_requisites", (form.get("name") or "")[:100])
+    return RedirectResponse("/settings?saved=requisites#requisites", status_code=303)
 
 
 @app.post("/settings/proxy", dependencies=[Depends(same_origin)])

@@ -65,6 +65,7 @@
   <a href="#ai" role="tab" data-tab="ai">{{ _("Искусственный интеллект") }}</a>
   <a href="#company" role="tab" data-tab="company">{{ _("Организация") }}</a>
   <a href="#tariff" role="tab" data-tab="tariff">{{ _("Тариф") }}</a>
+  <a href="#requisites" role="tab" data-tab="requisites">{{ _("Реквизиты") }}</a>
   {% endif %}
   {% if is_staff %}
   <a href="#users" role="tab" data-tab="users">{{ _("Пользователи") }}</a>
@@ -234,6 +235,21 @@
     {% if saved == "tariff" %}<p class="note">{{ _("Сохранено.") }}</p>{% endif %}
   </form>
   <p class="muted"><a href="/pricing" target="_blank">{{ _("Открыть страницу тарифа →") }}</a></p>
+</section>
+</div>
+
+{% set rq = requisites() %}
+<div data-tab-panel="requisites" hidden>
+<section class="panel wide">
+  <h2>{{ _("Реквизиты") }}</h2>
+  <p class="muted">{{ _("Подставляются в публичную оферту, политику конфиденциальности и страницу контактов.") }} <a href="/offer" target="_blank">{{ _("Оферта") }}</a> · <a href="/privacy" target="_blank">{{ _("Политика") }}</a> · <a href="/contacts" target="_blank">{{ _("Контакты") }}</a></p>
+  <form method="post" action="/settings/requisites" class="tariff-form">
+    {% for key, label in requisite_fields.items() %}
+    <label class="field"><span>{{ _(label) }}</span><input name="{{ key }}" value="{{ rq[key] }}" maxlength="300"></label>
+    {% endfor %}
+    <button class="primary">{{ _("Сохранить") }}</button>
+    {% if saved == "requisites" %}<p class="note">{{ _("Сохранено.") }}</p>{% endif %}
+  </form>
 </section>
 </div>
 
