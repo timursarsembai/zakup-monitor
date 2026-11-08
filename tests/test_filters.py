@@ -276,8 +276,35 @@ def test_first_batch_comes_as_one_message_with_pages(conn, monkeypatch):
     calls.clear()
     matcher.turn_page(conn, {**query, "message": {"chat": {"id": 99}, "message_id": 7}})
     assert [method for method, _ in calls] == ["answerCallbackQuery"]
+    # Испорченная кнопка — ответ «Список устарел», без падения бота.
+    for data in ("mp:1", "mp:x:1", "mp:99999999999999999999:0", "mp:1:2:3"):
+        calls.clear()
+        matcher.turn_page(conn, {**query, "data": data})
+        assert [method for method, _ in calls] == ["answerCallbackQuery"], data
     # Повторно в тот же чат лоты не придут ни выборкой, ни по второй подписке.
     assert matcher.send_pages(conn) == 0
+
+
+def test_first_batch_keeps_nearest_lots_up_to_limit(conn, monkeypatch):
+    monkeypatch.setattr(matcher, "PAGE_LOTS_LIMIT", 4)
+    for ident in range(1, 8):
+        _announcement(conn, ident, ends_in_days=10 - ident)  # у последних срок ближе
+    user = _paid_user(conn)
+    sub = conn.execute(
+        """INSERT INTO subscriptions (user_id, name, query, kind, filters)
+           VALUES (%s, 'Мебель', '', 'announcements', %s) RETURNING id""",
+        (user, db.Jsonb(Filters(deadline="").to_json()))).fetchone()[0]
+    matcher.seed(conn, sub, Filters(deadline=""), "lots", NOW)
+    lot_ids, total = conn.execute("SELECT lot_ids, total FROM match_pages").fetchone()
+    assert total == 7 and len(lot_ids) == 4
+    nearest = [r[0] for r in conn.execute(
+        "SELECT l.id FROM lots l JOIN announcements a ON a.id = l.trd_buy_id "
+        "ORDER BY a.end_date, l.id LIMIT 4").fetchall()]
+    assert lot_ids == nearest == [70, 60, 50, 40]
+    # Все 7 — «увиденные»: остальные 3 не придут потом по одному.
+    assert conn.execute("SELECT count(*) FROM matches WHERE notified_at IS NULL").fetchone()[0] == 0
+    text = matcher.render_page(conn, 1, 0)[0]
+    assert "Показаны 4 лотов с ближайшим сроком из 7" in text
 
 
 def test_notification_language_follows_settings(conn):

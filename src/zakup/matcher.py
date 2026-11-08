@@ -97,7 +97,10 @@ def insert_matches(conn: psycopg.Connection, sub_id: int, current: Filters, scop
 
 # Новая (или изменённая) подписка присылает всё, что подходит сейчас, одним сообщением
 # с листанием: по PAGE_SIZE объявлений на странице, кнопки «Назад» / «Дальше».
+# Не больше PAGE_LOTS_LIMIT лотов с ближайшим сроком: у широкой подписки их тысячи, а
+# каждая страница собирается заново из всех лотов выборки.
 PAGE_SIZE = 10
+PAGE_LOTS_LIMIT = 200
 
 
 def seed(conn: psycopg.Connection, sub_id: int, current: Filters, scope: str,
@@ -114,8 +117,13 @@ def seed(conn: psycopg.Connection, sub_id: int, current: Filters, scope: str,
         {**params, "sub_id": sub_id},
     ).fetchall()
     if rows:
-        conn.execute("INSERT INTO match_pages (subscription_id, lot_ids) VALUES (%s, %s)",
-                     (sub_id, [r[0] for r in rows]))
+        nearest = conn.execute(
+            """SELECT l.id FROM lots l LEFT JOIN announcements a ON a.id = l.trd_buy_id
+               WHERE l.id = ANY(%s)
+               ORDER BY a.end_date NULLS LAST, l.trd_buy_id, l.prepayment DESC NULLS LAST, l.id
+               LIMIT %s""", ([r[0] for r in rows], PAGE_LOTS_LIMIT)).fetchall()
+        conn.execute("INSERT INTO match_pages (subscription_id, lot_ids, total) VALUES (%s, %s, %s)",
+                     (sub_id, [r[0] for r in nearest], len(rows)))
 
 
 class PendingLot(NamedTuple):
@@ -438,11 +446,14 @@ _NAV = {"ru": ("◀ Назад", "Дальше ▶"), "kk": ("◀ Артқа", "
 _FOUND = {"ru": "Подходит сейчас: {n} объявл. · стр. {p} из {t}",
           "kk": "Қазір сәйкес: {n} хабарландыру · {p}/{t} бет",
           "both": "Қазір сәйкес / подходит сейчас: {n} · {p}/{t}"}
+_PARTIAL = {"ru": "Показаны {shown} лотов с ближайшим сроком из {total}, остальные — в поиске на сайте.",
+            "kk": "Мерзімі ең жақын {shown} лот көрсетілді ({total} ішінен), қалғаны — сайттағы іздеуде.",
+            "both": "Көрсетілді / показаны: {shown} из {total} · мерзімі жақын / ближайшие по сроку"}
 
 
 def render_page(conn: psycopg.Connection, page_id: int, number: int) -> tuple[str, list | None] | None:
     """Текст и кнопки страницы number (с нуля) первой выборки; None — выборки нет."""
-    row = conn.execute("SELECT subscription_id, lot_ids FROM match_pages WHERE id = %s",
+    row = conn.execute("SELECT subscription_id, lot_ids, total FROM match_pages WHERE id = %s",
                        (page_id,)).fetchone()
     if row is None:
         return None
@@ -456,6 +467,8 @@ def render_page(conn: psycopg.Connection, page_id: int, number: int) -> tuple[st
     head = f"🔔 <b>{html.escape(lots[0].subscription_name)}</b>"
     if len(pages) > 1:
         head += "\n" + _FOUND[langs].format(n=len(blocks), p=number + 1, t=len(pages))
+    if row[2] and row[2] > len(row[1]):
+        head += "\n" + _PARTIAL[langs].format(shown=len(row[1]), total=row[2])
     text = head + "\n\n" + "\n\n".join(block.text for block in pages[number])
     if len(pages) == 1:
         return text, None
@@ -515,13 +528,20 @@ class _Key(NamedTuple):
 
 def turn_page(conn: psycopg.Connection, query: dict, bot_name: str = "main") -> None:
     """Кнопка «Назад» / «Дальше» под первой выборкой: показать другую страницу."""
-    _, page_id, number = (query.get("data") or "").split(":")
+    try:
+        _, page_id, number = (query.get("data") or "").split(":")
+        page_id, number = int(page_id), int(number)
+        if not 0 < page_id < 2**63:
+            raise ValueError(page_id)
+    except ValueError:  # испорченная кнопка — не повод падать боту
+        page_id = number = None
     message = query.get("message") or {}
     chat = str((message.get("chat") or {}).get("id"))
     if bot_name == "client":
         chat = telegram.CLIENT_PREFIX + chat
-    owner = conn.execute("SELECT chat_id FROM match_pages WHERE id = %s", (int(page_id),)).fetchone()
-    page = render_page(conn, int(page_id), int(number)) if owner and owner[0] == chat else None
+    owner = conn.execute("SELECT chat_id FROM match_pages WHERE id = %s",
+                         (page_id,)).fetchone() if page_id is not None else None
+    page = render_page(conn, page_id, number) if owner and owner[0] == chat else None
     conn.commit()
     try:
         telegram.call("answerCallbackQuery", bot=bot_name, callback_query_id=query["id"],
