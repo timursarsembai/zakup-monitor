@@ -1,0 +1,33 @@
+{# Настройки → вкладка «interface». Подключается из settings.html. #}
+<div data-tab-panel="interface">
+<section class="panel wide">
+  <h2>{{ _("Тема") }}</h2>
+  <div class="themes" role="radiogroup" aria-label="{{ _("Тема") }}">
+    {% for key, label, bg, fg, accent in [("light", "Светлая", "#ffffff", "#1d1d1f", "#c2410c"), ("beige", "Бежевая", "#f7f1dd", "#2b2417", "#b43c0b"), ("navy", "Синяя", "#0e1b2e", "#e8eef5", "#ff8a3d"), ("dark", "Тёмная", "#151517", "#ececee", "#ff7a1a")] %}
+    <label class="theme-card"><input type="radio" name="theme" value="{{ key }}" data-theme-choice>
+      <span class="preview" style="background: {{ bg }}; color: {{ fg }}"><b>Aa</b><i style="background: {{ accent }}"></i><i style="background: {{ fg }}; opacity: .25"></i></span>
+      <span>{{ _(label) }}</span></label>
+    {% endfor %}
+  </div>
+</section>
+<section class="panel wide">
+  <h2>{{ _("Язык") }}</h2>
+  <div class="langs-choice">
+    {% for code, label in [("ru", "Русский"), ("kk", "Қазақша")] %}
+    <a class="lang-card {{ 'on' if lang() == code }}" href="/lang/{{ code }}" hreflang="{{ code }}">{% if lang() == code %}✓ {% endif %}{{ label }}</a>
+    {% endfor %}
+  </div>
+</section>
+<section class="panel wide">
+  <h2>{{ _("Для слабовидящих") }}</h2>
+  <div class="a11y-settings">
+    <div class="a11y-line"><span>{{ _("Размер шрифта") }}</span>
+      <button type="button" data-ui-zoom="-0.1" aria-label="{{ _("Мельче") }}">−</button>
+      <output data-ui-zoom-value>100%</output>
+      <button type="button" data-ui-zoom="0.1" aria-label="{{ _("Крупнее") }}">+</button></div>
+    <label class="a11y-line"><input type="checkbox" data-ui-contrast> {{ _("Высокий контраст") }}</label>
+    <button type="button" data-ui-reset>{{ _("Как было") }}</button>
+  </div>
+  <p class="note muted">{{ _("Настройки интерфейса запоминаются в этом браузере.") }}</p>
+</section>
+</div>

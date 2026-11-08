@@ -1,7 +1,7 @@
 {% extends "base.html" %}
-{% from "_lot_card.html" import lot_styles, lot_card, lot_winners, lot_scripts with context %}
+{% from "_lot_card.html" import lot_styles, lot_card, lot_winners with context %}
 {% from "_contacts.html" import org_contacts with context %}
-{% from "_share.html" import share_buttons, share_styles, share_script with context %}
+{% from "_share.html" import share_buttons, share_styles with context %}
 {% block title %}№ {{ a.numberAnno or a.id }}{% endblock %}
 {% block style %}
 {{ lot_styles() }}
@@ -121,29 +121,6 @@
 
 <p class="muted" style="margin-top:24px">{{ _("Данные с портала обновлены") }} {{ (fetched_at|local).strftime("%d.%m.%Y %H:%M") if fetched_at else "—" }}{% if results_at %}{{ _(", итоги и договоры —") }} {{ (results_at|local).strftime("%d.%m.%Y %H:%M") }}{% endif %}.</p>
 
-<script>
-  const showTab = (name) => {
-    for (const t of document.querySelectorAll("[data-tab]")) t.setAttribute("aria-selected", t.dataset.tab === name);
-    for (const p of document.querySelectorAll("[data-panel]")) p.hidden = p.dataset.panel !== name;
-  };
-  for (const tab of document.querySelectorAll("[data-tab]")) {
-    tab.addEventListener("click", () => showTab(tab.dataset.tab));
-  }
-  for (const link of document.querySelectorAll("[data-goto]")) {
-    link.addEventListener("click", () => showTab(link.dataset.goto));
-  }
-{{ lot_scripts() }}
-{{ share_script() }}
-  const cd = document.querySelector(".countdown");
-  if (cd) {
-    const end = new Date(cd.dataset.end);
-    const parts = Object.fromEntries([...cd.querySelectorAll("[data-part]")].map(e => [e.dataset.part, e]));
-    const tick = () => {
-      let s = Math.max(0, Math.floor((end - Date.now()) / 1000));
-      const v = { d: Math.floor(s / 86400), h: Math.floor(s % 86400 / 3600), m: Math.floor(s % 3600 / 60), s: s % 60 };
-      for (const k in v) parts[k].textContent = v[k];
-    };
-    tick(); setInterval(tick, 1000);
-  }
-</script>
+<script src="/static/lot-common.js?v={{ asset_v }}"></script>
+<script src="/static/announcement.js?v={{ asset_v }}"></script>
 {% endblock %}

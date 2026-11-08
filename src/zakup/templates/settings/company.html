@@ -1,0 +1,12 @@
+{# Настройки → вкладка «company». Подключается из settings.html. #}
+<div data-tab-panel="company" hidden>
+<section class="panel">
+  <h2>{{ _("Ваша организация") }}</h2>
+  <p class="muted">{{ _("БИН или ИИН, под которым вы подаёте ценовые предложения. По нему в итогах отмечаются ваши предложения, а отмеченные лоты сами получают «Выиграли» или «Не выиграли».") }}</p>
+  <form class="actions" method="post" action="/settings/company">
+    <input name="company_bin" value="{{ company_bin or '' }}" placeholder="{{ _("12 цифр") }}" inputmode="numeric" maxlength="12" pattern="\d{12}" aria-label="{{ _("БИН или ИИН") }}">
+    <button class="primary">{{ _("Сохранить") }}</button>
+  </form>
+  {% if saved == "bin" %}<p class="note">{{ _("Сохранено.") }}</p>{% endif %}
+</section>
+</div>

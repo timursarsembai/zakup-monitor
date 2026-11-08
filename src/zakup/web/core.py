@@ -3,12 +3,14 @@
 статистика, клиент портала.
 """
 
+import hashlib
 import logging
 import os
 import threading
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from importlib.resources import files
+from pathlib import Path
 from typing import Annotated, Any
 from urllib.parse import urlsplit
 
@@ -58,6 +60,11 @@ pool = ConnectionPool(os.environ.get("DATABASE_URL", ""), min_size=1, max_size=5
 
 
 templates = Jinja2Templates(directory=str(files("zakup").joinpath("templates")))
+# Версия файлов из static/ для адресов скриптов (…/app.js?v=…): после выкладки браузер
+# берёт новые, а не старые из своего кэша.
+templates.env.globals["asset_v"] = hashlib.sha1(b"".join(
+    f.read_bytes() for f in sorted(Path(str(files("zakup").joinpath("static"))).iterdir()) if f.is_file()
+)).hexdigest()[:10]
 
 
 templates.env.globals["announcement_url"] = "/a/{}".format

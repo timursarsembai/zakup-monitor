@@ -1,0 +1,68 @@
+{# Настройки → вкладка «users». Подключается из settings.html. #}
+<div data-tab-panel="users" hidden>
+<section class="panel wide">
+  <h2>{{ _("Пользователи") }}</h2>
+  <p class="muted">{{ _("Администратор и модераторы заводят пользователей и сбрасывают им пароли. Новый пароль показывается один раз — передайте его человеку.") }}{% if not is_admin %} {{ _("Модератор управляет только обычными пользователями.") }}{% endif %}</p>
+  {% if is_admin %}<form class="actions" method="post" action="/settings/registration" style="margin-bottom:12px"
+        data-confirm="{{ _("Закрыть регистрацию?") if registration_open else _("Открыть регистрацию? Пока нет оплаты, зарегистрировавшиеся получат полный доступ, а каждая SMS стоит 40 ₸.") }}">
+    <span>{{ _("Регистрация клиентов по телефону:") }} <b>{{ _("открыта") if registration_open else _("закрыта") }}</b></span>
+    <button>{{ _("Закрыть") if registration_open else _("Открыть") }}</button>
+  </form>{% endif %}
+  <div class="table-wrap"><table>
+    <tr><th>{{ _("Логин") }}</th><th>{{ _("Роль") }}</th><th>Telegram</th><th>{{ _("Последний вход") }}</th><th></th></tr>
+    {% for u in users %}
+    {% set manageable = u[0] != me and (is_admin or u[2] == "user") %}
+    <tr class="{{ 'off' if u[5] }}">
+      <td>{{ u[1] }}{% if u[0] == me %} <span class="muted">{{ _("(вы)") }}</span>{% endif %}{% if u[5] %} <span class="muted">{{ _("· отключён") }}</span>{% endif %}{% if u[6] %}<div class="muted">{{ u[6] }} · {{ u[7] }}</div>{% endif %}</td>
+      <td>{% if not is_admin or u[0] == me %}{{ _(roles[u[2]]) }}{% else %}
+        <form method="post" action="/settings/users/{{ u[0] }}/role">
+          <select name="role" onchange="this.form.submit()" aria-label="{{ _("Роль") }} {{ u[1] }}">
+            {% for key, title in roles.items() %}<option value="{{ key }}" {% if u[2] == key %}selected{% endif %}>{{ _(title) }}</option>{% endfor %}
+          </select><noscript><button>OK</button></noscript>
+        </form>{% endif %}</td>
+      <td>{{ _("подключён") if u[3] else "—" }}</td>
+      <td class="muted">{{ (u[4]|local).strftime("%d.%m.%Y %H:%M") if u[4] else "—" }}</td>
+      <td>{% if manageable %}<div class="row-actions">
+        {% if is_admin and u[2] == "user" %}<form method="post" action="/settings/users/{{ u[0] }}/access" class="access-form">
+          <span class="muted">{% if u[8] and u[8] > now %}{{ _("оплачено до") }} {{ (u[8]|local).strftime("%d.%m.%Y") }}{% else %}{{ _("без тарифа") }}{% endif %}</span>
+          <button name="days" value="30">{{ _("+30 дней") }}</button>{% if u[8] and u[8] > now %}<button name="days" value="0">{{ _("Снять") }}</button>{% endif %}
+        </form>{% endif %}
+        {% if is_admin and u[2] == "user" %}<form method="post" action="/settings/users/{{ u[0] }}/searches" class="access-form">
+          <span class="muted">{{ _("поисков:") }} {{ u[9] }}</span><button name="count" value="20">{{ _("+20 поисков") }}</button>
+        </form>{% endif %}
+        {% if is_admin and u[2] != "admin" %}<form method="post" action="/settings/users/{{ u[0] }}/impersonate"><button>👁 {{ _("Войти как") }}</button></form>{% endif %}
+        {% if is_admin %}<form method="post" action="/settings/users/{{ u[0] }}/reset" data-confirm="{{ _("Сбросить пароль {login}? Старый перестанет работать.", login=u[1]) }}"><button>{{ _("Сбросить пароль") }}</button></form>{% endif %}
+        <form method="post" action="/settings/users/{{ u[0] }}/disable" data-confirm="{{ _("Включить аккаунт {login}?", login=u[1]) if u[5] else _("Отключить {login}? Войти будет нельзя, данные останутся.", login=u[1]) }}"><button>{{ _("Включить") if u[5] else _("Отключить") }}</button></form>
+        <form method="post" action="/settings/users/{{ u[0] }}/delete" data-confirm="{{ _("Удалить {login}? Войти и получать уведомления он не сможет. Данные сохранятся, вернуть может администратор.", login=u[1]) }}"><button class="danger">{{ _("Удалить") }}</button></form>
+      </div>{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table></div>
+  <form class="actions" method="post" action="/settings/users" style="margin-top:12px">
+    <input name="login" placeholder="{{ _("логин нового пользователя") }}" required autocapitalize="none" spellcheck="false" aria-label="{{ _("Логин") }}">
+    <button class="primary">{{ _("Добавить") }}</button>
+  </form>
+</section>
+{% if is_admin %}
+<section class="panel wide">
+  <h2>{{ _("Удалённые") }} <span class="muted">{{ deleted|length }}</span></h2>
+  <p class="muted">{{ _("Удалённые не входят и ничего не получают, но их данные сохранены. Можно вернуть пользователя или разрешить ему зарегистрироваться заново.") }}</p>
+  {% if deleted %}
+  <div class="table-wrap"><table>
+    <tr><th>{{ _("Логин") }}</th><th>{{ _("Роль") }}</th><th>{{ _("Удалён") }}</th><th>{{ _("Повторная регистрация") }}</th><th></th></tr>
+    {% for id, login, role, at, by, may in deleted %}
+    <tr>
+      <td>{{ login }}</td><td>{{ _(roles[role]) }}</td>
+      <td class="muted">{{ (at|local).strftime("%d.%m.%Y %H:%M") }}{% if by %} · {{ by }}{% endif %}</td>
+      <td>{{ _("разрешена") if may else _("запрещена") }}</td>
+      <td><div class="row-actions">
+        <form method="post" action="/settings/users/{{ id }}/restore" data-confirm="{{ _("Вернуть {login}?", login=login) }}"><button>{{ _("Восстановить") }}</button></form>
+        <form method="post" action="/settings/users/{{ id }}/reregister"><button>{{ _("Запретить регистрацию") if may else _("Разрешить регистрацию") }}</button></form>
+      </div></td>
+    </tr>
+    {% endfor %}
+  </table></div>
+  {% else %}<p class="muted">{{ _("Удалённых нет.") }}</p>{% endif %}
+</section>
+{% endif %}
+</div>

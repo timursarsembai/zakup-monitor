@@ -212,7 +212,7 @@
         <input type="date" name="end_from" value="{{ today.isoformat() if f.end_from == 'today' else f.end_from }}" aria-label="{{ _("Окончание с") }}">
         <input type="date" name="deadline_date" value="{{ f.deadline if f.deadline and f.deadline != rule else '' }}" aria-label="{{ _("Окончание по") }}">
       </div></div>
-    <div class="advance" data-advance>
+    <div class="advance" data-advance data-labels='{{ {"any": _("любой"), "none": _("без аванса"), "from": _("от"), "to": _("до")}|tojson }}'>
       <span class="fl">{{ _("Авансовый платёж") }}{% if not lots %} {{ _("(наибольший по лотам)") }}{% endif %}: <b data-advance-label></b></span>
       <div class="range2">
         <input type="range" name="advance_min" min="0" max="100" step="5" value="{{ f.advance_min if not f.advance_only or f.advance_min else 5 }}" aria-label="{{ _("Аванс от, %") }}">
@@ -278,75 +278,11 @@
   </aside>
   </div>
 </form>
-<script>
-  // На телефоне фильтр открывается на весь экран.
-  const sheet = document.getElementById("filters");
-  for (const opener of document.querySelectorAll("[data-filter-open]")) opener.addEventListener("click", () => {
-    sheet.classList.add("open"); document.body.classList.add("sheet-open");
-    // «Подписаться» — сразу к блоку подписки внизу панели.
-    if (opener.hasAttribute("data-filter-subscribe")) sheet.querySelector(".subscribe")?.scrollIntoView({ block: "start" });
-  });
-  document.querySelector("[data-filter-close]").addEventListener("click", () => {
-    sheet.classList.remove("open"); document.body.classList.remove("sheet-open");
-  });
-  // Поля подписки живут в той же форме, что и поиск: в обычный поиск их не отправляем,
-  // а Enter в названии подписки — подписывает, а не ищет.
-  // При редактировании подписки обычный поиск сохраняет режим правки (поле edit).
-  const subscribeButton = sheet.querySelector(".subscribe button.primary");
-  sheet.addEventListener("submit", (event) => {
-    if (event.submitter !== subscribeButton) {
-      for (const field of sheet.querySelectorAll(".subscribe [name]")) field.disabled = field.name !== "edit";
-    }
-  });
-  sheet.querySelector('.subscribe [name="name"]')?.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") { event.preventDefault(); subscribeButton?.click(); }
-  });
-  // Escape закрывает полноэкранный фильтр на телефоне.
-  document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && sheet.classList.contains("open")) {
-      sheet.classList.remove("open"); document.body.classList.remove("sheet-open");
-    }
-  });
-  // Выпадающие списки: клик мимо — закрыть.
-  document.addEventListener("click", (event) => {
-    for (const d of document.querySelectorAll("details.multi[open]")) if (!d.contains(event.target)) d.open = false;
-  });
-  // Аванс: два ползунка «от» и «до», между ними — закрашенная полоса.
-  for (const box of document.querySelectorAll("[data-advance]")) {
-    const [low, high] = box.querySelectorAll("input[type=range]");
-    const label = box.querySelector("[data-advance-label]");
-    const fill = document.createElement("div");
-    fill.className = "fill";
-    box.querySelector(".range2").prepend(fill);
-    const draw = (moved) => {
-      if (+low.value > +high.value) (moved === low ? high : low).value = moved.value;
-      const a = +low.value, b = +high.value;
-      const T = {{ {"any": _("любой"), "none": _("без аванса"), "from": _("от"), "to": _("до")}|tojson }};
-      label.textContent = a === 0 && b === 100 ? T.any : b === 0 ? T.none : b === 100 ? `${T.from} ${a}%` : a === 0 ? `${T.to} ${b}%` : `${a}–${b}%`;
-      // Центр бегунка: a% ширины + полбегунка − a% от ширины бегунка.
-      const thumb = parseFloat(getComputedStyle(box.querySelector(".range2")).getPropertyValue("--thumb")) || 18;
-      fill.style.left = `calc(${a}% + ${thumb / 2 - a * thumb / 100}px)`;
-      fill.style.width = `calc(${b - a}% - ${(b - a) * thumb / 100}px)`;
-    };
-    low.addEventListener("input", () => draw(low));
-    high.addEventListener("input", () => draw(high));
-    for (const preset of box.querySelectorAll("[data-preset]")) {
-      preset.addEventListener("click", () => {
-        [low.value, high.value] = preset.dataset.preset.split(",");
-        draw(low);
-      });
-    }
-    draw(low);
-  }
-  const mode = document.querySelector("[name=deadline_mode]");
-  const until = document.querySelector("[name=deadline_date]");
-  mode.addEventListener("change", () => { if (mode.value !== "date") until.value = ""; else until.focus(); });
-  until.addEventListener("change", () => { if (until.value) mode.value = "date"; });
-</script>
+<script src="/static/filters.js?v={{ asset_v }}"></script>
 {% endmacro %}
 
 {% macro sort_bar(found) %}
-<div class="sortbar">
+<div class="sortbar" data-query="{{ query }}"{% if hidden %} data-hidden="1"{% endif %}>
   <div>{{ found }}</div>
   <div class="sortbar-controls">
     <label class="muted">{{ _("Сортировка") }}
@@ -363,35 +299,7 @@
       </select></label>
   </div>
 </div>
-<script>
-  // Вид результатов: таблица (по умолчанию) или плитка-карточки; запоминается в браузере.
-  // Панель стоит над таблицей — ждём, пока страница загрузится целиком.
-  document.addEventListener("DOMContentLoaded", () => {
-    const box = document.querySelector("[data-view-box]");
-    const buttons = document.querySelectorAll(".view-switch [data-view]");
-    if (!box) return;
-    const apply = (view) => {
-      box.dataset.view = view;
-      for (const b of buttons) b.setAttribute("aria-pressed", String(b.dataset.view === view));
-    };
-    // Без сохранённого выбора: на телефоне — плитка, на компьютере — таблица.
-    let saved = matchMedia("(max-width: 760px)").matches ? "cards" : "table";
-    try { saved = localStorage.getItem("zakup-view") || saved; } catch (e) {}
-    apply(saved);
-    for (const b of buttons) b.addEventListener("click", () => {
-      apply(b.dataset.view);
-      try { localStorage.setItem("zakup-view", b.dataset.view); } catch (e) {}
-    });
-  });
-  for (const select of document.querySelectorAll(".sortbar [data-param]")) {
-    select.addEventListener("change", () => {
-      const url = new URL(location.pathname + "?" + {{ query|tojson }}, location.origin);
-      url.searchParams.set(select.dataset.param, select.value);
-      {% if hidden %}url.searchParams.set("hidden", "1");{% endif %}
-      location.href = url;
-    });
-  }
-</script>
+<script src="/static/sortbar.js?v={{ asset_v }}"></script>
 {% endmacro %}
 
 {% macro pager() %}

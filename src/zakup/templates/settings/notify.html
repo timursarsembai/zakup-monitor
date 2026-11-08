@@ -1,0 +1,49 @@
+{# Настройки → вкладка «notify». Подключается из settings.html. #}
+<div data-tab-panel="notify" hidden>
+<section class="panel">
+  <h2>{{ _("Уведомления в Telegram") }}</h2>
+  <p class="muted">{{ _("Новые лоты по вашим подпискам приходят сводкой раз в 10 минут.") }}</p>
+  {% if not configured %}
+    <p>{{ _("Бот пока не настроен на сервере.") }}</p>
+  {% elif connected %}
+    <div class="status"><span class="dot on"></span>{{ _("Подключено к @") }}{{ bot_username }}</div>
+    <div class="actions">
+      <form method="post" action="/settings/telegram/test"><button>{{ _("Отправить проверку") }}</button></form>
+      <form method="post" action="/settings/telegram/unlink"><button>{{ _("Отключить") }}</button></form>
+    </div>
+    {% if sent == "ok" %}<p class="note">{{ _("Проверочное сообщение отправлено.") }}</p>
+    {% elif sent == "fail" %}<p class="note">{{ _("Не удалось отправить. Возможно, бот заблокирован — подключите заново.") }}</p>{% endif %}
+  {% else %}
+    <div class="status"><span class="dot"></span>{{ _("Не подключено") }}</div>
+    <div class="actions">
+      <form method="post" action="/settings/telegram/link"><button class="primary">{{ _("Подключить Telegram") }}</button></form>
+    </div>
+    <p class="note muted">{{ _("Откроется бот @") }}{{ bot_username }} {{ _("— нажмите в нём «Start». Ссылка одноразовая и действует 30 минут. Потом обновите эту страницу.") }}</p>
+  {% endif %}
+</section>
+{% if client_group %}
+<section class="panel">
+  <h2>{{ _("Группа клиентов в Telegram") }}</h2>
+  <p class="muted">{{ _("Общая группа клиентов Tenderim. Вступление — по заявке, бот одобряет её, если тариф оплачен. Уведомления по подпискам приходят в личку, не в группу.") }}</p>
+  {% if client_group.member %}<p>✓ {{ _("Вы в группе.") }}</p>
+  {% elif not client_group.exists %}<p class="muted">{{ _("Группа скоро откроется.") }}</p>
+  {% elif not client_group.paid %}<p class="muted">{{ _("Группа доступна с оплаченным тарифом.") }} <a href="/pricing">{{ _("Тариф →") }}</a></p>
+  {% elif not client_group.linked %}<p class="muted">{{ _("Сначала подключите Telegram выше — заявка одобряется только для привязанного аккаунта.") }}</p>
+  {% else %}<form method="post" action="/settings/client-group" class="actions"><button class="primary">{{ _("Вступить в группу клиентов") }}</button></form>{% endif %}
+</section>
+{% endif %}
+{% if is_admin %}
+<section class="panel">
+  <h2>{{ _("Telegram-группы") }}</h2>
+  <p class="muted">{{ _("Результаты подписок можно присылать в общую группу, например с партнёрами: в подписке выберите «в группу». Если лот подошёл под несколько подписок, в группу он придёт один раз — с названием подписки и логином.") }} {{ _("Подключённые группы доступны всем пользователям: каждый сам решает, какие подписки слать в группу, а какие — себе в личку.") }}</p>
+  {% for chat_id, title in groups %}
+  <div class="status"><span class="dot on"></span>{{ title }}
+    <form method="post" action="/settings/groups/remove" style="display:inline"><input type="hidden" name="chat_id" value="{{ chat_id }}"><button>{{ _("Отключить") }}</button></form></div>
+  {% endfor %}
+  {% if configured %}
+  <div class="actions"><form method="post" action="/settings/telegram/group"><button class="primary">{{ _("Подключить группу") }}</button></form></div>
+  <p class="note muted">{{ _("Откроется Telegram: выберите группу — бот @") }}{{ bot_username }} {{ _("добавится в неё и подтвердит подключение. Ссылка одноразовая, действует 30 минут. Потом обновите эту страницу.") }}</p>
+  {% endif %}
+</section>
+{% endif %}
+</div>

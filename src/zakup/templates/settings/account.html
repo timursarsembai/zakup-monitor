@@ -1,0 +1,13 @@
+{# Настройки → вкладка «account». Подключается из settings.html. #}
+<div data-tab-panel="account" hidden>
+<section class="panel">
+  <h2>{{ _("Мой пароль") }}</h2>
+  <form method="post" action="/settings/password">
+    <label class="field"><span>{{ _("Текущий пароль") }}</span><input type="password" name="current" autocomplete="current-password" required></label>
+    <label class="field"><span>{{ _("Новый пароль, от") }} {{ min_password }} {{ _("символов") }}</span><input type="password" name="password" autocomplete="new-password" minlength="{{ min_password }}" required></label>
+    <label class="field"><span>{{ _("Новый пароль ещё раз") }}</span><input type="password" name="repeat" autocomplete="new-password" minlength="{{ min_password }}" required></label>
+    <button class="primary">{{ _("Сменить пароль") }}</button>
+  </form>
+  <p class="note muted">{{ _("После смены пароля нужно войти заново — на всех устройствах.") }}</p>
+</section>
+</div>
