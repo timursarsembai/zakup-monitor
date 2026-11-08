@@ -34,6 +34,7 @@ from zakup import (
     dashboard,
     details,
     i18n,
+    kaspi,
     marks,
     matcher,
     questions,
@@ -1186,6 +1187,7 @@ def _settings_page(request: Request, user: int, *, sent: str = "", saved: str = 
         ai = conn.execute("SELECT ai_provider, ai_model, ai_model_light FROM users WHERE id = %s",
                           (user,)).fetchone()
         ai_keys = secrets_box.saved_providers(conn, user)
+        proxy_host = kaspi.proxy_host(kaspi.proxy_url(conn)) if is_admin else ""
         users = conn.execute(
             """SELECT u.id, u.email, u.role, u.telegram_chat_id IS NOT NULL,
                       (SELECT max(created_at) FROM sessions s WHERE s.user_id = u.id),
@@ -1210,6 +1212,7 @@ def _settings_page(request: Request, user: int, *, sent: str = "", saved: str = 
             "ai_model": ai[1] or "",
             "ai_model_light": ai[2] or research.SUMMARY_MODELS.get(ai[0] or "claude_code", ""),
             "ai_keys": ai_keys,
+            "proxy_host": proxy_host,
             "providers": research.PROVIDERS,
             "default_models": research.DEFAULT_MODELS,
             "models": research.MODELS,
@@ -1359,6 +1362,36 @@ def save_ai(
     _audit(request, user, "settings_ai", provider, model=chosen, model_light=light,
            new_key=bool(api_key.strip()))
     return RedirectResponse("/settings?saved=ai#ai", status_code=303)
+
+
+@app.post("/settings/proxy", dependencies=[Depends(same_origin)])
+def save_proxy(request: Request, user: Admin, proxy: Annotated[str, Form()] = "",
+               action: Annotated[str, Form()] = "save"):
+    """Прокси (IPRoyal) для Kaspi и других закрытых для серверов сайтов."""
+    with pool.connection() as conn:
+        if action == "delete":
+            conn.execute("DELETE FROM user_ai_keys WHERE user_id = %s AND provider = %s",
+                         (user, kaspi.PROXY_KEY))
+            _audit(request, user, "settings_proxy", "удалён")
+            return RedirectResponse("/settings?saved=proxy#ai", status_code=303)
+        if action == "test":
+            current = kaspi.proxy_url(conn)
+            try:
+                found = kaspi.search("кровать", current) if current else []
+                message = (f"Прокси работает: Kaspi ответил, товаров {len(found)}." if found
+                           else "Прокси не задан." if not current else "Kaspi ответил, но товаров нет.")
+            except kaspi.Blocked as error:
+                message = f"Не работает: {error}."
+            return _settings_page(request, user, notice=message, tab="ai")
+        if not kaspi.valid_proxy(proxy):
+            return _settings_page(request, user, error="Адрес прокси вида http://логин:пароль@хост:порт.",
+                                  status_code=422, tab="ai")
+        try:
+            secrets_box.save_key(conn, user, kaspi.PROXY_KEY, proxy.strip())
+        except secrets_box.NoSecretKey:
+            raise HTTPException(503, "На сервере не настроено шифрование ключей") from None
+    _audit(request, user, "settings_proxy", kaspi.proxy_host(proxy))
+    return RedirectResponse("/settings?saved=proxy#ai", status_code=303)
 
 
 _models_cache: dict[tuple[int, str], tuple[float, list]] = {}

@@ -26,7 +26,7 @@ import httpx
 import psycopg
 from psycopg.types.json import Jsonb
 
-from zakup import contacts, details, secrets_box, sources
+from zakup import contacts, details, kaspi, secrets_box, sources
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +122,7 @@ PROMPT = """Ты помогаешь поставщику, который уча�
    поставщиков, satu.kz и т.п. Открывай страницы, чтобы проверить цену и
    характеристики. Не выдумывай: только то, что реально видел на странице.
    Если подходящих меньше — верни сколько есть: не добавляй неподходящее ради
-   количества. Ничего не нашёл — пустой список items.{exclude}
+   количества. Ничего не нашёл — пустой список items.{exclude}{kaspi}
 4. Для каждого предложения:
    - name — название товара у продавца; seller — магазин или компания; city — город;
    - in_region — true, если продавец в регионе поставки ({region});
@@ -258,7 +258,7 @@ def default_region(context: dict[str, Any]) -> str:
 def build_prompt(context: dict[str, Any], region: str, whole_kz: bool,
                  sources_text: str = "", categories: list[str] | None = None,
                  target: int = 10, exclude: list[str] | None = None,
-                 known_sellers: str = "") -> str:
+                 known_sellers: str = "", kaspi_text: str = "") -> str:
     exclude_text = ""
     if exclude:
         # «Найти ещё»: уже найденное не повторяем — нужны только новые предложения.
@@ -268,6 +268,7 @@ def build_prompt(context: dict[str, Any], region: str, whole_kz: bool,
         target=target,
         exclude=exclude_text,
         known_sellers=known_sellers or "     (пока нет)",
+        kaspi=kaspi_text,
         sources=sources_text or "   (пока нет — ищи сам)",
         categories=", ".join(categories or []) or "например «Мебель», «Канцтовары», «Оргтехника»",
         **{key: value if value not in (None, "") else "—" for key, value in context.items()
@@ -571,6 +572,22 @@ def merge(base: dict[str, Any], found: dict[str, Any]) -> dict[str, Any]:
             "category": base.get("category") or found.get("category", "")}
 
 
+def _kaspi_candidates(conn: psycopg.Connection, context: dict[str, Any],
+                      base: dict[str, Any] | None) -> str:
+    """Товары с Kaspi через прокси — готовым списком для ИИ. Без прокси — пусто."""
+    proxy = kaspi.proxy_url(conn)
+    if not proxy:
+        return ""
+    query = " ".join(f"{context['name']} {context.get('extra') or ''}".split())[:100]
+    try:
+        found = kaspi.search(query, proxy, kaspi.city_of(context.get("kato")))
+    except kaspi.Blocked as error:
+        logger.info("kaspi search %r: %s", query, error)
+        return ""
+    known = {i.get("url") for i in (base or {}).get("items", [])}
+    return kaspi.candidates_for_prompt([i for i in found if i["url"] not in known])
+
+
 def run_job(conn: psycopg.Connection, job: dict[str, Any]) -> dict[str, Any]:
     context = lot_context(conn, job["lot_id"])
     if context is None:
@@ -580,7 +597,8 @@ def run_job(conn: psycopg.Connection, job: dict[str, Any]) -> dict[str, Any]:
                           sources.for_prompt(conn), sources.known_categories(conn),
                           target=job.get("target") or 10,
                           exclude=[i["url"] for i in (base or {}).get("items", [])],
-                          known_sellers=contacts.known_for_prompt(conn))
+                          known_sellers=contacts.known_for_prompt(conn),
+                          kaspi_text=_kaspi_candidates(conn, context, base))
     key = None
     if job["provider"] != "claude_code":
         admin = conn.execute("SELECT id FROM users WHERE role = 'admin' ORDER BY id LIMIT 1").fetchone()

@@ -642,3 +642,20 @@ def test_source_contacts_dialog(client, conn):
     assert "ТОО «Мебель»" in fragment and 'href="tel:+77073037063"' in fragment
     assert 'href="https://wa.me/77073037063"' in fragment
     assert client.get("/sources/999999/contacts").status_code == 404
+
+
+def test_proxy_settings_hide_password(client, conn, monkeypatch):
+    from cryptography.fernet import Fernet
+
+    monkeypatch.setenv("ZAKUP_SECRET_KEY", Fernet.generate_key().decode())
+    _login(client)
+    assert client.post("/settings/proxy", data={"proxy": "81.1.2.3:12323"}, headers=ORIGIN).status_code == 422
+    saved = client.post("/settings/proxy", data={"proxy": "http://user:topsecret@81.1.2.3:12323"},
+                        headers=ORIGIN, follow_redirects=False)
+    assert saved.headers["location"] == "/settings?saved=proxy#ai"
+    page = client.get("/settings").text
+    assert "81.1.2.3:12323" in page and "topsecret" not in page
+    monkeypatch.setattr(web.kaspi, "search", lambda query, proxy, *a, **k: [{"name": "x"}])
+    assert "Прокси работает" in client.post("/settings/proxy", data={"action": "test"}, headers=ORIGIN).text
+    client.post("/settings/proxy", data={"action": "delete"}, headers=ORIGIN)
+    assert "Прокси не задан" in client.get("/settings").text

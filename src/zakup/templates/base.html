@@ -163,8 +163,9 @@
   // Подтверждение для форм с data-confirm (выход, удаление и т.п.): защита от
   // случайного нажатия. Текст — из атрибута, не из кода.
   document.addEventListener("submit", (event) => {
-    const form = event.target.closest("form[data-confirm]");
-    if (form && !confirm(form.dataset.confirm)) event.preventDefault();
+    // У формы целиком или у одной кнопки (например, «Удалить» рядом с «Сохранить»).
+    const text = event.submitter?.dataset.confirm || event.target.closest("form[data-confirm]")?.dataset.confirm;
+    if (text && !confirm(text)) event.preventDefault();
   });
   // Темы по кругу: светлая → бежевая → синяя → тёмная → светлая.
   // Значок кнопки — кружок цвета текущей темы.

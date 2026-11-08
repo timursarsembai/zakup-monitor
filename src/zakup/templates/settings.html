@@ -137,6 +137,19 @@
   {% if saved == "ai" %}<p class="note">{{ _("Сохранено.") }}</p>{% endif %}
   <p class="note muted">{{ _("Ключ хранится зашифрованным и на страницу не выводится.") }}</p>
 </section>
+<section class="panel">
+  <h2>{{ _("Прокси для маркетплейсов") }}</h2>
+  <p class="muted">{{ _("Kaspi и некоторые маркетплейсы не отвечают серверам. Через резидентный прокси (например, IPRoyal) поиск товаров сначала сам смотрит Kaspi и передаёт найденное ИИ.") }}</p>
+  <p>{% if proxy_host %}{{ _("Прокси сохранён:") }} <b>{{ proxy_host }}</b>{% else %}<span class="muted">{{ _("Прокси не задан — Kaspi в подборе не используется.") }}</span>{% endif %}</p>
+  <form method="post" action="/settings/proxy" class="actions">
+    <input name="proxy" type="password" autocomplete="off" placeholder="http://login:password@host:port" aria-label="{{ _("Адрес прокси") }}">
+    <button class="primary" name="action" value="save">{{ _("Сохранить") }}</button>
+    {% if proxy_host %}<button name="action" value="test" formnovalidate>{{ _("Проверить") }}</button>
+    <button name="action" value="delete" data-confirm="{{ _("Удалить прокси?") }}">{{ _("Удалить") }}</button>{% endif %}
+  </form>
+  {% if saved == "proxy" %}<p class="note">{{ _("Сохранено.") }}</p>{% endif %}
+  <p class="note muted">{{ _("Логин и пароль прокси хранятся зашифрованными и на страницу не выводятся.") }}</p>
+</section>
 </div>
 
 <div data-tab-panel="company" hidden>

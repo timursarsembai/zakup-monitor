@@ -160,3 +160,33 @@ def test_manual_search_links():
                                                "%D1%86%D0%B5%D0%BD%D0%B0")
     assert links["Kaspi"].startswith("https://kaspi.kz/shop/search/?text=")
     assert research.manual_links(None, "") == []
+
+
+def test_kaspi_search_parses_cards_and_reports_blocks():
+    import httpx
+
+    from zakup import kaspi
+
+    def handler(request):
+        assert request.url.params["text"] == "кровать двухъярусная"
+        return httpx.Response(200, json={"data": [
+            {"title": "Двухъярусная кровать Гранада", "unitPrice": 179500,
+             "shopLink": "/p/dvuh-jarusnaja-krovat-113069628/?c=750000000",
+             "previewImages": [{"medium": "https://resources.cdn-kaspi.kz/img/m.jpg"}]},
+            {"title": "Без ссылки"}]})
+
+    found = kaspi.search(" кровать   двухъярусная ", "http://u:p@h:1", transport=httpx.MockTransport(handler))
+    assert found == [{"name": "Двухъярусная кровать Гранада", "price": 179500,
+                      "url": "https://kaspi.kz/shop/p/dvuh-jarusnaja-krovat-113069628/",
+                      "image": "https://resources.cdn-kaspi.kz/img/m.jpg"}]
+    assert "Гранада — 179500 ₸" in kaspi.candidates_for_prompt(found)
+    blocked = httpx.MockTransport(lambda request: httpx.Response(429))
+    try:
+        kaspi.search("кровать", "http://u:secret@h:1", transport=blocked)
+    except kaspi.Blocked as error:
+        assert "429" in str(error) and "secret" not in str(error)
+    else:
+        raise AssertionError("ожидали Blocked")
+    assert kaspi.proxy_host("http://user:secret@81.1.2.3:12323") == "81.1.2.3:12323"
+    assert kaspi.valid_proxy("http://u:p@h:1") and not kaspi.valid_proxy("h:1")
+    assert kaspi.city_of(["711410000"]) == "710000000" and kaspi.city_of(["351010000"]) == kaspi.ALMATY
