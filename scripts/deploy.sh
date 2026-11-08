@@ -47,7 +47,7 @@ wait_healthy zakup-web-2 web-2
 docker compose up -d --no-deps web
 wait_healthy zakup-web-1 web
 docker compose up -d --no-deps gateway
-docker compose exec -T gateway nginx -s reload >/dev/null
+docker compose exec -T gateway nginx -s reload >/dev/null 2>&1
 
 systemctl --user restart zakup-research
 # Дежурного не перезапускаем, если выкладку запустил он сам: иначе прервёт свой же разбор.
