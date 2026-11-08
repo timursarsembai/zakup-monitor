@@ -371,7 +371,7 @@ def test_announcements_advance_column_groups_values(client, conn):
     conn.commit()
     _login(client)
     page = client.get("/announcements?applied=1&deadline_mode=").text
-    cell = page.split('class="advances">', 1)[1].split("</td>", 1)[0]
+    cell = page.split('class="advances c-adv"', 1)[1].split("</td>", 1)[0]
     assert cell.count("30%") == 1 and cell.count("100%") == 1
 
 
