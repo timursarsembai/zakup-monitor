@@ -239,8 +239,8 @@
 {{ share_script() }}
   // Вид результатов подбора: таблица или плитка (запоминается); фрагмент обновляется — применяем заново.
   const applyRView = () => {
-    let view = "table";
-    try { view = localStorage.getItem("zakup-rview") || "table"; } catch (e) {}
+    let view = matchMedia("(max-width: 760px)").matches ? "cards" : "table";
+    try { view = localStorage.getItem("zakup-rview") || view; } catch (e) {}
     for (const box of document.querySelectorAll("[data-rview-box]")) box.dataset.rview = view;
     for (const b of document.querySelectorAll("[data-rview]:not([data-rview-box])")) b.setAttribute("aria-pressed", String(b.dataset.rview === view));
   };

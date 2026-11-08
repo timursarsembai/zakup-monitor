@@ -115,6 +115,8 @@
   td.c-more { display: none; }
   /* Плитка: та же таблица, строки — карточки. */
   [data-view=cards] { overflow: visible; }
+  /* В плитке на телефоне у избранного — только сердечко (подсказка остаётся в title). */
+  @media (max-width: 760px) { [data-view=cards] .fav span { display: none; } [data-view=cards] .fav { padding: 6px 9px; } }
   [data-view=cards] table.results, [data-view=cards] table.results tbody { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; min-width: 0 !important; }
   [data-view=cards] table.results tbody { grid-column: 1 / -1; }
   [data-view=cards] table.results tr:first-child:has(th) { display: none; }
@@ -372,8 +374,9 @@
       box.dataset.view = view;
       for (const b of buttons) b.setAttribute("aria-pressed", String(b.dataset.view === view));
     };
-    let saved = "table";
-    try { saved = localStorage.getItem("zakup-view") || "table"; } catch (e) {}
+    // Без сохранённого выбора: на телефоне — плитка, на компьютере — таблица.
+    let saved = matchMedia("(max-width: 760px)").matches ? "cards" : "table";
+    try { saved = localStorage.getItem("zakup-view") || saved; } catch (e) {}
     apply(saved);
     for (const b of buttons) b.addEventListener("click", () => {
       apply(b.dataset.view);
