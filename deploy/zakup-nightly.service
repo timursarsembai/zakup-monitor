@@ -1,0 +1,9 @@
+# Ночной ревьюер zakup: разбирает прошедшие сутки и шлёт владельцу краткий отчёт.
+[Unit]
+Description=zakup: ночной ревьюер (Claude Code)
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/apps/zakup/scripts/nightly-host.sh
+TimeoutStartSec=45min

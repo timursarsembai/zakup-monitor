@@ -1,0 +1,9 @@
+[Unit]
+Description=zakup: ночной ревьюер в 03:00 по Алматы
+
+[Timer]
+OnCalendar=*-*-* 03:00:00 Asia/Almaty
+Persistent=true
+
+[Install]
+WantedBy=timers.target

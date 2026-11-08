@@ -38,6 +38,7 @@ def main() -> int:
     orgs.add_argument("--limit", type=int, default=600)
     sub.add_parser("client-bot", help="клиентский Telegram-бот и группа клиентов (постоянно)")
     sub.add_parser("autofix", help="дежурный: разбирает и исправляет сбои (на хосте, постоянно)")
+    sub.add_parser("nightly", help="ночной ревьюер: отчёт владельцу за сутки (на хосте)")
     sub.add_parser("bot", help="Telegram-бот: привязка чатов (работает постоянно)")
     specs_cmd = sub.add_parser("specs", help="заранее разобрать техспецификации открытых лотов")
     specs_cmd.add_argument("--limit", type=int, default=200)
@@ -72,6 +73,10 @@ def main() -> int:
 
         autofix.run()
         return 0
+    if args.command == "nightly":
+        from zakup import nightly
+
+        return nightly.run()
     if args.command == "client-bot":
         from zakup import client_bot
 
