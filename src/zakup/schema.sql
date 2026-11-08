@@ -402,3 +402,13 @@ CREATE TABLE IF NOT EXISTS supplier_questions (
 );
 -- Отдельная модель для коротких задач (выжимка, вопросы поставщику); пусто — по умолчанию.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS ai_model_light text;
+-- Контакты продавцов из подбора: у сайта целиком (seller = '') или у продавца на
+-- маркетплейсе. Следующий поиск берёт отсюда и не открывает страницы заново.
+CREATE TABLE IF NOT EXISTS seller_contacts (
+    domain     text NOT NULL,
+    seller     text NOT NULL DEFAULT '',
+    name       text,
+    phones     jsonb NOT NULL DEFAULT '[]',
+    checked_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (domain, seller)
+);

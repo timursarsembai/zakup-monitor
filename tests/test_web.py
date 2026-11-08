@@ -625,3 +625,20 @@ def test_supplier_questions_on_demand_and_shared(client, conn, monkeypatch):
     assert client.post("/lots/5001/questions", data={"url": "https://m.kz/p1"},
                        headers=ORIGIN).json() == {"status": "done"}
     assert questions.work_one(conn, ["claude_code"]) is False
+
+
+def test_source_contacts_dialog(client, conn):
+    from zakup import contacts
+
+    conn.execute("INSERT INTO sources (domain, name, auto) VALUES ('satu.kz', 'Satu', true)")
+    contacts._store(conn, "satu.kz", "тоо мебель", "ТОО «Мебель»",
+                    [{"number": "+7 (707) 303-70-63", "label": "страница товара", "whatsapp": False}])
+    conn.commit()
+    _login(client)
+    page = client.get("/research").text
+    assert 'data-contacts="/sources/' in page and 'class="count">1<' in page
+    source = conn.execute("SELECT id FROM sources WHERE domain = 'satu.kz'").fetchone()[0]
+    fragment = client.get(f"/sources/{source}/contacts").text
+    assert "ТОО «Мебель»" in fragment and 'href="tel:+77073037063"' in fragment
+    assert 'href="https://wa.me/77073037063"' in fragment
+    assert client.get("/sources/999999/contacts").status_code == 404

@@ -30,6 +30,7 @@ from zakup import (
     audit,
     auth,
     bot,
+    contacts,
     dashboard,
     details,
     i18n,
@@ -907,6 +908,18 @@ def add_source(
         raise HTTPException(422, i18n.gettext("Укажите адрес сайта, например zeta.kz"))
     _audit(request, user, "source_add", domain)
     return RedirectResponse("/research?sources_open=1#sources", status_code=303)
+
+
+@app.get("/sources/{source_id}/contacts")
+def source_contacts(request: Request, _: User, source_id: int):
+    with pool.connection() as conn:
+        row = conn.execute("SELECT domain, name FROM sources WHERE id = %s", (source_id,)).fetchone()
+        if row is None:
+            raise HTTPException(404, "Нет такого источника")
+        sellers = [(name, contacts.links(phones), checked)
+                   for name, phones, checked in contacts.of_domain(conn, row[0])]
+    return templates.TemplateResponse(request, "source_contacts.html",
+                                      {"domain": row[0], "name": row[1], "sellers": sellers})
 
 
 @app.post("/sources/{source_id}/toggle", dependencies=[Depends(same_origin)])

@@ -1,7 +1,18 @@
 {% extends "base.html" %}
+{% from "_contacts.html" import contacts_styles with context %}
 {% block title %}{{ _("Подбор товаров") }}{% endblock %}
 {% block style %}
+{{ contacts_styles() }}
   h1 { font-size: 22px; margin: 6px 0 4px; }
+  .src-actions { display: flex; gap: 6px; align-items: flex-start; flex-wrap: wrap; justify-content: flex-end; }
+  dialog.contacts { width: min(560px, 100vw); max-height: 90vh; border: 1px solid var(--line); border-radius: 12px; padding: 0; background: var(--bg); color: var(--fg); }
+  dialog.contacts::backdrop { background: rgba(0, 0, 0, .5); }
+  .c-wrap { padding: 16px; }
+  .c-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; margin-bottom: 8px; }
+  .seller { padding: 10px 0; border-bottom: 1px solid var(--line); } .seller:last-child { border-bottom: 0; }
+  .seller-name { font-weight: 600; margin-bottom: 4px; }
+  .small { font-size: 12px; }
+  @media (max-width: 600px) { dialog.contacts { width: 100vw; height: 100vh; max-height: none; margin: 0; border-radius: 0; } }
   .search { display: flex; gap: 8px; margin: 12px 0; max-width: 560px; }
   .search input { flex: 1; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); font: inherit; }
   .primary { background: var(--accent); color: var(--on-accent); border-color: transparent; font-weight: 600; }
@@ -91,11 +102,12 @@
     {% for category, rows in ns.groups | dictsort %}
     <div class="src-group">
       <h3>{{ category }} <span class="muted">{{ rows | length }}</span></h3>
-      {% for id, domain, name, categories, city, note, auto, active, found, last_found, added_email, added_by in rows %}
+      {% for id, domain, name, categories, city, note, auto, active, found, last_found, added_email, added_by, contact_count in rows %}
       <div class="src {{ '' if active else 'off' }}">
         <div><a href="https://{{ domain }}" target="_blank" rel="noopener noreferrer">{{ name or domain }}</a> <span class="muted">{{ domain }}</span>
           <div class="muted">{% if auto %}<span class="tag ai">{{ _("ИИ") }}</span>{% else %}<span class="tag">{{ added_email or _("вручную") }}</span>{% endif %}{% if city %}{{ city }} · {% endif %}{% if found %}{{ _("находили:") }} {{ found }}{% endif %}{% if note %} · {{ note }}{% endif %}</div></div>
-        {% if is_admin or auto or added_by == me %}<form method="post" action="/sources/{{ id }}/toggle"><button>{{ _("Выключить") if active else _("Включить") }}</button></form>{% endif %}
+        <div class="src-actions"><button type="button" data-contacts="/sources/{{ id }}/contacts" data-title="{{ name or domain }}">📞 {{ _("Контакты") }}{% if contact_count %} <span class="count">{{ contact_count }}</span>{% endif %}</button>
+        {% if is_admin or auto or added_by == me %}<form method="post" action="/sources/{{ id }}/toggle"><button>{{ _("Выключить") if active else _("Включить") }}</button></form>{% endif %}</div>
       </div>
       {% endfor %}
     </div>
@@ -104,17 +116,39 @@
     {% endfor %}
   </div>
 </div>
+<dialog class="contacts" id="contacts" aria-labelledby="contacts-title">
+  <div class="c-wrap">
+    <div class="c-head"><div><b id="contacts-title">{{ _("Контакты") }}</b><div class="muted" data-c-title></div></div>
+      <button type="button" data-c-close aria-label="{{ _("Закрыть") }}">✕</button></div>
+    <div data-c-body></div>
+  </div>
+</dialog>
 <script>
+  // Контакты источника: окно поверх справочника.
+  const cDialog = document.getElementById("contacts");
+  document.addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-contacts]");
+    if (!button) return;
+    cDialog.querySelector("[data-c-title]").textContent = button.dataset.title || "";
+    const body = cDialog.querySelector("[data-c-body]");
+    body.innerHTML = '<p class="muted">…</p>';
+    cDialog.showModal();
+    try {
+      const response = await fetch(button.dataset.contacts);
+      body.innerHTML = response.ok && !response.redirected ? await response.text() : '<p class="muted">' + {{ _("Не удалось загрузить.")|tojson }} + '</p>';
+    } catch { body.innerHTML = '<p class="muted">' + {{ _("Не удалось загрузить.")|tojson }} + '</p>'; }
+  });
+  cDialog.querySelector("[data-c-close]").addEventListener("click", () => cDialog.close());
   // Пока идут поиски — обновляем страницу раз в 20 секунд (если не открыто окно источников).
   {% if running %}setTimeout(function reload() {
-    if (document.getElementById("sources").classList.contains("open")) return setTimeout(reload, 20000);
+    if (document.getElementById("sources").classList.contains("open") || cDialog.open) return setTimeout(reload, 20000);
     location.reload();
   }, 20000);{% endif %}
   const sheet = document.getElementById("sources");
   const toggle = (open) => { sheet.classList.toggle("open", open); document.body.classList.toggle("sheet-open", open); };
   document.querySelector("[data-sources-open]").addEventListener("click", () => toggle(true));
   document.querySelector("[data-sources-close]").addEventListener("click", () => toggle(false));
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape") toggle(false); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !cDialog.open) toggle(false); });
   if (sheet.classList.contains("open")) document.body.classList.add("sheet-open");
 </script>
 {% endblock %}

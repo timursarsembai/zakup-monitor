@@ -11,10 +11,12 @@
 import ipaddress
 import logging
 import re
+from typing import Any
 import socket
 from urllib.parse import urlsplit
 
 import httpx
+from psycopg.types.json import Jsonb
 
 logger = logging.getLogger(__name__)
 
@@ -172,19 +174,50 @@ def _domain(url: str) -> str:
     return (urlsplit(url).hostname or "").lower().removeprefix("www.")
 
 
-def enrich(result: dict, site_cache: dict | None = None) -> int:
+# Сохранённые контакты свежие столько дней — потом собираем заново.
+FRESH_DAYS = 60
+
+
+def seller_key(seller: str | None) -> str:
+    """Продавец на маркетплейсе: «ТОО  "Мебель-Строй" » → «тоо мебель-строй»."""
+    return " ".join(re.sub(r"[«»\"'“”]", " ", (seller or "").lower()).split())[:150]
+
+
+def _stored(conn, domain: str, key: str) -> list[dict] | None:
+    row = conn.execute(
+        f"""SELECT phones FROM seller_contacts WHERE domain = %s AND seller = %s
+            AND checked_at > now() - interval '{FRESH_DAYS} days'""",
+        (domain, key),
+    ).fetchone()
+    return row[0] if row else None
+
+
+def _store(conn, domain: str, key: str, name: str, phones: list[dict]) -> None:
+    conn.execute(
+        """INSERT INTO seller_contacts (domain, seller, name, phones, checked_at)
+           VALUES (%s, %s, %s, %s, now())
+           ON CONFLICT (domain, seller) DO UPDATE SET phones = excluded.phones,
+               name = coalesce(nullif(excluded.name, ''), seller_contacts.name), checked_at = now()""",
+        (domain, key, name[:150], Jsonb(phones)),
+    )
+
+
+def enrich(result: dict, conn=None) -> int:
     """Собирает все телефоны предложения в item["phones"]: [{number, label, whatsapp}].
 
-    Источники: что нашёл ИИ, страница товара (код страницы), раздел «Контакты»
-    сайта продавца (не у маркетплейсов). site_cache — {домен: контакты} между
-    предложениями одного поиска и из справочника источников.
+    Источники: что нашёл ИИ, база контактов (seller_contacts), страница товара и
+    раздел «Контакты» сайта (не у маркетплейсов). Собранное — в базу: следующий
+    поиск возьмёт контакты оттуда и не будет открывать страницы ещё раз.
+    На маркетплейсах контакты свои у каждого продавца, у прочих сайтов — общие.
     """
-    site_cache = {} if site_cache is None else site_cache
     added = 0
     for item in result.get("items") or []:
         url = item.get("url") or ""
-        if not url:
+        domain = _domain(url)
+        if not url or not domain:
             continue
+        marketplace = domain in MARKETPLACES
+        key = seller_key(item.get("seller")) if marketplace else ""
         phones: list[dict] = []
 
         def add(number: str | None, label: str = "", whatsapp: bool = False) -> None:
@@ -193,14 +226,20 @@ def enrich(result: dict, site_cache: dict | None = None) -> int:
 
         for raw in (item.get("phone") or "").split(","):
             add(normalize(raw))
-        for number in fetch_phones(url):
-            add(number, "страница товара")
-        domain = _domain(url)
-        if domain and domain not in MARKETPLACES:
-            if domain not in site_cache:
-                site_cache[domain] = site_contacts(url)
-            for contact in site_cache[domain]:
-                add(contact["number"], contact["label"], contact["whatsapp"])
+        known = _stored(conn, domain, key) if conn is not None and (key or not marketplace) else None
+        if conn is not None:
+            conn.commit()  # страницы открываются долго — транзакцию не держим
+        if known is None:
+            # Нет в базе — собираем сами (без ИИ) и запоминаем, даже пустой результат.
+            known = [{"number": n, "label": "страница товара", "whatsapp": False}
+                     for n in fetch_phones(url)]
+            if not marketplace:
+                known += site_contacts(url)
+            if conn is not None and (key or not marketplace):
+                _store(conn, domain, key, item.get("seller") or "", known)
+                conn.commit()
+        for contact in known:
+            add(contact["number"], contact.get("label", ""), contact.get("whatsapp", False))
         # Один номер без подписи, если он же есть с подписью, — лишний.
         phones = [p for p in phones if p["label"] or not any(
             q["number"] == p["number"] and q["label"] for q in phones)][:MAX_CONTACTS]
@@ -209,3 +248,25 @@ def enrich(result: dict, site_cache: dict | None = None) -> int:
             item["phone"] = ", ".join(dict.fromkeys(p["number"] for p in phones))
             added += 1
     return added
+
+
+def of_domain(conn, domain: str) -> list[tuple[str, list[dict], Any]]:
+    """Все сохранённые контакты сайта: [(продавец, телефоны, когда проверены)]."""
+    return conn.execute(
+        """SELECT coalesce(nullif(name, ''), seller), phones, checked_at FROM seller_contacts
+           WHERE domain = %s AND jsonb_array_length(phones) > 0
+           ORDER BY seller = '' DESC, name""",
+        (domain,),
+    ).fetchall()
+
+
+def links(phones: list[dict]) -> list[dict[str, str]]:
+    """Для страниц: номер, ссылка звонка tel: и WhatsApp (у мобильных и помеченных)."""
+    out = []
+    for phone in phones:
+        number = phone.get("number") or ""
+        tel = re.sub(r"[^\d+]", "", number)
+        mobile = len(tel) == 12 and tel[3] in "04567"
+        out.append({"number": number, "tel": tel, "label": phone.get("label") or "",
+                    "wa": "https://wa.me/" + tel.lstrip("+") if mobile or phone.get("whatsapp") else ""})
+    return out

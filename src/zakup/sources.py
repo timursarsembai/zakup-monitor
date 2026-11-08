@@ -94,7 +94,9 @@ def for_prompt(conn: psycopg.Connection) -> str:
 def listing(conn: psycopg.Connection) -> list[tuple]:
     return conn.execute(
         """SELECT s.id, s.domain, s.name, s.categories, s.city, s.note, s.auto, s.active,
-                  s.found_count, s.last_found, u.email, s.added_by
+                  s.found_count, s.last_found, u.email, s.added_by,
+                  (SELECT count(*) FROM seller_contacts c
+                   WHERE c.domain = s.domain AND jsonb_array_length(c.phones) > 0)
            FROM sources s LEFT JOIN users u ON u.id = s.added_by
            ORDER BY s.active DESC, s.auto, s.found_count DESC, s.domain"""
     ).fetchall()

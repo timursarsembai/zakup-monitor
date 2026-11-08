@@ -1,0 +1,10 @@
+{% from "_contacts.html" import phone_links %}
+{% if sellers %}
+{% for seller, phones, checked in sellers %}
+<div class="seller">
+  {% if sellers|length > 1 or seller != "" %}<div class="seller-name">{{ seller or _("Контакты сайта") }}</div>{% endif %}
+  <div class="org-row">{{ phone_links(phones) }}</div>
+  <div class="muted small">{{ _("проверено") }} {{ (checked|local).strftime("%d.%m.%Y") }}</div>
+</div>
+{% endfor %}
+{% else %}<p class="muted">{{ _("Контактов пока нет: они собираются, когда товар этого сайта находится в подборе.") }}</p>{% endif %}

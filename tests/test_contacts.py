@@ -28,18 +28,27 @@ def test_labeled_phones_from_contacts_page():
     ]
 
 
-def test_enrich_merges_ai_page_and_site(monkeypatch):
-    monkeypatch.setattr(contacts, "fetch_phones", lambda url: ["+7 (707) 303-70-63"])
-    calls = []
-    monkeypatch.setattr(contacts, "site_contacts", lambda url: calls.append(url) or [
+def test_enrich_uses_and_fills_contact_base(conn, monkeypatch):
+    pages, sites = [], []
+    monkeypatch.setattr(contacts, "fetch_phones", lambda url: pages.append(url) or ["+7 (707) 303-70-63"])
+    monkeypatch.setattr(contacts, "site_contacts", lambda url: sites.append(url) or [
         {"number": "+7 (727) 313-13-51", "label": "Call-центр", "whatsapp": False}])
     result = {"items": [{"url": "https://zeta.kz/a", "phone": "87073037063"},
-                        {"url": "https://www.zeta.kz/b"}, {"url": "https://satu.kz/p1"}]}
-    assert contacts.enrich(result) == 3
-    first, second, third = result["items"]
+                        {"url": "https://www.zeta.kz/b"},
+                        {"url": "https://satu.kz/p1", "seller": "ТОО «Мебель»"},
+                        {"url": "https://satu.kz/p2", "seller": "ИП Другой"}]}
+    assert contacts.enrich(result, conn) == 4
+    first, second, third, fourth = result["items"]
     assert first["phones"] == [
         {"number": "+7 (707) 303-70-63", "label": "страница товара", "whatsapp": False},
         {"number": "+7 (727) 313-13-51", "label": "Call-центр", "whatsapp": False}]
     assert first["phone"] == "+7 (707) 303-70-63, +7 (727) 313-13-51"
-    assert len(second["phones"]) == 2 and len(calls) == 1  # один сайт — один разбор «Контактов»
-    assert third["phones"] == [{"number": "+7 (707) 303-70-63", "label": "страница товара", "whatsapp": False}]
+    assert second["phones"] == first["phones"]  # тот же сайт — из базы, страницы не открываем
+    assert sites == ["https://zeta.kz/a"]  # «Контакты» маркетплейса — не продавец
+    assert pages == ["https://zeta.kz/a", "https://satu.kz/p1", "https://satu.kz/p2"]
+    # Следующий поиск: всё уже в базе — ни одной страницы.
+    again = {"items": [{"url": "https://satu.kz/p9", "seller": "тоо мебель"}, {"url": "https://zeta.kz/c"}]}
+    pages.clear()
+    assert contacts.enrich(again, conn) == 2 and pages == []
+    assert again["items"][0]["phones"][0]["number"] == "+7 (707) 303-70-63"
+    assert [name for name, _, _ in contacts.of_domain(conn, "satu.kz")] == ["ИП Другой", "ТОО «Мебель»"]
