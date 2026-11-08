@@ -243,7 +243,11 @@ def grant_searches(request: Request, admin: Admin, user_id: int, count: Annotate
         raise HTTPException(422, "от −1000 до 1000, не ноль")
     with core.pool.connection() as conn:
         login = _other_user(conn, request, admin, user_id)
-        credits.add(conn, user_id, count, "grant", by=admin, note="начислил администратор")
+        # Списать можно не больше, чем есть: баланс не уходит в минус.
+        conn.execute("SELECT 1 FROM users WHERE id = %s FOR UPDATE", (user_id,))
+        count = max(count, -credits.balance(conn, user_id))
+        if count:
+            credits.add(conn, user_id, count, "grant", by=admin, note="начислил администратор")
         left = credits.balance(conn, user_id)
     _audit(request, admin, "user_searches", login, count=count)
     return _settings_page(request, admin, tab="users", notice=f"{login}: поисков на балансе — {left}.")

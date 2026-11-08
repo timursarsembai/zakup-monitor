@@ -12,6 +12,7 @@ import ipaddress
 import logging
 import re
 import socket
+import time
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -29,16 +30,18 @@ _TEL = re.compile(r'href="tel:([^"]{7,40})"', re.I)
 _WA = re.compile(r'(?:wa\.me/|api\.whatsapp\.com/send\?phone=)(\+?\d{10,12})', re.I)
 
 
-def _public(host: str) -> bool:
+def _public(host: str) -> str | None:
+    """Адрес, к которому подключаться, если все адреса имени публичные; иначе None.
+    Подключаемся именно к нему: второй запрос DNS мог бы вернуть уже внутренний адрес."""
     try:
         infos = socket.getaddrinfo(host, 443, proto=socket.IPPROTO_TCP)
     except OSError:
-        return False
+        return None
     for info in infos:
         ip = ipaddress.ip_address(info[4][0])
         if not ip.is_global:
-            return False
-    return True
+            return None
+    return infos[0][4][0] if infos else None
 
 
 def normalize(raw: str) -> str | None:
@@ -72,20 +75,34 @@ MAX_CONTACTS = 15
 _CONTACT_LINK = re.compile(r'<a\b[^>]*href="([^"#]+)"[^>]*>(.*?)</a>', re.I | re.S)
 
 
+# Страница целиком — не дольше стольких секунд: медленная отдача по байту держала бы
+# очередь ИИ-подбора.
+PAGE_DEADLINE = 15
+
+
 def _get(url: str) -> str | None:
     parts = urlsplit(url)
-    if parts.scheme not in ("http", "https") or not parts.hostname or not _public(parts.hostname):
+    if (parts.scheme not in ("http", "https") or not parts.hostname
+            or parts.port not in (None, 80, 443)):
         return None
+    ip = _public(parts.hostname)
+    if not ip:
+        return None
+    # Запрос — на проверенный адрес; имя сайта — в Host и для проверки сертификата.
+    host = f"[{ip}]" if ":" in ip else ip
+    pinned = parts._replace(netloc=host + (f":{parts.port}" if parts.port else "")).geturl()
+    started = time.monotonic()
     try:
         with httpx.Client(timeout=httpx.Timeout(8, connect=4), follow_redirects=False,
                           headers={"User-Agent": "Mozilla/5.0 (compatible; zakup-bot)"}) as http:
-            with http.stream("GET", url) as response:
+            with http.stream("GET", pinned, headers={"Host": parts.netloc.rsplit("@", 1)[-1]},
+                             extensions={"sni_hostname": parts.hostname}) as response:
                 if response.status_code != 200:
                     return None
                 chunks, size = [], 0
                 for chunk in response.iter_bytes():
                     size += len(chunk)
-                    if size > MAX_BYTES:
+                    if size > MAX_BYTES or time.monotonic() - started > PAGE_DEADLINE:
                         break
                     chunks.append(chunk)
                 encoding = response.encoding or "utf-8"

@@ -132,7 +132,54 @@ def test_webhook_failure_is_retried_and_refund_not_recredited(conn, monkeypatch)
     assert payments.handle_event(conn, {"event_id": "e2", "event": "order.refunded", "order_ref": "r1"}) == "refunded"
     again = {"event_id": "e3", "event": "payment.received", "order_ref": "r1", "paid_amount": 4900}
     assert payments.handle_event(conn, again) == "skipped"
-    assert conn.execute("SELECT sum(delta) FROM search_ledger").fetchone()[0] == 20
+    # Возврат денег забрал выданные поиски.
+    assert conn.execute("SELECT sum(delta) FROM search_ledger").fetchone()[0] == 0
+
+
+def test_refund_takes_back_only_unspent_and_tariff_days(conn):
+    from zakup import credits
+
+    auth.set_password(conn, "+77011112233", "client-password-1")
+    uid = conn.execute("SELECT id FROM users").fetchone()[0]
+    conn.execute("UPDATE users SET paid_until = now() + interval '40 days' WHERE id = %s", (uid,))
+    conn.execute("""INSERT INTO payments (ref, user_id, kind, quantity, amount, status) VALUES
+                    ('s1', %s, 'searches', 20, 4900, 'paid'), ('t1', %s, 'tariff', 30, 9900, 'paid'),
+                    ('p1', %s, 'searches', 20, 4900, 'pending')""", (uid, uid, uid))
+    credits.add(conn, uid, 20, "purchase")
+    credits.add(conn, uid, -15, "grant")
+    conn.commit()
+    assert payments.handle_event(conn, {"event_id": "r1", "event": "order.refunded", "order_ref": "s1"}) == "refunded"
+    assert credits.balance(conn, uid) == 0  # потрачено 15, забрали оставшиеся 5
+    payments.handle_event(conn, {"event_id": "r2", "event": "order.refunded", "order_ref": "t1"})
+    left = conn.execute("SELECT paid_until - now() FROM users WHERE id = %s", (uid,)).fetchone()[0]
+    assert 9 <= left.days <= 10
+    # Возврат раньше оплаты: поздняя оплата уже ничего не выдаст.
+    payments.handle_event(conn, {"event_id": "r3", "event": "order.refunded", "order_ref": "p1"})
+    assert not payments.fulfill(conn, "p1", 4900)
+    assert credits.balance(conn, uid) == 0
+
+
+def test_open_orders_are_reused_and_capped(conn, monkeypatch):
+    orders = []
+    monkeypatch.setattr(kazpayment, "create_order", lambda ref, *a, **k: orders.append(ref) or f"https://k/{ref}")
+    auth.set_password(conn, "+77011112233", "client-password-1")
+    uid = conn.execute("SELECT id FROM users").fetchone()[0]
+    first = payments.create(conn, uid, "tariff", 30, 9900, None, "t")
+    assert payments.create(conn, uid, "tariff", 30, 9900, None, "t") == first and len(orders) == 1
+    payments.create(conn, uid, "searches", 20, 4900, None, "s")
+    payments.create(conn, uid, "searches", 50, 9900, None, "s")
+    with pytest.raises(payments.TooManyOrders):
+        payments.create(conn, uid, "searches", 100, 14900, None, "s")
+    # Заказ у kazpayment не создался — черновик не занимает место.
+    conn.execute("UPDATE payments SET status = 'cancelled' WHERE ref = %s", (first,))
+    conn.commit()
+
+    def fail(*a, **k):
+        raise kazpayment.KazpaymentError("down")
+    monkeypatch.setattr(kazpayment, "create_order", fail)
+    with pytest.raises(kazpayment.KazpaymentError):
+        payments.create(conn, uid, "searches", 5, 1250, None, "s")
+    assert conn.execute("SELECT status FROM payments WHERE quantity = 5").fetchone()[0] == "cancelled"
 
 
 def test_search_price_never_above_bigger_pack():

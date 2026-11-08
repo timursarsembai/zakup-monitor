@@ -61,9 +61,26 @@ def start_research(
     return RedirectResponse(f"/lots/{lot_id}#research", status_code=303)
 
 
+# Выжимки и вопросы поставщику бесплатны для клиента, но каждая — запрос к ИИ за счёт
+# владельца: не больше стольких в сутки на человека (сотрудникам без лимита).
+HELPERS_DAILY_LIMIT = 100
+
+
+def _helpers_left(request: Request, conn, user: int) -> None:
+    if request.state.staff:
+        return
+    used = conn.execute(
+        """SELECT count(*) FROM user_actions WHERE user_id = %s
+           AND action IN ('spec_summary', 'supplier_questions') AND at > now() - interval '1 day'""",
+        (user,)).fetchone()[0]
+    if used >= HELPERS_DAILY_LIMIT:
+        raise HTTPException(429, f"Не больше {HELPERS_DAILY_LIMIT} выжимок и вопросов в сутки")
+
+
 @router.post("/lots/{lot_id}/spec-summary", dependencies=[Depends(same_origin)])
 def request_spec_summary(request: Request, user: Paid, lot_id: int):
     with core.pool.connection() as conn:
+        _helpers_left(request, conn, user)
         if not conn.execute("SELECT 1 FROM lot_specs WHERE lot_id = %s AND text IS NOT NULL",
                             (lot_id,)).fetchone():
             raise HTTPException(404, "Нет текста техспецификации")
@@ -82,7 +99,10 @@ def spec_summary(request: Request, _: Paid, lot_id: int):
 @router.post("/lots/{lot_id}/questions", dependencies=[Depends(same_origin)])
 def request_questions(request: Request, user: Paid, lot_id: int, url: Annotated[str, Form()]):
     with core.pool.connection() as conn:
-        status = questions.request(conn, lot_id, url)
+        _helpers_left(request, conn, user)
+        # Вопросы — только по своим найденным предложениям (сотрудник — по всем).
+        owner = None if request.state.staff else user
+        status = questions.request(conn, lot_id, url, owner)
     if status is None:
         raise HTTPException(404, "Такого предложения нет в результатах подбора")
     _audit(request, user, "supplier_questions", f"/lots/{lot_id}", url=url[:300])
@@ -90,9 +110,10 @@ def request_questions(request: Request, user: Paid, lot_id: int, url: Annotated[
 
 
 @router.get("/lots/{lot_id}/questions")
-def questions_fragment(request: Request, _: Paid, lot_id: int, url: str):
+def questions_fragment(request: Request, user: Paid, lot_id: int, url: str):
     with core.pool.connection() as conn:
-        found = questions.of(conn, lot_id, url)
+        owner = None if request.state.staff else user
+        found = questions.of(conn, lot_id, url) if questions.item(conn, lot_id, url, owner) else None
     return templates.TemplateResponse(request, "questions_fragment.html", {"q": found})
 
 

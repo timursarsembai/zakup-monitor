@@ -103,6 +103,10 @@ def manual_links(context: dict[str, Any] | None, region: str) -> list[tuple[str,
 
 
 def clean_region(region: str) -> str:
-    """Регион — короткий текст: буквы, цифры, пробелы и знаки препинания, без переносов."""
-    allowed = "".join(c for c in region if c.isalnum() or c in " .,-()«»\"'/")
-    return " ".join(allowed.split())[:120] or "Казахстан"
+    """Регион — короткий текст: буквы, цифры, пробелы и знаки препинания, без переносов.
+    Попадает в подсказку ИИ: длинный текст был бы уже не регионом, а указаниями."""
+    allowed = "".join(c for c in region if c.isalnum() or c in " .,-()/")
+    return " ".join(allowed.split())[:REGION_LIMIT].strip() or "Казахстан"
+
+
+REGION_LIMIT = 60

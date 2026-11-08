@@ -513,13 +513,20 @@ class Filters:
         return "; ".join(parts)
 
 
+MAX_SUM_DIGITS = 15
+
+
 def _decimal(value: Any) -> Decimal | None:
     if value is None or str(value).strip() == "":
         return None
     try:
-        return Decimal(str(value).replace(" ", "").replace(" ", "").replace(",", "."))
+        number = Decimal(str(value).replace(" ", "").replace(" ", "").replace(",", "."))
     except InvalidOperation:
         return None
+    # «1e200000000» — допустимое Decimal, но в строку это сотни мегабайт: копия сайта
+    # падала от нехватки памяти. Сумм больше триллиона тенге в закупках не бывает.
+    # adjusted() — порядок числа без вычислений (abs() такого числа переполняется).
+    return number if number.is_finite() and number.adjusted() < MAX_SUM_DIGITS else None
 
 
 # «стол или стул» — то же, что «стол or стул» в синтаксисе websearch_to_tsquery.

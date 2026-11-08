@@ -69,6 +69,11 @@ def export(request: Request, user: Paid):
                       row[9], row[10], row[11], row[12], row[13],
                       ", ".join(templates.env.globals["region_names"](row[14])), row[15], row[16],
                       f"{SITE_URL}/lots/{row[18]}"])
+        # Названия с портала пишет кто угодно: «=HYPERLINK(…)» Excel выполнил бы как
+        # формулу. Такие ячейки — простым текстом.
+        for cell in sheet[sheet.max_row]:
+            if cell.data_type == "f":
+                cell.data_type = "s"
     for column, width in zip("ABCDEFGHIJKLMNOPQR", (14, 50, 40, 22, 22, 17, 16, 40, 50, 9, 9,
                                                    14, 15, 9, 24, 36, 16, 40), strict=True):
         sheet.column_dimensions[column].width = width

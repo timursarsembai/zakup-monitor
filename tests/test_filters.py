@@ -229,3 +229,12 @@ def test_migrations_apply_once_and_old_databases_are_recognised(conn):
     conn.commit()
     assert db.pending(conn) == names[1:]
     assert db.migrate(conn) is True and db.pending(conn) == []
+
+
+def test_huge_or_infinite_sums_are_ignored():
+    # «1e200000000» в строку — сотни мегабайт: копия сайта падала от нехватки памяти.
+    from zakup.filters import _decimal
+
+    for value in ("1e200000000", "Infinity", "NaN", "1e16"):
+        assert _decimal(value) is None
+    assert _decimal("5 000 000") == 5_000_000 and _decimal("-1,5") == Decimal("-1.5")

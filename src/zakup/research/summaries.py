@@ -34,7 +34,7 @@ def request_summary(conn: psycopg.Connection, lot_id: int) -> str:
         """INSERT INTO spec_summaries (lot_id, provider, model) VALUES (%s, %s, %s)
            ON CONFLICT (lot_id) DO UPDATE SET status = 'queued', error = NULL,
                provider = excluded.provider, model = excluded.model, created_at = now()
-           WHERE spec_summaries.status = 'error'
+           WHERE spec_summaries.status = 'error' AND spec_summaries.created_at < now() - interval '30 minutes'
            RETURNING status""",
         (lot_id, provider, model),
     ).fetchone()

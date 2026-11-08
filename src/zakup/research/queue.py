@@ -44,6 +44,11 @@ STALE_AFTER = "30 minutes"
 # Пользователь (не администратор) за сутки запускает не больше стольких поисков:
 # каждый расходует подписку или ключ администратора.
 USER_DAILY_LIMIT = 20
+# Сотрудники ищут бесплатно, но тоже за счёт подписки: свой потолок.
+STAFF_DAILY_LIMIT = 200
+# Неудачный поиск возвращается на баланс, а работа ИИ уже оплачена: после стольких
+# неудач за сутки новые поиски — завтра (иначе неудачи можно вызывать нарочно).
+USER_DAILY_FAILURES = 5
 
 
 class QuotaExceeded(Exception):
@@ -68,14 +73,22 @@ def enqueue(conn: psycopg.Connection, user_id: int, lot_id: int, region: str,
     ).fetchone()
     if active:
         return active[0]
-    if not is_admin:
-        used = conn.execute(
-            """SELECT count(*) FROM lot_research
-               WHERE user_id = %s AND created_at > now() - interval '1 day'""",
-            (user_id,),
-        ).fetchone()[0]
-        if used >= USER_DAILY_LIMIT:
-            raise QuotaExceeded(f"не больше {USER_DAILY_LIMIT} поисков в сутки")
+    # Строка пользователя — под блокировку до конца транзакции: параллельные нажатия
+    # считают лимит по очереди, а не все по старому числу.
+    conn.execute("SELECT 1 FROM users WHERE id = %s FOR UPDATE", (user_id,))
+    used, failed = conn.execute(
+        """SELECT count(*), count(*) FILTER (WHERE status = 'error') FROM lot_research
+           WHERE user_id = %s AND created_at > now() - interval '1 day'""",
+        (user_id,),
+    ).fetchone()
+    limit = STAFF_DAILY_LIMIT if is_admin else USER_DAILY_LIMIT
+    if used >= limit:
+        conn.rollback()
+        raise QuotaExceeded(f"не больше {limit} поисков в сутки")
+    if not is_admin and failed >= USER_DAILY_FAILURES:
+        conn.rollback()
+        raise QuotaExceeded("сегодня слишком много неудачных поисков — попробуйте завтра "
+                            "или напишите в поддержку")
     base_id = None
     if more:
         base = conn.execute(
@@ -197,6 +210,9 @@ def run_job(conn: psycopg.Connection, job: dict[str, Any]) -> dict[str, Any]:
     return found
 
 
+HELPERS_PER_SEARCH = 5
+
+
 def work(database_url: str, providers: list[str], once: bool = False) -> None:
     """Берёт задачи по очереди. Одна за раз: подписку и ключи не нагружаем."""
     from zakup import db, questions
@@ -206,9 +222,11 @@ def work(database_url: str, providers: list[str], once: bool = False) -> None:
         with db.connect(database_url) as conn:
             _reap(conn, providers, first)
             first = False
-            # Выжимки короткие (секунды) — их вперёд длинных поисков товаров.
-            while _work_summaries(conn, providers) or questions.work_one(conn, providers):
-                pass
+            # Выжимки короткие (секунды) — их вперёд длинных поисков товаров, но не
+            # больше нескольких подряд: поток выжимок не должен останавливать поиски.
+            for _ in range(HELPERS_PER_SEARCH):
+                if not (_work_summaries(conn, providers) or questions.work_one(conn, providers)):
+                    break
             job = _take(conn, providers)
             if job:
                 _run(conn, job)

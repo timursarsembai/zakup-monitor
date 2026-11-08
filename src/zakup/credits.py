@@ -11,7 +11,7 @@ from typing import Any
 import psycopg
 
 KINDS = {"purchase": "Покупка", "grant": "Начисление", "search": "Поиск товаров",
-         "refund": "Возврат: поиск не удался"}
+         "refund": "Возврат: поиск не удался", "chargeback": "Возврат оплаты"}
 
 
 class NoCredits(Exception):

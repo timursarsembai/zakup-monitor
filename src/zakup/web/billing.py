@@ -8,6 +8,7 @@ from fastapi.responses import RedirectResponse
 from starlette.concurrency import run_in_threadpool
 
 from zakup import (
+    audit,
     auth,
     credits,
     kazpayment,
@@ -46,8 +47,8 @@ def pricing(request: Request, user: Viewer, need: str = "", error: str = ""):
 def pay_tariff(request: Request, user: User):
     with core.pool.connection() as conn:
         price = tariff.get(conn)["price"]
-        return _pay(request, conn, user, "tariff", payments.TARIFF_DAYS, price,
-                    f"Zakup: тариф на {payments.TARIFF_DAYS} дней")
+    return _pay(request, user, "tariff", payments.TARIFF_DAYS, price,
+                f"Zakup: тариф на {payments.TARIFF_DAYS} дней")
 
 
 @router.post("/pay/searches", dependencies=[Depends(same_origin)])
@@ -55,18 +56,29 @@ def pay_searches(request: Request, user: Paid, count: Annotated[int, Form()]):
     # Поиски — дополнение к тарифу: без оплаченного тарифа купить нельзя.
     if not 1 <= count <= payments.MAX_SEARCHES:
         raise HTTPException(422, f"от 1 до {payments.MAX_SEARCHES} поисков")
+    return _pay(request, user, "searches", count, payments.searches_price(count),
+                f"Tenderim: {count} поисков товаров с ИИ")
+
+
+def _pay(request: Request, user: int, kind: str, quantity: int, amount: int, title: str):
     with core.pool.connection() as conn:
-        return _pay(request, conn, user, "searches", count, payments.searches_price(count),
-                    f"Tenderim: {count} поисков товаров с ИИ")
-
-
-def _pay(request: Request, conn, user: int, kind: str, quantity: int, amount: int, title: str):
-    phone = conn.execute("SELECT phone FROM users WHERE id = %s", (user,)).fetchone()[0]
+        phone = conn.execute("SELECT phone FROM users WHERE id = %s", (user,)).fetchone()[0]
+        try:
+            ref, new = payments.start(conn, user, kind, quantity, amount)
+        except payments.TooManyOrders:
+            return RedirectResponse("/pricing?error=orders", status_code=303)
+    if not new:
+        return RedirectResponse(f"/pay/{ref}", status_code=303)
+    # Запрос к kazpayment — до 20 секунд: соединение с базой на это время не держим.
     try:
-        ref = payments.create(conn, user, kind, quantity, amount, phone, title)
+        pay_url = kazpayment.create_order(ref, amount, title, phone)
     except kazpayment.KazpaymentError as error:
         logger.warning("payment create failed: %s", error.code)
+        with core.pool.connection() as conn:
+            payments.drop(conn, ref)
         return RedirectResponse("/pricing?error=pay", status_code=303)
+    with core.pool.connection() as conn:
+        payments.attach(conn, ref, pay_url)
     _audit(request, user, "payment_start", kind, quantity=quantity, amount=amount)
     return RedirectResponse(f"/pay/{ref}", status_code=303)
 
@@ -104,21 +116,26 @@ def pay_kaspi_invoice(request: Request, user: User, ref: str, phone: Annotated[s
         if payment is None or payment["status"] != "pending":
             raise HTTPException(404, "Нет такого неоплаченного платежа")
         own = conn.execute("SELECT phone FROM users WHERE id = %s", (user,)).fetchone()[0]
+        number = auth.normalize_phone(phone) if phone.strip() else own
+        if not number:
+            return RedirectResponse(f"/pay/{ref}?error=phone", status_code=303)
         # Счёт приходит в Kaspi от имени магазина: чужим номерам — не чаще нескольких раз.
+        # Счёт записываем до отправки и под блокировкой: параллельные запросы считают
+        # по очереди, а не все по старому числу.
+        conn.execute("SELECT 1 FROM users WHERE id = %s FOR UPDATE", (user,))
         sent = conn.execute(
             """SELECT count(*) FROM user_actions WHERE user_id = %s AND action = 'payment_invoice'
                AND at > now() - interval '1 hour'""", (user,)).fetchone()[0]
-    if sent >= INVOICES_PER_HOUR:
-        return RedirectResponse(f"/pay/{ref}?error=invoice", status_code=303)
-    number = auth.normalize_phone(phone) if phone.strip() else own
-    if not number:
-        return RedirectResponse(f"/pay/{ref}?error=phone", status_code=303)
+        if sent >= INVOICES_PER_HOUR:
+            conn.commit()
+            return RedirectResponse(f"/pay/{ref}?error=invoice", status_code=303)
+        audit.log(conn, user, "payment_invoice", ref, None,
+                  ip=request.client.host if request.client else None)
     try:
         kazpayment.remote_invoice(ref, number)
     except kazpayment.KazpaymentError as error:
         code = "nokaspi" if error.code == "invoice_rejected" else "invoice"
         return RedirectResponse(f"/pay/{ref}?error={code}", status_code=303)
-    _audit(request, user, "payment_invoice", ref)
     return RedirectResponse(f"/pay/{ref}?sent=1", status_code=303)
 
 

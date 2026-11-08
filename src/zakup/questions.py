@@ -56,22 +56,24 @@ PROMPT = """Ты помогаешь поставщику на госзакупк
 Не больше 10 вопросов в списке. Пиши по-русски, ничего не выдумывай."""
 
 
-def _item(conn: psycopg.Connection, lot_id: int, url: str) -> dict[str, Any] | None:
-    done = research.merged_done(conn, lot_id)
+def item(conn: psycopg.Connection, lot_id: int, url: str, owner: int | None = None) -> dict[str, Any] | None:
+    """Предложение из результатов подбора. owner — только из поисков этого клиента
+    (каждый видит свои), None — из всех (сотрудники)."""
+    done = research.merged_done(conn, lot_id) if owner is None else research.latest_done(conn, lot_id, owner)
     items = ((done or {}).get("result") or {}).get("items") or []
     return next((i for i in items if i.get("url") == url), None)
 
 
-def request(conn: psycopg.Connection, lot_id: int, url: str) -> str | None:
+def request(conn: psycopg.Connection, lot_id: int, url: str, owner: int | None = None) -> str | None:
     """Ставит в очередь (если нет готового). None — такого предложения нет."""
-    if _item(conn, lot_id, url) is None:
+    if item(conn, lot_id, url, owner) is None:
         return None
     provider, model = research.light_model(conn)
     row = conn.execute(
         """INSERT INTO supplier_questions (lot_id, url, provider, model) VALUES (%s, %s, %s, %s)
            ON CONFLICT (lot_id, url) DO UPDATE SET status = 'queued', error = NULL,
                provider = excluded.provider, model = excluded.model, created_at = now()
-           WHERE supplier_questions.status = 'error'
+           WHERE supplier_questions.status = 'error' AND supplier_questions.created_at < now() - interval '30 minutes'
            RETURNING status""",
         (lot_id, url, provider, model),
     ).fetchone()
@@ -89,16 +91,16 @@ def of(conn: psycopg.Connection, lot_id: int, url: str) -> dict[str, Any] | None
 
 def _ask(conn: psycopg.Connection, lot_id: int, url: str, provider: str, model: str) -> dict:
     context = research.lot_context(conn, lot_id)
-    item = _item(conn, lot_id, url)
-    if context is None or item is None:
+    found = item(conn, lot_id, url)
+    if context is None or found is None:
         raise research.ResearchError("нет данных лота или предложения")
-    price = item.get("price") or item.get("unit_price") or "не указана"
+    price = found.get("price") or found.get("unit_price") or "не указана"
     prompt = PROMPT.format(
         **{k: v or "—" for k, v in context.items() if k != "kato"},
-        item_name=item.get("name") or "—", seller=item.get("seller") or "—",
-        city=item.get("city") or "—", offer_price=f"{price} {item.get('price_unit') or ''}".strip(),
-        url=url, matches="; ".join(item.get("matches") or []) or "—",
-        mismatches="; ".join(item.get("mismatches") or []) or "—", note=item.get("note") or "—",
+        item_name=found.get("name") or "—", seller=found.get("seller") or "—",
+        city=found.get("city") or "—", offer_price=f"{price} {found.get('price_unit') or ''}".strip(),
+        url=url, matches="; ".join(found.get("matches") or []) or "—",
+        mismatches="; ".join(found.get("mismatches") or []) or "—", note=found.get("note") or "—",
     )
     key = research.api_key(conn, provider)
     conn.commit()
