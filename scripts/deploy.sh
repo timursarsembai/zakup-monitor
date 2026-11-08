@@ -21,7 +21,7 @@ db_digest=$(docker compose exec -T postgres psql -U zakup -Atc \
   "SELECT digest FROM schema_state WHERE id = 1" 2>/dev/null || true)
 if [ "$file_digest" != "$db_digest" ]; then
   echo "Схема изменилась: применяю при остановленных сборщиках"
-  docker compose stop worker archive specs research bot
+  docker compose stop worker archive specs research bot client-bot
   docker compose run --rm --no-deps --entrypoint zakup worker migrate
 fi
 

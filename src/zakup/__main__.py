@@ -36,6 +36,7 @@ def main() -> int:
     sub.add_parser("payments", help="запасная проверка неоплаченных заказов kazpayment")
     orgs = sub.add_parser("subjects", help="догрузить контакты заказчиков открытых объявлений")
     orgs.add_argument("--limit", type=int, default=600)
+    sub.add_parser("client-bot", help="клиентский Telegram-бот и группа клиентов (постоянно)")
     sub.add_parser("bot", help="Telegram-бот: привязка чатов (работает постоянно)")
     specs_cmd = sub.add_parser("specs", help="заранее разобрать техспецификации открытых лотов")
     specs_cmd.add_argument("--limit", type=int, default=200)
@@ -64,6 +65,11 @@ def main() -> int:
         with db.connect(os.environ["DATABASE_URL"]) as conn:
             if os.environ.get("KAZPAYMENT_API_KEY"):
                 print(f"payments: {payments.poll(conn)}")
+        return 0
+    if args.command == "client-bot":
+        from zakup import client_bot
+
+        client_bot.run(os.environ["DATABASE_URL"])
         return 0
     if args.command == "bot":
         bot.run(os.environ["DATABASE_URL"])

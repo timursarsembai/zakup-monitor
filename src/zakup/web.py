@@ -31,6 +31,7 @@ from zakup import (
     audit,
     auth,
     bot,
+    client_bot,
     contacts,
     credits,
     dashboard,
@@ -826,7 +827,10 @@ def _user_groups(conn, user: int) -> list[tuple[str, str]]:
     это общие рабочие группы команды. Какие подписки слать в группу, а какие
     себе в личку, каждый решает сам.
     """
-    del user  # группы общие для всех пользователей
+    # Клиентам уведомления — только в личку; группы — для владельца и сотрудников.
+    role = conn.execute("SELECT role FROM users WHERE id = %s", (user,)).fetchone() if user else None
+    if not role or role[0] not in auth.STAFF_ROLES:
+        return []
     return conn.execute(
         "SELECT chat_id, coalesce(title, 'Группа') FROM telegram_groups ORDER BY title"
     ).fetchall()
@@ -1780,6 +1784,13 @@ def _settings_page(request: Request, user: int, *, sent: str = "", saved: str = 
                WHERE u.deleted_at IS NOT NULL ORDER BY u.deleted_at DESC"""
         ).fetchall() if is_admin else []
         registration_open = signup.registration_open(conn)
+        tg_bot = "main" if is_staff else "client"
+        client_group = None if is_staff else {
+            "exists": bool(client_bot.group_id(conn)),
+            "member": bool(conn.execute("SELECT 1 FROM client_group_members WHERE user_id = %s",
+                                        (user,)).fetchone()),
+            "linked": bool(chat_id and str(chat_id).startswith(telegram.CLIENT_PREFIX)),
+            "paid": request.state.paid}
     return templates.TemplateResponse(
         request,
         "settings.html",
@@ -1791,8 +1802,10 @@ def _settings_page(request: Request, user: int, *, sent: str = "", saved: str = 
             "deleted": deleted,
             "registration_open": registration_open,
             "connected": bool(chat_id),
-            "bot_username": telegram.bot_username(),
-            "configured": bool(telegram.token() and telegram.bot_username()),
+            # Клиентам — свой бот (@tenderim_kz_bot), сотрудникам — прежний.
+            "bot_username": telegram.bot_username(tg_bot),
+            "configured": bool(telegram.token(tg_bot) and telegram.bot_username(tg_bot)),
+            "client_group": client_group,
             "sent": sent,
             "saved": saved,
             "notice": notice,
@@ -2154,12 +2167,29 @@ def save_company(request: Request, user: Admin, company_bin: Annotated[str, Form
 
 @app.post("/settings/telegram/link", dependencies=[Depends(same_origin)])
 def telegram_link(request: Request, user: User):
-    if not telegram.bot_username():
+    which = "main" if request.state.staff else "client"
+    username = telegram.bot_username(which)
+    if not username:
         raise HTTPException(503, "Telegram-бот не настроен")
     with pool.connection() as conn:
-        code = bot.create_link_code(conn, user)
+        code = bot.create_link_code(conn, user, "private" if which == "main" else "client")
     _audit(request, user, "telegram_link")
-    return RedirectResponse(bot.link_url(code), status_code=303)
+    return RedirectResponse(f"https://t.me/{username}?start={code}", status_code=303)
+
+
+@app.post("/settings/client-group", dependencies=[Depends(same_origin)])
+def client_group_join(request: Request, user: Paid):
+    """Ссылка-заявка в группу клиентов: бот одобрит её, если тариф оплачен."""
+    with pool.connection() as conn:
+        try:
+            link = client_bot.invite_link(conn, request.state.email)
+        except telegram.TelegramError as error:
+            logger.warning("invite link failed: %s", error)
+            link = None
+    if not link:
+        raise HTTPException(503, "Группа клиентов пока не подключена")
+    _audit(request, user, "client_group_join")
+    return RedirectResponse(link, status_code=303)
 
 
 @app.post("/settings/telegram/group", dependencies=[Depends(same_origin)])

@@ -483,3 +483,10 @@ CREATE TABLE IF NOT EXISTS payment_events (
     received_at timestamptz NOT NULL DEFAULT now()
 );
 ALTER TABLE payments ADD COLUMN IF NOT EXISTS checked_at timestamptz;
+-- Участники группы клиентов (вступили через заявку, одобренную ботом).
+CREATE TABLE IF NOT EXISTS client_group_members (
+    user_id   bigint PRIMARY KEY REFERENCES users (id) ON DELETE CASCADE,
+    tg_id     bigint NOT NULL,
+    joined_at timestamptz NOT NULL DEFAULT now(),
+    warned_at timestamptz
+);

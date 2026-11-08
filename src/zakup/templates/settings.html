@@ -128,6 +128,17 @@
     <p class="note muted">{{ _("Откроется бот @") }}{{ bot_username }} {{ _("— нажмите в нём «Start». Ссылка одноразовая и действует 30 минут. Потом обновите эту страницу.") }}</p>
   {% endif %}
 </section>
+{% if client_group %}
+<section class="panel">
+  <h2>{{ _("Группа клиентов в Telegram") }}</h2>
+  <p class="muted">{{ _("Общая группа клиентов Tenderim. Вступление — по заявке, бот одобряет её, если тариф оплачен. Уведомления по подпискам приходят в личку, не в группу.") }}</p>
+  {% if client_group.member %}<p>✓ {{ _("Вы в группе.") }}</p>
+  {% elif not client_group.exists %}<p class="muted">{{ _("Группа скоро откроется.") }}</p>
+  {% elif not client_group.paid %}<p class="muted">{{ _("Группа доступна с оплаченным тарифом.") }} <a href="/pricing">{{ _("Тариф →") }}</a></p>
+  {% elif not client_group.linked %}<p class="muted">{{ _("Сначала подключите Telegram выше — заявка одобряется только для привязанного аккаунта.") }}</p>
+  {% else %}<form method="post" action="/settings/client-group" class="actions"><button class="primary">{{ _("Вступить в группу клиентов") }}</button></form>{% endif %}
+</section>
+{% endif %}
 {% if is_admin %}
 <section class="panel">
   <h2>{{ _("Telegram-группы") }}</h2>

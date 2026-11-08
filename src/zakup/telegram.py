@@ -30,16 +30,39 @@ class TelegramError(Exception):
         )
 
 
-def token() -> str | None:
-    return os.environ.get("ZAKUP_TELEGRAM_BOT_TOKEN") or None
+# Два бота: «main» — для владельца и сотрудников (@zakup_sarsembai_bot), «client» — для
+# клиентов (@tenderim_kz_bot). Чаты клиентского бота хранятся с префиксом «c:»
+# (users.telegram_chat_id = "c:123"): так любая рассылка сама уходит нужным ботом.
+CLIENT_PREFIX = "c:"
+_TOKENS = {"main": "ZAKUP_TELEGRAM_BOT_TOKEN", "client": "ZAKUP_CLIENT_BOT_TOKEN"}
+_usernames: dict[str, str] = {}
 
 
-def bot_username() -> str | None:
-    return os.environ.get("ZAKUP_TELEGRAM_BOT_USERNAME") or None
+def token(bot: str = "main") -> str | None:
+    return os.environ.get(_TOKENS[bot]) or None
 
 
-def call(method: str, http_timeout: float = 15, **params: Any) -> Any:
-    bot_token = token()
+def bot_username(bot: str = "main") -> str | None:
+    if bot == "main":
+        return os.environ.get("ZAKUP_TELEGRAM_BOT_USERNAME") or None
+    if bot not in _usernames and token(bot):
+        try:
+            _usernames[bot] = call("getMe", bot=bot)["username"]
+        except (TelegramError, KeyError):
+            return None
+    return _usernames.get(bot)
+
+
+def route(chat_id: str | int) -> tuple[str, str]:
+    """(бот, настоящий id чата) по сохранённому id: «c:123» — клиентский бот."""
+    text = str(chat_id)
+    if text.startswith(CLIENT_PREFIX):
+        return "client", text[len(CLIENT_PREFIX):]
+    return "main", text
+
+
+def call(method: str, http_timeout: float = 15, bot: str = "main", **params: Any) -> Any:
+    bot_token = token(bot)
     if not bot_token:
         raise TelegramError(None, "bot token is not configured")
     request = urllib.request.Request(
@@ -63,9 +86,11 @@ def call(method: str, http_timeout: float = 15, **params: Any) -> Any:
 
 
 def send_message(chat_id: str | int, text: str) -> None:
+    bot, real_id = route(chat_id)
     call(
         "sendMessage",
-        chat_id=chat_id,
+        bot=bot,
+        chat_id=real_id,
         text=text,
         parse_mode="HTML",
         link_preview_options={"is_disabled": True},

@@ -38,6 +38,7 @@ ACTIONS = {
     "subscription_chat": "Сменил получателя подписки",
     "password_change": "Сменил свой пароль",
     "telegram_link": "Подключение Telegram",
+    "client_group_join": "Заявка в группу клиентов",
     "telegram_unlink": "Отключил Telegram",
     "group_link": "Подключение группы",
     "group_remove": "Отключил группу",

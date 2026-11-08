@@ -495,7 +495,7 @@ def test_kazakh_interface_and_data(client, conn):
 def test_users_can_send_own_subscriptions_to_shared_group(client, conn):
     conn.execute("INSERT INTO telegram_groups (chat_id, title) VALUES ('-100', 'ZAKUP GROUP')")
     auth.set_password(conn, "amir", "amir-password-1")
-    conn.execute("UPDATE users SET paid_until = now() + interval '30 days' WHERE email = 'amir'")
+    conn.execute("UPDATE users SET role = 'moderator' WHERE email = 'amir'")  # группы — для сотрудников
     conn.commit()
     client.post("/login", data={"email": "amir", "password": "amir-password-1"}, headers=ORIGIN)
     data = {"applied": "1", "deadline_mode": "rule", "scope": "lots", "chat_id": "-100", "name": "В группу"}
@@ -1015,3 +1015,25 @@ def test_guest_settings_only_interface_and_header_order(client):
     header = page.text.split("<header>", 1)[1].split("</header>", 1)[0]
     assert header.index(">Регистрация<") < header.index(">Вход<") < header.index("data-burger")
     assert 'href="/settings"' in header
+
+
+def test_client_settings_and_group_button(client, conn, monkeypatch):
+    from zakup import telegram
+    from tests.test_client_bot import _calls
+
+    _calls(monkeypatch)
+    monkeypatch.setattr(telegram, "bot_username", lambda which="main": "tenderim_kz_bot" if which == "client" else "zakup_bot")
+    monkeypatch.setattr(telegram, "token", lambda which="main": "t")
+    uid = auth.set_password(conn, "+77011112233", "client-password-1")
+    conn.execute("UPDATE users SET role = 'user', paid_until = now() + interval '30 days', telegram_chat_id = 'c:555' WHERE id = %s", (uid,))
+    conn.execute("INSERT INTO app_settings (key, value) VALUES ('client_group', '-1009')")
+    conn.commit()
+    origin = {"origin": "https://testserver"}
+    client.post("/login", data={"email": "87011112233", "password": "client-password-1"}, headers=origin)
+    page = client.get("/settings").text
+    assert "Вступить в группу клиентов" in page and "@tenderim_kz_bot" in page
+    go = client.post("/settings/client-group", headers=origin, follow_redirects=False)
+    assert go.headers["location"] == "https://t.me/+join"
+    link = client.post("/settings/telegram/link", headers=origin, follow_redirects=False)
+    assert link.headers["location"].startswith("https://t.me/tenderim_kz_bot?start=")
+    assert web._user_groups(conn, uid) == []

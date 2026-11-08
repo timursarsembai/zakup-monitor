@@ -8,6 +8,7 @@ x-app-env: &app-env
   ZAKUP_TELEGRAM_BOT_USERNAME: ${ZAKUP_TELEGRAM_BOT_USERNAME:-}
   ZAKUP_TELEGRAM_CHAT_ID: ${ZAKUP_TELEGRAM_CHAT_ID:-}
   ZAKUP_SECRET_KEY: ${ZAKUP_SECRET_KEY:-}
+  ZAKUP_CLIENT_BOT_TOKEN: ${ZAKUP_CLIENT_BOT_TOKEN:-}
   KAZPAYMENT_API_KEY: ${KAZPAYMENT_API_KEY:-}
   KAZPAYMENT_WEBHOOK_SECRET: ${KAZPAYMENT_WEBHOOK_SECRET:-}
 
@@ -112,6 +113,19 @@ services:
       worker:
         condition: service_started
     entrypoint: ["zakup", "bot"]
+    environment: *app-env
+    mem_limit: 128m
+    logging: *logging
+
+  client-bot:
+    image: zakup
+    container_name: zakup-client-bot
+    restart: unless-stopped
+    init: true
+    depends_on:
+      worker:
+        condition: service_started
+    entrypoint: ["zakup", "client-bot"]
     environment: *app-env
     mem_limit: 128m
     logging: *logging
