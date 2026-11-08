@@ -190,3 +190,24 @@ def test_kaspi_search_parses_cards_and_reports_blocks():
     assert kaspi.proxy_host("http://user:secret@81.1.2.3:12323") == "81.1.2.3:12323"
     assert kaspi.valid_proxy("http://u:p@h:1") and not kaspi.valid_proxy("h:1")
     assert kaspi.city_of(["711410000"]) == "710000000" and kaspi.city_of(["351010000"]) == kaspi.ALMATY
+
+
+def test_kaspi_candidates_use_buyer_query(monkeypatch):
+    from zakup import kaspi, research
+
+    class Conn:
+        def commit(self):
+            pass
+
+    asked, searched = [], []
+    monkeypatch.setattr(kaspi, "proxy_url", lambda conn: "http://u:p@h:1")
+    monkeypatch.setattr(research, "_light_json", lambda conn, prompt, schema: (
+        asked.append(prompt) or {"queries": ["утюг паровой", "утюг"]}))
+    monkeypatch.setattr(kaspi, "search", lambda query, proxy, city: searched.append(query) or [
+        {"name": f"Утюг {query}", "price": 9990, "url": f"https://kaspi.kz/shop/p/{len(query)}/", "image": None}])
+    context = {"name": "Электроутюг", "extra": "", "spec": "Мощность 2000 Вт", "kato": ["751110000"]}
+    text = research._kaspi_candidates(Conn(), context, {"items": [{"url": "https://kaspi.kz/shop/p/5/"}]})
+    assert "Мощность 2000 Вт" in asked[0] and searched == ["утюг паровой", "утюг"]
+    assert "Утюг утюг паровой" in text and "/shop/p/5/" not in text  # уже найденное — не повторяем
+    monkeypatch.setattr(kaspi, "proxy_url", lambda conn: None)
+    assert research._kaspi_candidates(Conn(), context, None) == ""
