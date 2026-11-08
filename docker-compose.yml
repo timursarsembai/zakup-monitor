@@ -130,32 +130,61 @@ services:
     mem_limit: 128m
     logging: *logging
 
-  web:
+  # Сайт — две одинаковые копии за шлюзом (см. deploy/gateway/default.conf): выкладка
+  # перезапускает их по очереди, и сайт не пропадает.
+  web: &web
     image: zakup
-    container_name: zakup-web
+    container_name: zakup-web-1
     restart: unless-stopped
     depends_on:
       worker:
         condition: service_started
-    # Порт снаружи не открыт: сюда ходят только NPM и localhost, поэтому
-    # X-Forwarded-For можно верить от любого адреса — по нему считаются попытки входа.
     entrypoint:
       - uvicorn
       - zakup.web:app
       - --host=0.0.0.0
       - --port=8000
       - --proxy-headers
-      # Доверяем X-Forwarded-For только от прокси (сеть NPM): иначе клиент сам
-      # подставляет «свой» IP и обходит ограничение попыток входа.
-      - --forwarded-allow-ips=172.18.0.0/16
+      # X-Forwarded-For принимаем только от шлюза (его адрес постоянный): иначе клиент
+      # сам подставляет «свой» IP и обходит ограничение попыток входа.
+      - --forwarded-allow-ips=172.31.96.10
     environment: *app-env
+    networks:
+      default:
+      webnet:
+        ipv4_address: 172.31.96.11
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/robots.txt', timeout=3)"]
+      interval: 5s
+      timeout: 4s
+      retries: 3
+      start_period: 5s
+    mem_limit: 256m
+    logging: *logging
+
+  web-2:
+    <<: *web
+    container_name: zakup-web-2
+    networks:
+      default:
+      webnet:
+        ipv4_address: 172.31.96.12
+
+  # Шлюз: Nginx Proxy Manager ходит на zakup-web:8000, как и раньше.
+  gateway:
+    image: nginx:1.27-alpine
+    container_name: zakup-web
+    restart: unless-stopped
+    volumes:
+      # Папка, а не файл: при замене файла (git) контейнер видит новую версию.
+      - ./deploy/gateway:/etc/nginx/conf.d:ro
     ports:
       - "127.0.0.1:8096:8000"
-    # proxy-network — сеть Nginx Proxy Manager: он ходит на zakup-web:8000.
     networks:
-      - default
-      - proxy-network
-    mem_limit: 256m
+      proxy-network:
+      webnet:
+        ipv4_address: 172.31.96.10
+    mem_limit: 64m
     logging: *logging
 
 volumes:
@@ -164,3 +193,7 @@ volumes:
 networks:
   proxy-network:
     external: true
+  webnet:
+    ipam:
+      config:
+        - subnet: 172.31.96.0/24

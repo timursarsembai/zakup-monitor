@@ -29,7 +29,26 @@ if [ "$file_digest" != "$db_digest" ]; then
   trap - EXIT
 fi
 
-docker compose up -d
+# Всё, кроме сайта, — как обычно.
+docker compose up -d --no-deps postgres worker archive specs research bot client-bot
+
+# Сайт — две копии за шлюзом: перезапускаем по очереди и ждём, пока новая ответит.
+# Пока одна перезапускается, шлюз отправляет запросы в другую — перерыва нет.
+wait_healthy() {
+  for _ in $(seq 60); do
+    [ "$(docker inspect -f '{{.State.Health.Status}}' "$1" 2>/dev/null)" = healthy ] && return 0
+    sleep 1
+  done
+  echo "Копия $1 не поднялась за минуту — проверьте: docker compose logs ${2}"
+  return 1
+}
+docker compose up -d --no-deps web-2
+wait_healthy zakup-web-2 web-2
+docker compose up -d --no-deps web
+wait_healthy zakup-web-1 web
+docker compose up -d --no-deps gateway
+docker compose exec -T gateway nginx -s reload >/dev/null
+
 systemctl --user restart zakup-research
 # Дежурного не перезапускаем, если выкладку запустил он сам: иначе прервёт свой же разбор.
 if [ -z "${ZAKUP_AUTOFIX:-}" ]; then

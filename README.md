@@ -43,7 +43,7 @@ docker compose up -d
 docker compose exec -it worker zakup set-password you@mail    # спросит пароль
 ```
 
-Веб-интерфейс открывается на `127.0.0.1:8096`. Наружу его выставлять через Nginx
+Веб-интерфейс открывается на `127.0.0.1:8096` (шлюз `zakup-web`; за ним две копии сайта `web` и `web-2`, `scripts/deploy.sh` перезапускает их по очереди — выкладка без перерыва). Наружу его выставлять через Nginx
 Proxy Manager.
 
 Telegram: токен бота (`ZAKUP_TELEGRAM_BOT_TOKEN`) в Infisical, username

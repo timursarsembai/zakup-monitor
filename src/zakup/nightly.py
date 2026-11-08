@@ -23,7 +23,7 @@ from zakup.incidents import redact
 logger = logging.getLogger(__name__)
 
 REPO = Path(__file__).resolve().parents[2]
-SERVICES = ("worker", "archive", "specs", "research", "bot", "client-bot", "web")
+SERVICES = ("worker", "archive", "specs", "research", "bot", "client-bot", "web", "web-2", "gateway")
 TIMEOUT = 30 * 60
 TELEGRAM_LIMIT = 3900
 
@@ -150,7 +150,7 @@ def _claude(prompt: str) -> dict:
     binary = shutil.which("claude") or os.path.expanduser("~/.local/bin/claude")
     # Только чтение. Логи web не даём: там адреса запросов от кого угодно из интернета.
     read_only = ["Read", "Grep", "Glob",
-                 *[f"Bash(docker compose logs {s}:*)" for s in SERVICES if s != "web"],
+                 *[f"Bash(docker compose logs {s}:*)" for s in SERVICES if s not in ("web", "web-2", "gateway")],
                  "Bash(docker compose ps)", "Bash(git log:*)", "Bash(git show:*)", "Bash(git diff:*)"]
     settings = {"permissions": {"deny": SECRET_PLACES}}
     command = [
