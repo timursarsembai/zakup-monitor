@@ -20,6 +20,7 @@ import subprocess
 import tempfile
 import time
 from typing import Any
+from urllib.parse import quote_plus
 
 import httpx
 import psycopg
@@ -129,9 +130,14 @@ PROMPT = """Ты помогаешь поставщику, который уча�
      напиши об этом в note); price_unit — за что эта цена (шт, упаковка 10 шт, м и т.д.);
    - unit_price — цена за ту же единицу, что в лоте ({unit}), в тенге;
    - url — прямая ссылка на страницу товара (обязательно — чтобы перепроверить);
-   - phone — телефон продавца, только если он виден на уже открытой странице
-     товара (несколько — через запятую). Специально контакты не ищи и ради них
-     другие страницы не открывай: телефоны продавцов мы соберём сами. Нет — null;
+   - phone — телефон продавца (несколько — через запятую). Ищи по-настоящему:
+     на странице товара, затем на странице продавца (ссылка «Продавец …»,
+     название магазина) и в его разделе «Контакты»/«О компании»; на
+     маркетплейсах (Satu и др.) телефон обычно там. E-mail не нужен.
+     Не нашёл — null, не выдумывай. ИСКЛЮЧЕНИЕ — продавцы ниже: их телефоны уже
+     есть у нас в базе, для них phone = null и контакты не ищи, лишних страниц
+     не открывай:
+{known_sellers}
    - image — прямая ссылка на фото товара с этой страницы (обычно og:image), или null;
    - fit — «полностью», если подходит по спецификации, «частично» — если отличается
      в мелочах, «аналог» — похожий товар;
@@ -251,7 +257,8 @@ def default_region(context: dict[str, Any]) -> str:
 
 def build_prompt(context: dict[str, Any], region: str, whole_kz: bool,
                  sources_text: str = "", categories: list[str] | None = None,
-                 target: int = 10, exclude: list[str] | None = None) -> str:
+                 target: int = 10, exclude: list[str] | None = None,
+                 known_sellers: str = "") -> str:
     exclude_text = ""
     if exclude:
         # «Найти ещё»: уже найденное не повторяем — нужны только новые предложения.
@@ -260,6 +267,7 @@ def build_prompt(context: dict[str, Any], region: str, whole_kz: bool,
     return PROMPT.format(
         target=target,
         exclude=exclude_text,
+        known_sellers=known_sellers or "     (пока нет)",
         sources=sources_text or "   (пока нет — ищи сам)",
         categories=", ".join(categories or []) or "например «Мебель», «Канцтовары», «Оргтехника»",
         **{key: value if value not in (None, "") else "—" for key, value in context.items()
@@ -269,6 +277,23 @@ def build_prompt(context: dict[str, Any], region: str, whole_kz: bool,
         whole_kz="Затем по всему Казахстану: доставить можно в любой регион — такие "
                  "предложения тоже нужны, но после местных. Районы и сёла не ищи отдельно.",
     )
+
+
+def manual_links(context: dict[str, Any] | None, region: str) -> list[tuple[str, str]]:
+    """Ссылки «искать самому»: готовые поисковые запросы по названию лота, без ИИ."""
+    if not context or not context.get("name"):
+        return []
+    words = " ".join(f"{context['name']} {context.get('extra') or ''}".split())[:120]
+    city = region.replace("г.", "").replace("область", "").strip(" ,.")
+    q = quote_plus
+    return [
+        ("Google — в регионе", f"https://www.google.com/search?q={q(f'{words} купить {city} цена')}"),
+        ("Google — по Казахстану", f"https://www.google.com/search?q={q(f'{words} купить Казахстан цена')}"),
+        ("Kaspi", f"https://kaspi.kz/shop/search/?text={q(words)}"),
+        ("Satu", f"https://satu.kz/search?search_term={q(words)}"),
+        ("Halyk Market", f"https://halykmarket.kz/search?r46_search_query={q(words)}"),
+        ("Flip.kz", f"https://www.flip.kz/search?search={q(words)}"),
+    ]
 
 
 # Пользователь (не администратор) за сутки запускает не больше стольких поисков:
@@ -554,7 +579,8 @@ def run_job(conn: psycopg.Connection, job: dict[str, Any]) -> dict[str, Any]:
     prompt = build_prompt(context, job["region"], job["whole_kz"],
                           sources.for_prompt(conn), sources.known_categories(conn),
                           target=job.get("target") or 10,
-                          exclude=[i["url"] for i in (base or {}).get("items", [])])
+                          exclude=[i["url"] for i in (base or {}).get("items", [])],
+                          known_sellers=contacts.known_for_prompt(conn))
     key = None
     if job["provider"] != "claude_code":
         admin = conn.execute("SELECT id FROM users WHERE role = 'admin' ORDER BY id LIMIT 1").fetchone()

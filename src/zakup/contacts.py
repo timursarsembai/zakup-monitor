@@ -270,3 +270,26 @@ def links(phones: list[dict]) -> list[dict[str, str]]:
         out.append({"number": number, "tel": tel, "label": phone.get("label") or "",
                     "wa": "https://wa.me/" + tel.lstrip("+") if mobile or phone.get("whatsapp") else ""})
     return out
+
+
+# Сколько продавцов с контактами перечислять ИИ (остальных он ищет сам).
+KNOWN_LIMIT = 200
+
+
+def known_for_prompt(conn) -> str:
+    """Продавцы, чьи телефоны уже в базе: сайты целиком и продавцы маркетплейсов."""
+    rows = conn.execute(
+        f"""SELECT domain, coalesce(nullif(name, ''), seller), seller = '' FROM seller_contacts
+            WHERE jsonb_array_length(phones) > 0
+              AND checked_at > now() - interval '{FRESH_DAYS} days'
+            ORDER BY checked_at DESC LIMIT %s""",
+        (KNOWN_LIMIT,),
+    ).fetchall()
+    sites = sorted({domain for domain, _, whole in rows if whole})
+    sellers: dict[str, list[str]] = {}
+    for domain, name, whole in rows:
+        if not whole:
+            sellers.setdefault(domain, []).append(name)
+    lines = [f"     - сайт {domain} (любой товар с него)" for domain in sites]
+    lines += [f"     - на {domain}: " + "; ".join(sorted(names)) for domain, names in sorted(sellers.items())]
+    return "\n".join(lines)

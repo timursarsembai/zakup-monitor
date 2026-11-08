@@ -148,3 +148,15 @@ def test_spec_summary_queue_and_cache(conn, monkeypatch):
     summary = research.summary_of(conn, 90)
     assert summary["status"] == "done" and summary["result"]["params"][0]["value"] == "120×60"
     assert research.request_summary(conn, 90) == "done"  # готовая — повторно не ставится
+
+
+def test_manual_search_links():
+    from zakup import research
+
+    links = dict(research.manual_links({"name": "Кровать", "extra": "двухъярусная"}, "г. Алматы"))
+    assert links["Google — в регионе"].endswith("q=%D0%9A%D1%80%D0%BE%D0%B2%D0%B0%D1%82%D1%8C+"
+                                               "%D0%B4%D0%B2%D1%83%D1%85%D1%8A%D1%8F%D1%80%D1%83%D1%81%D0%BD%D0%B0%D1%8F+"
+                                               "%D0%BA%D1%83%D0%BF%D0%B8%D1%82%D1%8C+%D0%90%D0%BB%D0%BC%D0%B0%D1%82%D1%8B+"
+                                               "%D1%86%D0%B5%D0%BD%D0%B0")
+    assert links["Kaspi"].startswith("https://kaspi.kz/shop/search/?text=")
+    assert research.manual_links(None, "") == []

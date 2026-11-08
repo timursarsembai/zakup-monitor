@@ -553,6 +553,8 @@ def lot_page(request: Request, user: User, lot_id: int, background: BackgroundTa
     context.update(lot=lot, others=[other for other in context["lots"] if other["id"] != lot_id],
                    here=request.url.path, job=job, done=done, lot_info=lot_info,
                    region=research.default_region(lot_info) if lot_info else "",
+                   manual_links=research.manual_links(
+                       lot_info, research.default_region(lot_info) if lot_info else ""),
                    provider_name=research.PROVIDERS.get(provider, provider),
                    targets=research.TARGETS,
                    is_admin=request.state.role == "admin")

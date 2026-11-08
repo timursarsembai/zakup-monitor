@@ -17,6 +17,8 @@
   .research-form select { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); font: inherit; }
   .more-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 14px 0 4px; }
   .more-form select { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); font: inherit; }
+  .manual { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; margin: 4px 0 10px; }
+  .manual .chip-link { padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px; font-size: 14px; white-space: nowrap; }
   .research-form .primary { background: var(--accent); color: var(--on-accent); border-color: transparent; font-weight: 600; }
   table.research { min-width: 1280px; }
   table.research td.fit { min-width: 170px; font-size: 13px; }
@@ -78,6 +80,8 @@
     <button class="primary" {% if job and job.status in ("queued", "running") %}disabled{% endif %}>{{ _("Найти заново") if job else _("Найти товары") }}</button>
   </form>
   <p class="muted">{{ _("Claude прочитает техспецификацию, найдёт в интернете подходящие товары — сначала в регионе поставки, потом по Казахстану — и посчитает маржу от цены в лоте. Сейчас ищет:") }} {{ provider_name }}{% if request.state.role == "admin" %} (<a href="/settings#ai">{{ _("настройки") }}</a>){% endif %}.</p>
+  {% if manual_links %}<div class="manual"><span class="muted">{{ _("Искать самому:") }}</span>
+    {% for label, url in manual_links %}<a class="chip-link" href="{{ url }}" target="_blank" rel="noopener noreferrer">🔎 {{ _(label) }}</a>{% endfor %}</div>{% endif %}
   {% else %}
   <p class="muted">{{ _("Нет данных лота для поиска.") }}</p>
   {% endif %}

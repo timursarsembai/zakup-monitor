@@ -52,3 +52,18 @@ def test_enrich_uses_and_fills_contact_base(conn, monkeypatch):
     assert contacts.enrich(again, conn) == 2 and pages == []
     assert again["items"][0]["phones"][0]["number"] == "+7 (707) 303-70-63"
     assert [name for name, _, _ in contacts.of_domain(conn, "satu.kz")] == ["ИП Другой", "ТОО «Мебель»"]
+
+
+def test_known_sellers_listed_for_ai(conn):
+    from zakup import research
+
+    contacts._store(conn, "zeta.kz", "", "", [{"number": "+7 (727) 313-13-51", "label": "", "whatsapp": False}])
+    contacts._store(conn, "satu.kz", "тоо мебель", "ТОО «Мебель»",
+                    [{"number": "+7 (707) 303-70-63", "label": "", "whatsapp": False}])
+    contacts._store(conn, "satu.kz", "ип пусто", "ИП Пусто", [])  # без телефонов — ИИ ищет сам
+    text = contacts.known_for_prompt(conn)
+    assert "сайт zeta.kz" in text and "на satu.kz: ТОО «Мебель»" in text and "ИП Пусто" not in text
+    context = {"name": "Стол", "description": "", "extra": "", "count": 1, "unit": "шт", "price": 1,
+               "places": "Алматы", "spec": "—", "kato": []}
+    prompt = research.build_prompt(context, "г. Алматы", True, known_sellers=text)
+    assert "Ищи по-настоящему" in prompt and "на satu.kz: ТОО «Мебель»" in prompt
