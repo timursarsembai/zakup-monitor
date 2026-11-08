@@ -96,10 +96,10 @@ def login(
     """Проверяет пароль и создаёт сессию. Возвращает токен для cookie или None."""
     email = normalize_email(email)
     row = conn.execute(
-        "SELECT id, password_hash, disabled FROM users WHERE email = %s", (email,)
+        "SELECT id, password_hash, disabled, deleted_at FROM users WHERE email = %s", (email,)
     ).fetchone()
-    # Отключённый аккаунт не входит даже с верным паролем.
-    ok = verify_password(password, row[1] if row else None) and not row[2]
+    # Отключённый и удалённый аккаунт не входит даже с верным паролем.
+    ok = verify_password(password, row[1] if row else None) and not row[2] and row[3] is None
     log_attempt(conn, email, ip, ok)
     token = None
     if ok:
@@ -120,7 +120,8 @@ def user_by_session(conn: psycopg.Connection, token: str | None) -> tuple[int, s
         return None
     return conn.execute(
         """SELECT u.id, u.email, u.role FROM sessions s JOIN users u ON u.id = s.user_id
-           WHERE s.token_hash = %s AND s.expires_at > now() AND NOT u.disabled""",
+           WHERE s.token_hash = %s AND s.expires_at > now() AND NOT u.disabled
+             AND u.deleted_at IS NULL""",
         (_token_hash(token),),
     ).fetchone()
 
@@ -129,6 +130,11 @@ def logout(conn: psycopg.Connection, token: str | None) -> None:
     if token:
         conn.execute("DELETE FROM sessions WHERE token_hash = %s", (_token_hash(token),))
         conn.commit()
+
+
+# Сотрудники: полный бесплатный доступ, управление обычными пользователями, журнал.
+STAFF_ROLES = ("admin", "moderator")
+ROLES = {"admin": "администратор", "moderator": "модератор", "user": "пользователь"}
 
 
 def generate_password() -> str:

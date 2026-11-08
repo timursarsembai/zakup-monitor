@@ -412,3 +412,8 @@ CREATE TABLE IF NOT EXISTS seller_contacts (
     checked_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (domain, seller)
 );
+-- Мягкое удаление: запись остаётся, администратор может вернуть. may_reregister —
+-- разрешено ли удалённому зарегистрироваться заново (решает администратор).
+ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_at timestamptz;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_by bigint;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS may_reregister boolean NOT NULL DEFAULT false;

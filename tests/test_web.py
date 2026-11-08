@@ -381,8 +381,48 @@ def test_admin_manages_roles_disable_delete(client, conn):
     assert auth.login(conn, "serik", "serik-password-1", None, None) is None
     client.post(f"/settings/users/{serik}/disable", headers=ORIGIN)
     assert auth.login(conn, "serik", "serik-password-1", None, None) is not None
+    conn.execute("INSERT INTO subscriptions (user_id, name, query) VALUES (%s, 'Столы', 'стол')", (serik,))
+    conn.commit()
     assert "удалён" in client.post(f"/settings/users/{serik}/delete", headers=ORIGIN).text
-    assert conn.execute("SELECT count(*) FROM users WHERE email = 'serik'").fetchone()[0] == 0
+    # Мягкое удаление: запись есть, войти нельзя, подписки выключены.
+    assert conn.execute("SELECT deleted_at IS NOT NULL, deleted_by FROM users WHERE id = %s",
+                        (serik,)).fetchone() == (True, me)
+    assert auth.login(conn, "serik", "serik-password-1", None, None) is None
+    assert conn.execute("SELECT bool_or(active) FROM subscriptions WHERE user_id = %s",
+                        (serik,)).fetchone()[0] is False
+    page = client.get("/settings").text
+    assert "Удалённые" in page and f"/settings/users/{serik}/restore" in page
+    assert "разрешена" in client.post(f"/settings/users/{serik}/reregister", headers=ORIGIN).text
+    assert "восстановлен" in client.post(f"/settings/users/{serik}/restore", headers=ORIGIN).text
+    assert auth.login(conn, "serik", "serik-password-1", None, None) is not None
+
+
+def test_moderator_manages_only_users_and_sees_log_without_admin(client, conn):
+    auth.set_password(conn, "amir", "amir-password-1")
+    auth.set_password(conn, "client", "client-password-1")
+    conn.execute("UPDATE users SET role = 'moderator' WHERE email = 'amir'")
+    conn.commit()
+    ids = dict(conn.execute("SELECT email, id FROM users").fetchall())
+    _login(client)  # администратор оставляет след в журнале
+    client.post("/logout", headers=ORIGIN)
+    client.post("/login", data={"email": "owner@mail.kz", "password": "wrong-password"}, headers=ORIGIN)
+    client.post("/login", data={"email": "client", "password": "client-password-1"}, headers=ORIGIN)
+    client.get("/my")
+    client.post("/logout", headers=ORIGIN)
+    client.post("/login", data={"email": "amir", "password": "amir-password-1"}, headers=ORIGIN)
+    page = client.get("/settings").text
+    assert "Пользователи" in page and "Искусственный интеллект" not in page
+    assert "owner@mail.kz" not in page and "client" in page
+    log = client.get("/log").text
+    assert "client" in log and "owner@mail.kz" not in log  # и неудачный вход админа не виден
+    assert client.post(f"/settings/users/{ids['owner@mail.kz']}/reset", headers=ORIGIN).status_code == 403
+    assert client.post(f"/settings/users/{ids['client']}/role", data={"role": "admin"},
+                       headers=ORIGIN).status_code == 403
+    assert "Новый пароль для client" in client.post(f"/settings/users/{ids['client']}/reset",
+                                                     headers=ORIGIN).text
+    assert "удалён" in client.post(f"/settings/users/{ids['client']}/delete", headers=ORIGIN).text
+    assert client.post(f"/settings/users/{ids['client']}/restore", headers=ORIGIN).status_code == 403
+    assert client.post("/settings/ai", data={"provider": "claude_code"}, headers=ORIGIN).status_code == 403
 
 
 def test_spec_shown_from_database_without_portal(client, conn, monkeypatch):

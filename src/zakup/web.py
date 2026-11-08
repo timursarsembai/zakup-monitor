@@ -226,6 +226,15 @@ def current_admin(request: Request, user: User) -> int:
 Admin = Annotated[int, Depends(current_admin)]
 
 
+def current_staff(request: Request, user: User) -> int:
+    if request.state.role not in auth.STAFF_ROLES:
+        raise HTTPException(403, "Доступно только администратору и модераторам")
+    return user
+
+
+Staff = Annotated[int, Depends(current_staff)]
+
+
 def same_origin(request: Request) -> None:
     # SameSite=Lax уже не пускает cookie с чужих сайтов, это второй рубеж.
     origin = request.headers.get("origin") or request.headers.get("referer")
@@ -577,7 +586,7 @@ def start_research(
             raise HTTPException(404, "Нет данных лота: откройте страницу объявления")
         try:
             research.enqueue(conn, user, lot_id, region, whole_kz == "1",
-                             is_admin=request.state.role == "admin", target=target,
+                             is_admin=request.state.role in auth.STAFF_ROLES, target=target,
                              more=more == "1")
             _audit(request, user, "research", f"/lots/{lot_id}", region=region[:120],
                    count=target, more=more == "1")
@@ -942,7 +951,7 @@ LOG_PAGE_SIZES = (20, 50, 100)
 
 
 @app.get("/log")
-def action_log(request: Request, _: Admin, page: int = 1, per_page: int = 50):
+def action_log(request: Request, _: Staff, page: int = 1, per_page: int = 50):
     """Журнал действий: фильтр по пользователю, действию и датам, постранично."""
     query = parse_qs(request.url.query)
     users = [int(v) for v in query.get("user", []) if v.isdigit()]
@@ -952,6 +961,11 @@ def action_log(request: Request, _: Admin, page: int = 1, per_page: int = 50):
     per_page = per_page if per_page in LOG_PAGE_SIZES else 50
     page = max(page, 1)
     clauses, params = ["true"], {}
+    moderator = request.state.role != "admin"
+    if moderator:
+        # Модератор видит всех, кроме администраторов (в том числе их неудачные входы).
+        clauses.append("""coalesce(u.role, (SELECT r.role FROM users r WHERE r.email = a.login), '')
+                          <> 'admin'""")
     if users:
         clauses.append("a.user_id = ANY(%(users)s)")
         params["users"] = users
@@ -977,8 +991,12 @@ def action_log(request: Request, _: Admin, page: int = 1, per_page: int = 50):
                 LIMIT {per_page} OFFSET {(page - 1) * per_page}""",
             params,
         ).fetchall()
-        total = conn.execute(f"SELECT count(*) FROM user_actions a WHERE {where}", params).fetchone()[0]
-        all_users = conn.execute("SELECT id, email FROM users ORDER BY email").fetchall()
+        total = conn.execute(
+            f"""SELECT count(*) FROM user_actions a LEFT JOIN users u ON u.id = a.user_id
+                WHERE {where}""", params).fetchone()[0]
+        all_users = conn.execute(
+            "SELECT id, email FROM users WHERE NOT (%s AND role = 'admin') ORDER BY email", (moderator,)
+        ).fetchall()
     keep = [(k, v) for k, vs in query.items() if k not in ("page",) for v in vs]
     return templates.TemplateResponse(request, "log.html", {
         "rows": rows, "total": total, "page": page, "per_page": per_page,
@@ -1179,6 +1197,7 @@ def _settings_page(request: Request, user: int, *, sent: str = "", saved: str = 
                    notice: str | None = None, error: str | None = None, status_code: int = 200,
                    tab: str | None = None):
     is_admin = request.state.role == "admin"
+    is_staff = request.state.role in auth.STAFF_ROLES
     with pool.connection() as conn:
         chat_id, company_bin = conn.execute(
             "SELECT telegram_chat_id, company_bin FROM users WHERE id = %s", (user,)
@@ -1188,17 +1207,28 @@ def _settings_page(request: Request, user: int, *, sent: str = "", saved: str = 
                           (user,)).fetchone()
         ai_keys = secrets_box.saved_providers(conn, user)
         proxy_host = kaspi.proxy_host(kaspi.proxy_url(conn)) if is_admin else ""
+        # Модератор видит обычных пользователей, модераторов и себя; админов — нет.
         users = conn.execute(
             """SELECT u.id, u.email, u.role, u.telegram_chat_id IS NOT NULL,
                       (SELECT max(created_at) FROM sessions s WHERE s.user_id = u.id),
                       u.disabled
-               FROM users u ORDER BY u.role, u.email"""
+               FROM users u WHERE u.deleted_at IS NULL AND (%s OR u.role <> 'admin' OR u.id = %s)
+               ORDER BY array_position(ARRAY['admin', 'moderator', 'user'], u.role), u.email""",
+            (is_admin, user),
+        ).fetchall() if is_staff else []
+        deleted = conn.execute(
+            """SELECT u.id, u.email, u.role, u.deleted_at, d.email, u.may_reregister
+               FROM users u LEFT JOIN users d ON d.id = u.deleted_by
+               WHERE u.deleted_at IS NOT NULL ORDER BY u.deleted_at DESC"""
         ).fetchall() if is_admin else []
     return templates.TemplateResponse(
         request,
         "settings.html",
         {
             "is_admin": is_admin,
+            "is_staff": is_staff,
+            "roles": auth.ROLES,
+            "deleted": deleted,
             "connected": bool(chat_id),
             "bot_username": telegram.bot_username(),
             "configured": bool(telegram.token() and telegram.bot_username()),
@@ -1252,81 +1282,114 @@ def change_password(
 
 
 @app.post("/settings/users", dependencies=[Depends(same_origin)])
-def add_user(request: Request, admin: Admin, login: Annotated[str, Form()]):
+def add_user(request: Request, staff: Staff, login: Annotated[str, Form()]):
     login = auth.normalize_email(login)
     if not login or len(login) > 100 or any(c.isspace() for c in login):
-        return _settings_page(request, admin, error="Логин — без пробелов, до 100 символов.",
+        return _settings_page(request, staff, error="Логин — без пробелов, до 100 символов.",
                               status_code=422, tab="users")
     with pool.connection() as conn:
-        if conn.execute("SELECT 1 FROM users WHERE email = %s", (login,)).fetchone():
-            return _settings_page(request, admin, error=f"Пользователь {login} уже есть.",
+        existing = conn.execute("SELECT deleted_at FROM users WHERE email = %s", (login,)).fetchone()
+        if existing:
+            hint = " Он удалён — вернуть его может администратор." if existing[0] else ""
+            return _settings_page(request, staff, error=f"Пользователь {login} уже есть.{hint}",
                                   status_code=422, tab="users")
         password = auth.generate_password()
         auth.set_password(conn, login, password)
-    _audit(request, admin, "user_add", login)
-    return _settings_page(request, admin, notice=f"Создан пользователь {login}. Пароль: {password} "
+    _audit(request, staff, "user_add", login)
+    return _settings_page(request, staff, notice=f"Создан пользователь {login}. Пароль: {password} "
                           "— передайте его, больше он нигде не показывается.", tab="users")
 
 
-def _other_user(conn, admin: int, user_id: int) -> str:
-    """Логин пользователя, которым управляет администратор; себя трогать нельзя."""
-    if user_id == admin:
+def _other_user(conn, request: Request, actor: int, user_id: int, deleted: bool = False) -> str:
+    """Логин пользователя, которым управляет сотрудник. Себя трогать нельзя;
+    модератор управляет только обычными пользователями."""
+    if user_id == actor:
         raise HTTPException(422, "Свою роль, доступ и аккаунт изменить здесь нельзя")
-    row = conn.execute("SELECT email FROM users WHERE id = %s", (user_id,)).fetchone()
-    if row is None:
+    row = conn.execute("SELECT email, role, deleted_at FROM users WHERE id = %s", (user_id,)).fetchone()
+    if row is None or (row[2] is not None) != deleted:
         raise HTTPException(404, "Нет такого пользователя")
+    if request.state.role != "admin" and row[1] != "user":
+        raise HTTPException(403, "Модератор управляет только обычными пользователями")
     return row[0]
 
 
 @app.post("/settings/users/{user_id}/role", dependencies=[Depends(same_origin)])
 def set_role(request: Request, admin: Admin, user_id: int, role: Annotated[str, Form()]):
-    if role not in ("admin", "user"):
+    if role not in auth.ROLES:
         raise HTTPException(422, "неизвестная роль")
     with pool.connection() as conn:
-        login = _other_user(conn, admin, user_id)
+        login = _other_user(conn, request, admin, user_id)
         conn.execute("UPDATE users SET role = %s WHERE id = %s", (role, user_id))
     _audit(request, admin, "user_role", login, role=role)
-    return _settings_page(request, admin, tab="users", notice=f"{login}: роль — "
-                          f"{'администратор' if role == 'admin' else 'пользователь'}.")
+    return _settings_page(request, admin, tab="users", notice=f"{login}: роль — {auth.ROLES[role]}.")
 
 
 @app.post("/settings/users/{user_id}/disable", dependencies=[Depends(same_origin)])
-def toggle_disabled(request: Request, admin: Admin, user_id: int):
+def toggle_disabled(request: Request, staff: Staff, user_id: int):
     with pool.connection() as conn:
-        login = _other_user(conn, admin, user_id)
+        login = _other_user(conn, request, staff, user_id)
         disabled = conn.execute(
             "UPDATE users SET disabled = NOT disabled WHERE id = %s RETURNING disabled", (user_id,)
         ).fetchone()[0]
         if disabled:
             # Отключение действует сразу: выкидываем из всех открытых сессий.
             conn.execute("DELETE FROM sessions WHERE user_id = %s", (user_id,))
-    _audit(request, admin, "user_disable", login, disabled=disabled)
-    return _settings_page(request, admin, tab="users", notice=f"{login}: аккаунт "
+    _audit(request, staff, "user_disable", login, disabled=disabled)
+    return _settings_page(request, staff, tab="users", notice=f"{login}: аккаунт "
                           f"{'отключён — войти нельзя' if disabled else 'снова включён'}.")
 
 
 @app.post("/settings/users/{user_id}/delete", dependencies=[Depends(same_origin)])
-def delete_user(request: Request, admin: Admin, user_id: int):
+def delete_user(request: Request, staff: Staff, user_id: int):
+    """Удаление мягкое: человек не войдёт и ничего не получит, но запись, подписки и
+    избранное остаются — администратор может вернуть."""
     with pool.connection() as conn:
-        login = _other_user(conn, admin, user_id)
-        conn.execute("DELETE FROM users WHERE id = %s", (user_id,))
-    _audit(request, admin, "user_delete", login)
-    return _settings_page(request, admin, tab="users",
-                          notice=f"Пользователь {login} удалён вместе с подписками и отметками.")
+        login = _other_user(conn, request, staff, user_id)
+        conn.execute("UPDATE users SET deleted_at = now(), deleted_by = %s WHERE id = %s",
+                     (staff, user_id))
+        conn.execute("DELETE FROM sessions WHERE user_id = %s", (user_id,))
+        conn.execute("UPDATE subscriptions SET active = false WHERE user_id = %s", (user_id,))
+    _audit(request, staff, "user_delete", login)
+    return _settings_page(request, staff, tab="users",
+                          notice=f"Пользователь {login} удалён. Вернуть его может администратор.")
+
+
+@app.post("/settings/users/{user_id}/restore", dependencies=[Depends(same_origin)])
+def restore_user(request: Request, admin: Admin, user_id: int):
+    with pool.connection() as conn:
+        login = _other_user(conn, request, admin, user_id, deleted=True)
+        conn.execute("UPDATE users SET deleted_at = NULL, deleted_by = NULL WHERE id = %s", (user_id,))
+    _audit(request, admin, "user_restore", login)
+    return _settings_page(request, admin, tab="users", notice=f"Пользователь {login} восстановлен. "
+                          "Подписки выключены — он включит их сам.")
+
+
+@app.post("/settings/users/{user_id}/reregister", dependencies=[Depends(same_origin)])
+def toggle_reregister(request: Request, admin: Admin, user_id: int):
+    with pool.connection() as conn:
+        login = _other_user(conn, request, admin, user_id, deleted=True)
+        allowed = conn.execute(
+            "UPDATE users SET may_reregister = NOT may_reregister WHERE id = %s RETURNING may_reregister",
+            (user_id,),
+        ).fetchone()[0]
+    _audit(request, admin, "user_reregister", login, allowed=allowed)
+    return _settings_page(request, admin, tab="users", notice=f"{login}: повторная регистрация "
+                          f"{'разрешена' if allowed else 'запрещена'}.")
 
 
 @app.post("/settings/users/{user_id}/reset", dependencies=[Depends(same_origin)])
-def reset_password(request: Request, admin: Admin, user_id: int):
+def reset_password(request: Request, staff: Staff, user_id: int):
     with pool.connection() as conn:
-        row = conn.execute("SELECT email FROM users WHERE id = %s", (user_id,)).fetchone()
-        if row is None:
-            raise HTTPException(404, "Нет такого пользователя")
+        if user_id == staff:
+            login = conn.execute("SELECT email FROM users WHERE id = %s", (user_id,)).fetchone()[0]
+        else:
+            login = _other_user(conn, request, staff, user_id)
         password = auth.generate_password()
-        auth.set_password(conn, row[0], password)
-    _audit(request, admin, "user_reset", row[0])
-    if user_id == admin:
+        auth.set_password(conn, login, password)
+    _audit(request, staff, "user_reset", login)
+    if user_id == staff:
         return RedirectResponse("/login", status_code=303)
-    return _settings_page(request, admin, notice=f"Новый пароль для {row[0]}: {password} — "
+    return _settings_page(request, staff, notice=f"Новый пароль для {login}: {password} — "
                           "передайте его, больше он нигде не показывается. Старые входы сброшены.",
                           tab="users")
 
