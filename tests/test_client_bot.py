@@ -55,3 +55,19 @@ def test_group_migration_to_supergroup(conn, monkeypatch):
     client_bot.handle_message(conn, {"chat": {"id": -5538, "type": "group", "title": "Клиенты"},
                                      "migrate_to_chat_id": -1005538})
     assert client_bot.group_id(conn) == "-1005538"
+
+
+def test_group_migration_learned_from_error(conn, monkeypatch):
+    client_bot._set_group(conn, "-5538", "Клиенты")
+    calls = []
+
+    def fake(method, http_timeout=15, bot="main", **params):
+        calls.append(params.get("chat_id"))
+        if params.get("chat_id") == "-5538":
+            raise telegram.TelegramError(400, "group chat was upgraded to a supergroup chat",
+                                         {"migrate_to_chat_id": -1005538})
+        return {"invite_link": "https://t.me/+x"}
+
+    monkeypatch.setattr(telegram, "call", fake)
+    assert client_bot.invite_link(conn, "client") == "https://t.me/+x"
+    assert calls == ["-5538", "-1005538"] and client_bot.group_id(conn) == "-1005538"

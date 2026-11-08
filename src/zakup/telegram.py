@@ -17,10 +17,12 @@ MESSAGE_LIMIT = 3800
 
 
 class TelegramError(Exception):
-    def __init__(self, code: int | None, description: str):
+    def __init__(self, code: int | None, description: str, parameters: dict | None = None):
         super().__init__(f"{code}: {description}")
         self.code = code
         self.description = description
+        # Например, migrate_to_chat_id — группа стала супергруппой с новым id.
+        self.parameters = parameters or {}
 
     @property
     def chat_gone(self) -> bool:
@@ -81,7 +83,8 @@ def call(method: str, http_timeout: float = 15, bot: str = "main", **params: Any
     except (OSError, ValueError) as error:
         raise TelegramError(None, type(error).__name__) from None
     if not payload.get("ok"):
-        raise TelegramError(payload.get("error_code"), payload.get("description", ""))
+        raise TelegramError(payload.get("error_code"), payload.get("description", ""),
+                            payload.get("parameters"))
     return payload["result"]
 
 

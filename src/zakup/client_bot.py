@@ -49,6 +49,21 @@ def _set_group(conn: psycopg.Connection, chat_id: str, title: str) -> None:
     conn.commit()
 
 
+def _group_call(conn: psycopg.Connection, method: str, **params):
+    """Запрос к группе клиентов. Если группа стала супергруппой (служебное сообщение
+    об этом бот может не получить), берём новый id из ответа Telegram и повторяем."""
+    group = group_id(conn)
+    try:
+        return telegram.call(method, bot=BOT, chat_id=group, **params)
+    except telegram.TelegramError as error:
+        new_id = error.parameters.get("migrate_to_chat_id")
+        if not new_id:
+            raise
+        title = conn.execute("SELECT value FROM app_settings WHERE key = 'client_group_title'").fetchone()
+        _set_group(conn, str(new_id), title[0] if title else "")
+        return telegram.call(method, bot=BOT, chat_id=str(new_id), **params)
+
+
 def _send(chat_id: int | str, text: str) -> None:
     try:
         telegram.call("sendMessage", bot=BOT, chat_id=chat_id, text=text,
@@ -167,8 +182,8 @@ def maintenance(conn: psycopg.Connection, now: datetime | None = None) -> tuple[
     ).fetchall():
         try:
             # Удалить без вечного бана: бан и сразу снятие — человек сможет вернуться по заявке.
-            telegram.call("banChatMember", bot=BOT, chat_id=group, user_id=tg_id)
-            telegram.call("unbanChatMember", bot=BOT, chat_id=group, user_id=tg_id, only_if_banned=True)
+            _group_call(conn, "banChatMember", user_id=tg_id)
+            _group_call(conn, "unbanChatMember", user_id=tg_id, only_if_banned=True)
         except telegram.TelegramError as error:
             logger.warning("client bot: remove %s failed: %s", tg_id, error)
             continue
@@ -182,11 +197,9 @@ def maintenance(conn: psycopg.Connection, now: datetime | None = None) -> tuple[
 
 def invite_link(conn: psycopg.Connection, login: str) -> str | None:
     """Ссылка-заявка в группу клиентов для человека с оплаченным тарифом."""
-    group = group_id(conn)
-    if not group:
+    if not group_id(conn):
         return None
-    link = telegram.call("createChatInviteLink", bot=BOT, chat_id=group, creates_join_request=True,
-                         name=login[:32])
+    link = _group_call(conn, "createChatInviteLink", creates_join_request=True, name=login[:32])
     return link.get("invite_link")
 
 
