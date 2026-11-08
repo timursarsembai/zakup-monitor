@@ -54,11 +54,12 @@
     .flayout { grid-template-columns: minmax(0, 1fr); }
     .subscribe { padding: 14px 0 0; border-left: 0; border-top: 1px solid var(--line); }
   }
-  .filter-open, .sheet-head { display: none; }
+  .filter-bar, .filter-open, .sheet-head { display: none; }
   @media (max-width: 760px) {
-    .filter-open { display: block; width: 100%; text-align: left; margin: 12px 0; padding: 12px 14px; border: 0; border-radius: 10px; background: var(--accent); color: var(--on-accent); }
-    .filter-open .filter-title { display: block; font-size: 17px; font-weight: 600; }
-    .filter-open .filter-sum { display: block; margin-top: 2px; font-size: 13px; opacity: .85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .filter-bar { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 12px 0; }
+    .filter-open { display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); color: var(--fg); font-size: 16px; font-weight: 600; }
+    .filter-open svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+    .filter-open .count { min-width: 22px; padding: 1px 7px; border-radius: 999px; background: color-mix(in srgb, var(--fg) 12%, transparent); font-size: 13px; }
     .filters-panel { display: none; }
     .filters-panel.open { display: block; position: fixed; inset: 0; z-index: 80; margin: 0; border: 0; border-radius: 0; overflow-y: auto; background: var(--bg); padding: 0 14px 0; }
     .sheet-head { display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 2; background: var(--bg); padding: 12px 0; border-bottom: 1px solid var(--line); margin-bottom: 12px; font-size: 17px; }
@@ -104,6 +105,14 @@
   .view-switch button { display: inline-flex; align-items: center; gap: 6px; border: 0; border-radius: 0; padding: 5px 10px; color: var(--muted); }
   .view-switch button[aria-pressed=true] { background: var(--accent); color: var(--on-accent); }
   .view-switch svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; }
+  /* Иерархия: название — главное, сумма и срок — затем, заказчик и номера — мелко. */
+  table.results a.title { color: var(--fg); font-weight: 650; font-size: 15px; }
+  table.results a.title:hover { color: var(--accent); }
+  .st { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; background: color-mix(in srgb, var(--fg) 8%, transparent); color: var(--muted); }
+  .st.st-open { background: color-mix(in srgb, #1e9e5a 16%, transparent); color: var(--ok); font-weight: 600; }
+  .due { display: inline-block; margin-top: 3px; padding: 1px 8px; border-radius: 999px; font-size: 12px; background: color-mix(in srgb, var(--fg) 8%, transparent); color: var(--fg); white-space: nowrap; }
+  .due.urgent { background: color-mix(in srgb, var(--bad) 16%, transparent); color: var(--bad); font-weight: 600; }
+  td.c-more { display: none; }
   /* Плитка: та же таблица, строки — карточки. */
   [data-view=cards] { overflow: visible; }
   [data-view=cards] table.results, [data-view=cards] table.results tbody { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; min-width: 0 !important; }
@@ -112,14 +121,20 @@
   [data-view=cards] table.results tr { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
   [data-view=cards] table.results td { display: block; border: 0; padding: 0; min-width: 0 !important; text-align: left; }
   [data-view=cards] table.results td[data-label]::before { content: attr(data-label) " "; display: block; font-size: 12px; color: var(--muted); font-weight: 400; }
-  [data-view=cards] .c-title { order: -2; flex: 1 1 100%; font-size: 16px; }
-  [data-view=cards] .c-title .title { font-weight: 700; }
-  [data-view=cards] .c-num { order: -3; flex: 1 1 100%; font-size: 12px; }
-  [data-view=cards] .c-num div { display: inline; margin-left: 6px; }
-  [data-view=cards] .c-ann { order: -1; flex: 1 1 100%; font-size: 13px; }
-  [data-view=cards] .c-sum b { font-size: 18px; }
-  [data-view=cards] .c-method, [data-view=cards] .c-status { flex: 1 1 100%; font-size: 12px; }
-  [data-view=cards] .c-fav { margin-left: auto; }
+  [data-view=cards] table.results tr { gap: 8px 16px; padding: 14px 16px; background: var(--bg); }
+  [data-view=cards] .c-status { order: -4; flex: 1 1 auto; }
+  [data-view=cards] .c-fav { order: -4; margin-left: auto; }
+  [data-view=cards] .c-title { order: -3; flex: 1 1 100%; font-size: 13px; color: var(--muted); }
+  [data-view=cards] .c-title .title { display: block; font-size: 17px; line-height: 1.35; font-weight: 700; margin-bottom: 4px; }
+  [data-view=cards] .c-ann { order: -2; flex: 1 1 100%; font-size: 12px; color: var(--muted); }
+  [data-view=cards] .c-ann a { font-size: 12px; }
+  [data-view=cards] .c-ann .deadline { font-size: 13px; color: var(--fg); margin-top: 4px; }
+  [data-view=cards] .c-sum b { font-size: 19px; }
+  [data-view=cards] table.results td.c-start { display: none; }
+  [data-view=cards] .c-num { order: 5; flex: 1 1 auto; font-size: 12px; padding-top: 8px; border-top: 1px solid var(--line); }
+  [data-view=cards] .c-num div { display: inline; margin-left: 8px; }
+  [data-view=cards] .c-method { order: 6; flex: 1 1 100%; font-size: 12px; color: var(--muted); }
+  [data-view=cards] td.c-more { display: block; order: 7; margin-left: auto; font-weight: 600; }
   .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 13px; white-space: nowrap; border: 1px solid var(--line); }
   .badge.hot { background: color-mix(in srgb, #1e9e5a 15%, transparent); border-color: transparent; color: var(--ok); font-weight: 600; }
   .badge.sub { background: color-mix(in srgb, var(--accent) 14%, transparent); border-color: transparent; }
@@ -134,7 +149,10 @@
   <a href="/announcements?{{ query }}" class="{{ '' if lots else 'on' }}">{{ _("Поиск объявлений") }}</a>
   <a href="/lots?{{ query }}" class="{{ 'on' if lots }}">{{ _("Поиск лотов") }}</a>
 </nav>
-<button type="button" class="filter-open" data-filter-open><span class="filter-title">{{ _("⚙ Фильтр и подписка") }}</span>{% if f.describe() %}<span class="filter-sum">{{ f.describe()|truncate(90) }}</span>{% endif %}</button>
+<div class="filter-bar">
+  <button type="button" class="filter-open" data-filter-open title="{{ f.describe() }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>{{ _("Фильтры") }}{% set n = f.active_count() %}{% if n %}<span class="count">{{ n }}</span>{% endif %}</button>
+  <button type="button" class="filter-open" data-filter-open data-filter-subscribe {% if not request.state.paid %}data-paid{% endif %}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg>{{ _("Подписаться") }}</button>
+</div>
 <form method="get" action="/{{ scope }}" class="filters-panel" id="filters" aria-label="{{ _("Фильтр") }}">
   <div class="sheet-head"><b>{{ _("Фильтр") }}</b><button type="button" data-filter-close aria-label="{{ _("Закрыть") }}">✕</button></div>
   <input type="hidden" name="applied" value="1">
@@ -261,8 +279,10 @@
 <script>
   // На телефоне фильтр открывается на весь экран.
   const sheet = document.getElementById("filters");
-  document.querySelector("[data-filter-open]").addEventListener("click", () => {
+  for (const opener of document.querySelectorAll("[data-filter-open]")) opener.addEventListener("click", () => {
     sheet.classList.add("open"); document.body.classList.add("sheet-open");
+    // «Подписаться» — сразу к блоку подписки внизу панели.
+    if (opener.hasAttribute("data-filter-subscribe")) sheet.querySelector(".subscribe")?.scrollIntoView({ block: "start" });
   });
   document.querySelector("[data-filter-close]").addEventListener("click", () => {
     sheet.classList.remove("open"); document.body.classList.remove("sheet-open");

@@ -20,7 +20,7 @@
     <td class="muted c-num">{{ r[1] or r[0] }}</td>
     <td class="c-ann" style="min-width:200px"><a href="{{ announcement_url(r[2]) }}">№ {{ r[3] or r[2] }}</a> {{ pick(r[4], r[23]) or "" }}
       <div class="muted">{{ r[5] or "" }}</div>
-      {% if r[15] %}<div class="muted">{{ _("до") }} {{ (r[15]|local).strftime("%d.%m %H:%M") }} · {{ time_left(r[15]) }}</div>{% endif %}</td>
+      {% set h = hours_left(r[15]) %}{% if r[15] %}<div class="deadline">{{ _("до") }} {{ (r[15]|local).strftime("%d.%m %H:%M") }}{% if h > 0 %} <span class="due {{ 'urgent' if h < 24 }}">⏱ {{ time_left(r[15]) }}</span>{% endif %}</div>{% endif %}</td>
     <td class="c-title" style="min-width:220px"><a class="title" href="/lots/{{ r[0] }}">{{ pick(r[6], r[22]) or "—" }}</a>
       {% set desc = pick(r[7], r[24]) %}{% if desc and desc != pick(r[6], r[22]) %}<div class="muted">{{ desc[:180] }}</div>{% endif %}
       <div class="muted">{{ region_names(r[16]) | join(", ") }}</div>
@@ -31,7 +31,7 @@
     <td class="num c-sum" data-label="{{ _("Сумма, ₸") }}"><b>{{ r[11] | money }}</b></td>
     <td class="c-adv" data-label="{{ _("Аванс") }}">{% if r[12] %}<span class="badge {% if r[12] >= 30 %}hot{% endif %}">{{ '%g'|format(r[12]) }}%</span>{% else %}<span class="muted">{{ _("нет") }}</span>{% endif %}</td>
     <td class="muted c-method">{{ _(method_names.get(r[13], "")) }}</td>
-    <td class="muted c-status">{{ _(status_names.get(r[14], r[14] or "")) }}</td>
+    <td class="c-status"><span class="st {{ 'st-open' if r[14] in open_statuses }}">{{ _(status_names.get(r[14], r[14] or "")) }}</span></td>
     <td class="c-fav">{{ mark_control(r[0], marks.get(r[0]), here) }}</td>
   </tr>
   {% else %}

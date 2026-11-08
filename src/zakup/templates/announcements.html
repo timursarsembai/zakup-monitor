@@ -21,10 +21,12 @@
       <div class="muted">{{ _("Организатор:") }} {{ pick(r[4], r[17]) or "—" }}</div></td>
     <td class="muted c-method">{{ pick(r[12], r[15]) or _(method_names.get(r[5], "")) }}</td>
     <td class="c-start" data-label="{{ _("Начало приема заявок") }}">{{ (r[6]|local).strftime("%d.%m.%Y %H:%M") if r[6] else "—" }}</td>
-    <td class="c-end" data-label="{{ _("Окончание приема заявок") }}">{{ (r[7]|local).strftime("%d.%m.%Y %H:%M") if r[7] else "—" }}{% if r[7] %}<div class="muted">{{ time_left(r[7]) }}</div>{% endif %}</td>
+    {% set h = hours_left(r[7]) %}
+    <td class="c-end" data-label="{{ _("Окончание приема заявок") }}">{{ (r[7]|local).strftime("%d.%m.%Y %H:%M") if r[7] else "—" }}{% if r[7] and h > 0 %}<div><span class="due {{ 'urgent' if h < 24 }}">⏱ {{ time_left(r[7]) }}</span></div>{% endif %}</td>
     <td class="num c-sum" data-label="{{ _("Сумма, ₸") }}"><b>{{ r[8] | money }}</b></td>
     <td class="advances c-adv" data-label="{{ _("Аванс") }}">{% for p in r[13] or [] %}{% if p %}<span class="badge {% if p >= 30 %}hot{% endif %}">{{ '%g'|format(p) }}%</span>{% else %}<span class="badge">0%</span>{% endif %}{% endfor %}</td>
-    <td class="muted c-status">{{ pick(r[11], r[16]) or _(status_names.get(r[9], r[9] or "")) }}</td>
+    <td class="c-status"><span class="st {{ 'st-open' if r[9] in open_statuses }}">{{ pick(r[11], r[16]) or _(status_names.get(r[9], r[9] or "")) }}</span></td>
+    <td class="c-more"><a href="{{ announcement_url(r[0]) }}">{{ _("Подробнее") }} →</a></td>
   </tr>
   {% else %}
   <tr><td colspan="8" class="muted">{{ _("Под фильтр ничего не подходит.") }}</td></tr>

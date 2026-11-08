@@ -28,7 +28,7 @@
         {% for chat_id, title in groups %}<option value="{{ chat_id }}" {% if r[10] == chat_id %}selected{% endif %}>{{ _("в группу «") }}{{ title }}»</option>{% endfor %}
       </select>
     </form>
-    <a href="/matches?sub={{ r[0] }}">{{ _("Совпадения") }}</a>
+    <a href="/matches?sub={{ r[0] }}">{{ _("Лента") }}</a>
     <a class="button" href="/subscriptions/{{ r[0] }}/edit">✏️ {{ _("Редактировать") }}</a>
     <form method="post" action="/subscriptions/{{ r[0] }}/toggle"><button>{{ _("Выключить") if r[5] else _("Включить") }}</button></form>
     <form method="post" action="/subscriptions/{{ r[0] }}/delete" data-confirm="{{ _("Удалить подписку?") }}"><button>{{ _("Удалить") }}</button></form>

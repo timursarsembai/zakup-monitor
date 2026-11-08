@@ -261,6 +261,17 @@ class Filters:
             sort=one("sort") if one("sort") in SORTS else "advance",
         )
 
+    def active_count(self) -> int:
+        """Сколько условий задано (для кнопки «Фильтры» на телефоне)."""
+        flags = [self.q, self.exclude, self.number, self.lot_number, self.enstru, self.customer,
+                 self.regions, self.methods, self.subjects, self.years, self.disable_person,
+                 self.min_sum is not None or self.max_sum is not None, self.deadline,
+                 self.start_from or self.start_to, self.published_from or self.published_to,
+                 self.itogi_from or self.itogi_to,
+                 self.advance_only or self.advance_min > 0 or self.advance_max < 100,
+                 self.statuses or (self.stages and self.stages != ["open"])]
+        return sum(1 for flag in flags if flag)
+
     def only_open(self) -> bool:
         """Выбраны только статусы приёма заявок: тогда объявления с прошедшим сроком
         отсекаем — статус на портале меняется с опозданием."""

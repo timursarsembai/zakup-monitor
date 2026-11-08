@@ -59,6 +59,7 @@ from zakup.filters import (
     DISABLE_PERSON,
     METHOD_NAMES,
     METHODS,
+    OPEN_STATUSES,
     REGIONS,
     SORTS,
     STAGES,
@@ -108,6 +109,14 @@ def _time_left(end: datetime | None) -> str:
 
 
 templates.env.globals["time_left"] = _time_left
+
+
+def _hours_left(end: datetime | None) -> float | None:
+    return (end - datetime.now(UTC)).total_seconds() / 3600 if end else None
+
+
+templates.env.globals["hours_left"] = _hours_left
+templates.env.globals["open_statuses"] = set(OPEN_STATUSES)
 templates.env.globals["site_url"] = SITE_URL
 
 
