@@ -25,6 +25,20 @@
   .provider:has(input:checked) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
   .provider b { display: block; }
   [data-tab-panel][hidden], [data-provider-fields][hidden] { display: none; }
+  .themes { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 12px; }
+  .theme-card { display: grid; gap: 8px; justify-items: center; padding: 10px; border: 2px solid var(--line); border-radius: 12px; cursor: pointer; }
+  .theme-card:has(input:checked) { border-color: var(--accent); }
+  .theme-card input { position: absolute; opacity: 0; }
+  .theme-card .preview { width: 100%; height: 64px; border-radius: 8px; border: 1px solid rgba(127, 127, 127, .35); display: grid; grid-template-columns: auto 1fr; grid-template-rows: 1fr 1fr; align-items: center; gap: 4px 10px; padding: 8px 12px; }
+  .theme-card .preview b { grid-row: span 2; font-size: 22px; }
+  .theme-card .preview i { display: block; height: 8px; border-radius: 4px; }
+  .langs-choice { display: flex; gap: 12px; flex-wrap: wrap; }
+  .lang-card { padding: 12px 22px; border: 2px solid var(--line); border-radius: 12px; color: var(--fg); font-size: 16px; }
+  .lang-card.on { border-color: var(--accent); font-weight: 600; }
+  .a11y-settings { display: grid; gap: 12px; justify-items: start; }
+  .a11y-line { display: flex; align-items: center; gap: 10px; }
+  .a11y-line output { min-width: 52px; text-align: center; font-weight: 600; }
+  .a11y-line button { min-width: 44px; font-size: 18px; }
   .tariff-form textarea { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); font: inherit; }
   .row-actions { display: flex; flex-wrap: wrap; gap: 6px; }
   .row-actions form, td form { margin: 0; }
@@ -42,6 +56,7 @@
 {% if error %}<p class="flash bad">{{ error }}</p>{% endif %}
 
 <nav class="tabs" role="tablist">
+  <a href="#interface" role="tab" data-tab="interface">{{ _("Интерфейс") }}</a>
   <a href="#notify" role="tab" data-tab="notify">{{ _("Уведомления") }}</a>
   <a href="#account" role="tab" data-tab="account">{{ _("Аккаунт") }}</a>
   {% if is_admin %}
@@ -55,7 +70,40 @@
   {% endif %}
 </nav>
 
-<div data-tab-panel="notify">
+<div data-tab-panel="interface">
+<section class="panel wide">
+  <h2>{{ _("Тема") }}</h2>
+  <div class="themes" role="radiogroup" aria-label="{{ _("Тема") }}">
+    {% for key, label, bg, fg, accent in [("light", "Светлая", "#ffffff", "#1d1d1f", "#0b5cad"), ("beige", "Бежевая", "#f7f1dd", "#2b2417", "#0b5cad"), ("navy", "Синяя", "#142738", "#e8eef5", "#5cc4ff"), ("dark", "Тёмная", "#151517", "#ececee", "#5aa7ff")] %}
+    <label class="theme-card"><input type="radio" name="theme" value="{{ key }}" data-theme-choice>
+      <span class="preview" style="background: {{ bg }}; color: {{ fg }}"><b>Aa</b><i style="background: {{ accent }}"></i><i style="background: {{ fg }}; opacity: .25"></i></span>
+      <span>{{ _(label) }}</span></label>
+    {% endfor %}
+  </div>
+</section>
+<section class="panel wide">
+  <h2>{{ _("Язык") }}</h2>
+  <div class="langs-choice">
+    {% for code, label in [("ru", "Русский"), ("kk", "Қазақша")] %}
+    <a class="lang-card {{ 'on' if lang() == code }}" href="/lang/{{ code }}" hreflang="{{ code }}">{% if lang() == code %}✓ {% endif %}{{ label }}</a>
+    {% endfor %}
+  </div>
+</section>
+<section class="panel wide">
+  <h2>{{ _("Для слабовидящих") }}</h2>
+  <div class="a11y-settings">
+    <div class="a11y-line"><span>{{ _("Размер шрифта") }}</span>
+      <button type="button" data-ui-zoom="-0.1" aria-label="{{ _("Мельче") }}">−</button>
+      <output data-ui-zoom-value>100%</output>
+      <button type="button" data-ui-zoom="0.1" aria-label="{{ _("Крупнее") }}">+</button></div>
+    <label class="a11y-line"><input type="checkbox" data-ui-contrast> {{ _("Высокий контраст") }}</label>
+    <button type="button" data-ui-reset>{{ _("Как было") }}</button>
+  </div>
+  <p class="note muted">{{ _("Настройки интерфейса запоминаются в этом браузере.") }}</p>
+</section>
+</div>
+
+<div data-tab-panel="notify" hidden>
 <section class="panel">
   <h2>{{ _("Уведомления в Telegram") }}</h2>
   <p class="muted">{{ _("Новые лоты по вашим подпискам приходят сводкой раз в 10 минут.") }}</p>
@@ -258,6 +306,35 @@
 {% endif %}
 
 <script>
+  // «Интерфейс»: тема, масштаб и контраст — в этом браузере (localStorage).
+  (() => {
+    const root = document.documentElement;
+    const store = (key, value) => { try { value ? localStorage.setItem(key, value) : localStorage.removeItem(key); } catch (e) {} };
+    for (const radio of document.querySelectorAll("[data-theme-choice]")) {
+      radio.checked = radio.value === root.dataset.theme;
+      radio.addEventListener("change", () => { root.dataset.theme = radio.value; store("zakup-theme", radio.value); });
+    }
+    const out = document.querySelector("[data-ui-zoom-value]");
+    const contrast = document.querySelector("[data-ui-contrast]");
+    if (!out) return;
+    const zoomNow = () => parseFloat(root.style.zoom) || 1;
+    const show = () => { out.textContent = Math.round(zoomNow() * 100) + "%"; contrast.checked = root.dataset.contrast === "high"; };
+    const setZoom = (value) => {
+      const zoom = Math.min(2, Math.max(1, Math.round(value * 10) / 10));
+      root.style.zoom = zoom === 1 ? "" : zoom; store("zakup-zoom", zoom === 1 ? "" : String(zoom)); show();
+    };
+    for (const button of document.querySelectorAll("[data-ui-zoom]")) {
+      button.addEventListener("click", () => setZoom(zoomNow() + parseFloat(button.dataset.uiZoom)));
+    }
+    contrast.addEventListener("change", () => {
+      if (contrast.checked) root.dataset.contrast = "high"; else delete root.dataset.contrast;
+      store("zakup-contrast", contrast.checked ? "high" : "");
+    });
+    document.querySelector("[data-ui-reset]").addEventListener("click", () => {
+      delete root.dataset.contrast; store("zakup-contrast", ""); setZoom(1);
+    });
+    show();
+  })();
   // Вкладки: выбор в адресе (#ai), чтобы после сохранения вернуться туда же.
   const tabs = [...document.querySelectorAll("[data-tab]")];  // ссылка «Журнал» — не вкладка
   const showTab = (name) => {
