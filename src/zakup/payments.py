@@ -26,12 +26,14 @@ MAX_SEARCHES = 10_000
 
 
 def searches_price(count: int) -> int:
-    """Цена N поисков: по цене за поиск самого выгодного пакета, который не больше N."""
+    """Цена N поисков: по цене за поиск самого выгодного пакета, который не больше N,
+    но не дороже ближайшего пакета побольше (49 поисков не дороже пакета на 50)."""
     per = SEARCH_PRICE
     for size, price in SEARCH_PACKS:
         if count >= size:
             per = min(per, price / size)
-    return round(count * per)
+    bigger = [price for size, price in SEARCH_PACKS if size >= count]
+    return min([round(count * per), *bigger])
 
 
 def create(conn: psycopg.Connection, user_id: int, kind: str, quantity: int, amount: int,
@@ -55,7 +57,9 @@ def fulfill(conn: psycopg.Connection, ref: str, paid_amount: int, late: bool = F
         "SELECT id, user_id, kind, quantity, amount, status FROM payments WHERE ref = %s FOR UPDATE",
         (ref,),
     ).fetchone()
-    if row is None or row[5] == "paid":
+    # Выдаём только за неоплаченный или отменённый (поздняя оплата) заказ: возвращённый
+    # повторно не выдаём.
+    if row is None or row[5] not in ("pending", "cancelled"):
         conn.commit()
         return False
     payment_id, user_id, kind, quantity, amount, _ = row
@@ -91,18 +95,22 @@ def handle_event(conn: psycopg.Connection, event: dict[str, Any]) -> str:
     event_id = str(event.get("event_id") or "")
     if not event_id:
         return "no id"
+    # Отметка «событие обработано» и само действие — одной транзакцией: если действие
+    # упадёт, отметка откатится и повтор kazpayment обработается заново.
     fresh = conn.execute(
         "INSERT INTO payment_events (event_id, event) VALUES (%s, %s) ON CONFLICT DO NOTHING RETURNING 1",
         (event_id, str(event.get("event") or "")[:40]),
     ).fetchone()
-    conn.commit()
     if not fresh:
+        conn.commit()
         return "duplicate"
     kind, ref = event.get("event"), event.get("order_ref")
     if not ref:
+        conn.commit()
         return "not ours"
     if kind == "payment.received":
-        done = fulfill(conn, str(ref), int(event.get("paid_amount") or 0), bool(event.get("late")))
+        paid = int(float(event.get("paid_amount") or 0))
+        done = fulfill(conn, str(ref), paid, bool(event.get("late")))
         return "fulfilled" if done else "skipped"
     if kind == "order.cancelled":
         conn.execute("UPDATE payments SET status = 'cancelled' WHERE ref = %s AND status = 'pending'", (ref,))
@@ -110,13 +118,15 @@ def handle_event(conn: psycopg.Connection, event: dict[str, Any]) -> str:
         return "cancelled"
     if kind == "order.refunded":
         updated = conn.execute(
-            "UPDATE payments SET status = 'refunded' WHERE ref = %s RETURNING kind, user_id, quantity",
+            "UPDATE payments SET status = 'refunded' WHERE ref = %s AND status = 'paid' "
+            "RETURNING kind, user_id, quantity",
             (ref,),
         ).fetchone()
         conn.commit()
         if updated:
             notify.send(f"zakup: возврат по {ref} ({updated[0]}). Доступ/поиски проверьте вручную.")
         return "refunded"
+    conn.commit()
     return "ignored"
 
 

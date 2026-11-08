@@ -59,7 +59,7 @@ def test_autofix_reports_result(conn, sent, monkeypatch):
     monkeypatch.setattr(autofix, "_claude", lambda prompt: {
         "verdict": "fixed", "summary": "Исправил разбор даты.", "commit": "abcdef1234567"})
     row = autofix._next(conn)
-    autofix.handle(conn, row)
+    autofix._finish(conn, row[0], *autofix.handle(row))
     status, commit = conn.execute("SELECT status, commit FROM incidents").fetchone()
     assert status == "fixed" and commit == "abcdef1234567"
     assert "исправлено и выложено" in sent[-1] and "abcdef1234" in sent[-1]

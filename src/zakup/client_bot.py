@@ -9,6 +9,7 @@
 """
 
 import logging
+import os
 import time
 from datetime import datetime, timedelta, UTC
 
@@ -81,6 +82,18 @@ def _user_by_tg(conn: psycopg.Connection, tg_id: int) -> tuple | None:
     ).fetchone()
 
 
+def _site_admin(conn: psycopg.Connection, tg_id: int | None) -> bool:
+    if not tg_id:
+        return False
+    if os.environ.get("ZAKUP_TELEGRAM_CHAT_ID", "").strip() == str(tg_id):
+        return True
+    return conn.execute(
+        """SELECT 1 FROM users WHERE role = 'admin' AND deleted_at IS NULL AND NOT disabled
+           AND telegram_chat_id = ANY(%s)""",
+        ([str(tg_id), f"{telegram.CLIENT_PREFIX}{tg_id}"],),
+    ).fetchone() is not None
+
+
 def handle_message(conn: psycopg.Connection, message: dict) -> str | None:
     chat = message.get("chat") or {}
     text = (message.get("text") or "").strip()
@@ -98,7 +111,9 @@ def handle_message(conn: psycopg.Connection, message: dict) -> str | None:
             member = telegram.call("getChatMember", bot=BOT, chat_id=chat["id"], user_id=sender)
         except telegram.TelegramError:
             return None
-        if member.get("status") not in ("creator", "administrator"):
+        # Подключить группу может только администратор сайта, а не админ любой группы:
+        # иначе чужая группа подменила бы нашу и получала бы ссылки для клиентов.
+        if member.get("status") not in ("creator", "administrator") or not _site_admin(conn, sender):
             return None
         _set_group(conn, str(chat["id"]), chat.get("title") or "")
         return ("Группа клиентов подключена. Вступление — по заявкам: бот одобряет тех, "
@@ -135,7 +150,13 @@ def handle_join_request(conn: psycopg.Connection, request: dict) -> str:
     user = _user_by_tg(conn, tg_id)
     dm = request.get("user_chat_id") or tg_id
     if user and user[2]:
+        old = conn.execute("SELECT tg_id FROM client_group_members WHERE user_id = %s",
+                           (user[0],)).fetchone()
+        conn.commit()
         telegram.call("approveChatJoinRequest", bot=BOT, chat_id=chat_id, user_id=tg_id)
+        if old and old[0] != tg_id:
+            # Один оплаченный аккаунт — один человек в группе: прежний Telegram удаляем.
+            _remove(conn, old[0])
         conn.execute(
             """INSERT INTO client_group_members (user_id, tg_id) VALUES (%s, %s)
                ON CONFLICT (user_id) DO UPDATE SET tg_id = excluded.tg_id, joined_at = now(),
@@ -161,31 +182,30 @@ def maintenance(conn: psycopg.Connection, now: datetime | None = None) -> tuple[
     if not group:
         return 0, 0
     warned = 0
-    for user_id, tg_id, until in conn.execute(
+    soon = conn.execute(
         """SELECT m.user_id, m.tg_id, u.paid_until FROM client_group_members m
            JOIN users u ON u.id = m.user_id
            WHERE u.role = 'user' AND u.paid_until > %s AND u.paid_until <= %s
              AND (m.warned_at IS NULL OR m.warned_at < u.paid_until - %s)""",
         (now, now + WARN_BEFORE, WARN_BEFORE),
-    ).fetchall():
+    ).fetchall()
+    conn.commit()  # рассылка — без открытой транзакции
+    for user_id, tg_id, until in soon:
         _send(tg_id, f"Тариф Tenderim заканчивается {until.strftime('%d.%m.%Y')}. После этого бот "
                      f"удалит вас из группы клиентов. Продлить: {SITE_URL}/pricing")
         conn.execute("UPDATE client_group_members SET warned_at = %s WHERE user_id = %s", (now, user_id))
         warned += 1
     conn.commit()
     removed = 0
-    for user_id, tg_id in conn.execute(
+    expired = conn.execute(
         """SELECT m.user_id, m.tg_id FROM client_group_members m JOIN users u ON u.id = m.user_id
            WHERE u.role = 'user' AND (u.paid_until IS NULL OR u.paid_until <= %s
                                       OR u.deleted_at IS NOT NULL OR u.disabled)""",
         (now,),
-    ).fetchall():
-        try:
-            # Удалить без вечного бана: бан и сразу снятие — человек сможет вернуться по заявке.
-            _group_call(conn, "banChatMember", user_id=tg_id)
-            _group_call(conn, "unbanChatMember", user_id=tg_id, only_if_banned=True)
-        except telegram.TelegramError as error:
-            logger.warning("client bot: remove %s failed: %s", tg_id, error)
+    ).fetchall()
+    conn.commit()
+    for user_id, tg_id in expired:
+        if not _remove(conn, tg_id):
             continue
         conn.execute("DELETE FROM client_group_members WHERE user_id = %s", (user_id,))
         conn.commit()
@@ -193,6 +213,17 @@ def maintenance(conn: psycopg.Connection, now: datetime | None = None) -> tuple[
                      f"{SITE_URL}/pricing — затем снова подайте заявку в группу.")
         removed += 1
     return warned, removed
+
+
+def _remove(conn: psycopg.Connection, tg_id: int) -> bool:
+    """Удалить из группы без вечного бана: бан и сразу снятие — вернуться можно по заявке."""
+    try:
+        _group_call(conn, "banChatMember", user_id=tg_id)
+        _group_call(conn, "unbanChatMember", user_id=tg_id, only_if_banned=True)
+    except telegram.TelegramError as error:
+        logger.warning("client bot: remove %s failed: %s", tg_id, error)
+        return False
+    return True
 
 
 def invite_link(conn: psycopg.Connection, login: str) -> str | None:
@@ -204,7 +235,16 @@ def invite_link(conn: psycopg.Connection, login: str) -> str | None:
 
 
 def run(database_url: str, poll_timeout: int = 50) -> None:
-    telegram.call("deleteWebhook", bot=BOT)
+    while not telegram.token(BOT):
+        logger.warning("client bot: ZAKUP_CLIENT_BOT_TOKEN is not set, sleeping")
+        time.sleep(3600)
+    while True:
+        try:
+            telegram.call("deleteWebhook", bot=BOT)
+            break
+        except telegram.TelegramError as error:
+            logger.warning("client bot: %s", error)
+            time.sleep(30)
     logger.info("client bot @%s is polling", telegram.bot_username(BOT))
     next_maintenance = datetime.now(UTC)
     while True:
@@ -221,11 +261,17 @@ def run(database_url: str, poll_timeout: int = 50) -> None:
                     allowed_updates=["message", "chat_join_request"],
                 )
                 for update in updates:
-                    if message := update.get("message"):
-                        if reply := handle_message(conn, message):
-                            _send(message["chat"]["id"], reply)
-                    elif request := update.get("chat_join_request"):
-                        logger.info("join request: %s", handle_join_request(conn, request))
+                    # Ошибка на одном обновлении (заявку уже разобрал человек, отменили) не
+                    # должна стопорить все следующие: пропускаем его и идём дальше.
+                    try:
+                        if message := update.get("message"):
+                            if reply := handle_message(conn, message):
+                                _send(message["chat"]["id"], reply)
+                        elif request := update.get("chat_join_request"):
+                            logger.info("join request: %s", handle_join_request(conn, request))
+                    except telegram.TelegramError as error:
+                        conn.rollback()
+                        logger.warning("client bot: update %s skipped: %s", update.get("update_id"), error)
                     db.save_state(conn, OFFSET_KEY, db.SyncState(update["update_id"] + 1, None, None))
                     conn.commit()
         except telegram.TelegramError as error:

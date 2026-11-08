@@ -38,8 +38,14 @@ def set_registration_open(conn: psycopg.Connection, value: bool) -> None:
     )
 
 
+OTP_LOCK = 7_402
+
+
 def start(conn: psycopg.Connection, phone: str, purpose: str, ip: str | None) -> str:
     """Отправляет код и возвращает flow для следующего шага."""
+    # Счётчики и запись шага — под общей блокировкой и до отправки SMS: иначе пачка
+    # одновременных запросов видит одни и те же старые счётчики и обходит лимиты.
+    conn.execute("SELECT pg_advisory_xact_lock(%s)", (OTP_LOCK,))
     ip_count, phone_count, total = conn.execute(
         """SELECT count(*) FILTER (WHERE ip = %s AND created_at > now() - interval '1 hour'),
                   count(*) FILTER (WHERE phone = %s AND created_at > now() - interval '1 day'),
@@ -48,23 +54,30 @@ def start(conn: psycopg.Connection, phone: str, purpose: str, ip: str | None) ->
         (ip, phone),
     ).fetchone()
     if ip_count >= PER_IP_HOUR or phone_count >= PER_PHONE_DAY:
+        conn.rollback()
         raise SignupError("Слишком много кодов. Попробуйте позже.")
     if total >= PER_DAY:
+        conn.rollback()
         raise SignupError("Отправка кодов временно недоступна. Попробуйте завтра.")
+    flow = secrets.token_urlsafe(24)
+    conn.execute(
+        """INSERT INTO otp_requests (flow, purpose, phone, request_id, ip)
+           VALUES (%s, %s, %s, '', %s)""",
+        (flow, purpose, phone, ip),
+    )
+    conn.commit()
     try:
         request_id = kazpayment.request_otp(phone)
     except kazpayment.KazpaymentError as error:
+        # SMS не ушло — шаг не считается.
+        conn.execute("DELETE FROM otp_requests WHERE flow = %s", (flow,))
+        conn.commit()
         if error.code == "rate_limited":
             raise SignupError("Код уже отправлен — подождите минуту и попробуйте снова.") from None
         if error.code == "invalid_phone":
             raise SignupError("Номер не похож на казахстанский мобильный.") from None
         raise SignupError("Не удалось отправить SMS. Попробуйте позже.") from None
-    flow = secrets.token_urlsafe(24)
-    conn.execute(
-        """INSERT INTO otp_requests (flow, purpose, phone, request_id, ip)
-           VALUES (%s, %s, %s, %s, %s)""",
-        (flow, purpose, phone, request_id, ip),
-    )
+    conn.execute("UPDATE otp_requests SET request_id = %s WHERE flow = %s", (request_id, flow))
     conn.commit()
     return flow
 

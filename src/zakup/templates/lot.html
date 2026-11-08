@@ -186,8 +186,10 @@
         if (dialog.querySelector("[data-sc-skip]")?.checked) {
           try { localStorage.setItem("zakup-search-confirm", "skip"); } catch (e) {}
         }
+        // Флаг — только на эту отправку: следующая снова спросит подтверждение.
         pending.dataset.confirmed = "1";
         pending.requestSubmit();
+        delete pending.dataset.confirmed;
       }
       pending = null;
     });

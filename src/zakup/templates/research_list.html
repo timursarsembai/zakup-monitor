@@ -105,7 +105,7 @@
       {% for id, domain, name, categories, city, note, auto, active, found, last_found, added_email, added_by, contact_count in rows %}
       <div class="src {{ '' if active else 'off' }}">
         <div><a href="https://{{ domain }}" target="_blank" rel="noopener noreferrer">{{ name or domain }}</a> <span class="muted">{{ domain }}</span>
-          <div class="muted">{% if auto %}<span class="tag ai">{{ _("ИИ") }}</span>{% else %}<span class="tag">{{ added_email or _("вручную") }}</span>{% endif %}{% if city %}{{ city }} · {% endif %}{% if found %}{{ _("находили:") }} {{ found }}{% endif %}{% if note %} · {{ note }}{% endif %}</div></div>
+          <div class="muted">{% if auto %}<span class="tag ai">{{ _("ИИ") }}</span>{% else %}<span class="tag">{{ added_email if request.state.staff and added_email else _("вручную") }}</span>{% endif %}{% if city %}{{ city }} · {% endif %}{% if found %}{{ _("находили:") }} {{ found }}{% endif %}{% if note %} · {{ note }}{% endif %}</div></div>
         <div class="src-actions"><button type="button" data-contacts="/sources/{{ id }}/contacts" data-title="{{ name or domain }}">📞 {{ _("Контакты") }}{% if contact_count %} <span class="count">{{ contact_count }}</span>{% endif %}</button>
         {% if is_admin or auto or added_by == me %}<form method="post" action="/sources/{{ id }}/toggle"><button>{{ _("Выключить") if active else _("Включить") }}</button></form>{% endif %}</div>
       </div>

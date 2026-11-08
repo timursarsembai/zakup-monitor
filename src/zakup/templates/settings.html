@@ -299,7 +299,7 @@
           <span class="muted">{{ _("поисков:") }} {{ u[9] }}</span><button name="count" value="20">{{ _("+20 поисков") }}</button>
         </form>{% endif %}
         {% if is_admin and u[2] != "admin" %}<form method="post" action="/settings/users/{{ u[0] }}/impersonate"><button>👁 {{ _("Войти как") }}</button></form>{% endif %}
-        <form method="post" action="/settings/users/{{ u[0] }}/reset" data-confirm="{{ _("Сбросить пароль {login}? Старый перестанет работать.", login=u[1]) }}"><button>{{ _("Сбросить пароль") }}</button></form>
+        {% if is_admin %}<form method="post" action="/settings/users/{{ u[0] }}/reset" data-confirm="{{ _("Сбросить пароль {login}? Старый перестанет работать.", login=u[1]) }}"><button>{{ _("Сбросить пароль") }}</button></form>{% endif %}
         <form method="post" action="/settings/users/{{ u[0] }}/disable" data-confirm="{{ _("Включить аккаунт {login}?", login=u[1]) if u[5] else _("Отключить {login}? Войти будет нельзя, данные останутся.", login=u[1]) }}"><button>{{ _("Включить") if u[5] else _("Отключить") }}</button></form>
         <form method="post" action="/settings/users/{{ u[0] }}/delete" data-confirm="{{ _("Удалить {login}? Войти и получать уведомления он не сможет. Данные сохранятся, вернуть может администратор.", login=u[1]) }}"><button class="danger">{{ _("Удалить") }}</button></form>
       </div>{% endif %}</td>

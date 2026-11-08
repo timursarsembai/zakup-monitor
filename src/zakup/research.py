@@ -615,10 +615,14 @@ QUERY_PROMPT = """Лот госзакупок: {name}. {extra}
 def _light_json(conn: psycopg.Connection, prompt: str, schema: dict) -> dict[str, Any]:
     """Короткий запрос к модели для коротких задач (без интернета)."""
     provider, model = light_model(conn)
+    key = None
+    if provider != "claude_code":
+        admin = conn.execute("SELECT id FROM users WHERE role = 'admin' ORDER BY id LIMIT 1").fetchone()
+        key = secrets_box.user_key(conn, admin[0], provider) if admin else None
+    # Ответа модели ждём без открытой транзакции: она держала бы блокировки (DeadlockDetected).
+    conn.commit()
     if provider == "claude_code":
         return _claude_code(prompt, model, schema, web=False)
-    admin = conn.execute("SELECT id FROM users WHERE role = 'admin' ORDER BY id LIMIT 1").fetchone()
-    key = secrets_box.user_key(conn, admin[0], provider) if admin else None
     if not key:
         raise ResearchError("в настройках не указан API-ключ")
     runner = _anthropic if provider == "anthropic" else _openai
@@ -647,6 +651,7 @@ def _kaspi_candidates(conn: psycopg.Connection, context: dict[str, Any],
     except (ResearchError, httpx.HTTPError) as error:
         logger.info("kaspi query for %r: %s", name, error)
         queries = []
+    conn.commit()
     found: list[dict[str, Any]] = []
     for query in queries or [name]:
         try:
@@ -853,7 +858,7 @@ def work(database_url: str, providers: list[str], once: bool = False) -> None:
                     credits.refund(conn, job["id"])
                 conn.execute(
                     """UPDATE lot_research SET status = %s, result = %s, error = %s,
-                           finished_at = now(), usage = %s WHERE id = %s""",
+                           finished_at = now(), usage = %s WHERE id = %s AND status = 'running'""",
                     ("done" if result is not None else "error",
                      Jsonb(result) if result is not None else None, error,
                      Jsonb(dict(_last_usage)) if _last_usage else None, job["id"]),

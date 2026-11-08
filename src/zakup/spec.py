@@ -16,6 +16,7 @@ from pypdf import PdfReader
 logger = logging.getLogger(__name__)
 
 MAX_BYTES = 15 * 1024 * 1024
+MAX_UNPACKED = 80 * 1024 * 1024
 ALLOWED_HOST = "ows.goszakup.gov.kz"
 _SECTION = re.compile(r"эксплуатационные\s+характеристики[^:]*:", re.IGNORECASE)
 _RUSSIAN_MARKERS = ("Количество", "Единица измерения", "Наименование лота")
@@ -100,7 +101,12 @@ def _pages(data: bytes) -> list[str]:
     if data[:2] == b"PK":
         import zipfile
 
-        names = zipfile.ZipFile(io.BytesIO(data)).namelist()
+        archive = zipfile.ZipFile(io.BytesIO(data))
+        # 15 МБ сжатого файла распаковываются во что угодно («zip-бомба»): службу убил бы
+        # нехваток памяти, а после перезапуска тот же лот снова первым в очереди.
+        if sum(info.file_size for info in archive.infolist()) > MAX_UNPACKED:
+            raise SpecError("файл слишком большой — откройте файл")
+        names = archive.namelist()
         if any(n.startswith("xl/") for n in names):
             return _xlsx_pages(data)
         if "word/document.xml" in names:

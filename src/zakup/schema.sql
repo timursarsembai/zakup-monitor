@@ -462,6 +462,9 @@ CREATE TABLE IF NOT EXISTS search_ledger (
     created_at  timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS search_ledger_user ON search_ledger (user_id, created_at DESC);
+-- Возврат за поиск — не больше одного.
+CREATE UNIQUE INDEX IF NOT EXISTS search_ledger_one_refund ON search_ledger (research_id)
+    WHERE kind = 'refund';
 -- Платежи через kazpayment: тариф (quantity — дней) и пакеты поисков (quantity — поисков).
 CREATE TABLE IF NOT EXISTS payments (
     id         bigserial PRIMARY KEY,

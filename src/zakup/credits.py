@@ -45,7 +45,7 @@ def refund(conn: psycopg.Connection, research_id: int) -> bool:
            WHERE research_id = %s AND kind = 'search'
              AND NOT EXISTS (SELECT 1 FROM search_ledger r
                              WHERE r.research_id = %s AND r.kind = 'refund')
-           RETURNING id""",
+           ON CONFLICT DO NOTHING RETURNING id""",
         (research_id, research_id),
     ).fetchone()
     return row is not None

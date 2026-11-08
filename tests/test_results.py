@@ -89,7 +89,7 @@ def test_refresh_saves_results_and_marks_get_outcome(conn, monkeypatch):
     )[70][0]["contractNumberSys"] == "C-1"
 
     user = auth.set_password(conn, "owner@mail.kz", "long-enough-password")
-    conn.execute("UPDATE users SET telegram_chat_id = '42', company_bin = '171040031283'")
+    conn.execute("UPDATE users SET telegram_chat_id = '42', company_bin = '171040031283', paid_until = now() + interval '30 days'")
     marks.set_mark(conn, user, 70, "interested")
     marks.set_mark(conn, user, 71, "interested")
     sent = []

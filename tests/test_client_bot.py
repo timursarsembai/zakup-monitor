@@ -31,7 +31,11 @@ def test_link_group_join_requests_and_expiry(conn, monkeypatch):
     reply = client_bot.handle_message(conn, {"chat": {"id": 555, "type": "private"}, "text": f"/start {code}"})
     assert "+77011112233" in reply
     assert conn.execute("SELECT telegram_chat_id FROM users WHERE id = %s", (uid,)).fetchone()[0] == "c:555"
-    # Группу подключает её администратор командой /start.
+    # Группу подключает командой /start только администратор сайта, не любой админ группы.
+    monkeypatch.setenv("ZAKUP_TELEGRAM_CHAT_ID", "1")
+    assert client_bot.handle_message(conn, {"chat": {"id": -1666, "type": "supergroup", "title": "Чужая"},
+                                            "from": {"id": 2}, "text": "/start"}) is None
+    assert client_bot.group_id(conn) is None
     assert client_bot.handle_message(conn, {"chat": {"id": -1009, "type": "supergroup", "title": "Клиенты"},
                                             "from": {"id": 1}, "text": "/start@tenderim_kz_bot"})
     assert client_bot.group_id(conn) == "-1009"

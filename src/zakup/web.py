@@ -8,6 +8,7 @@ import io
 import json
 import logging
 import os
+import threading
 import time
 from contextlib import asynccontextmanager
 from decimal import Decimal, InvalidOperation
@@ -538,15 +539,24 @@ def _finish(request: Request, purpose: str, flow: str, code: str, password: str,
                               i18n.gettext("Пароль — не короче 8 знаков."), 422)
         if password != password2:
             return _code_page(request, purpose, flow, phone, i18n.gettext("Пароли не совпадают."), 422)
+        # Администратор мог закрыть регистрацию, пока клиент ждал SMS.
+        if purpose == "register" and not signup.registration_open(conn):
+            return _phone_page(request, purpose, closed=True, status_code=403)
         try:
             phone = signup.verify(conn, flow, purpose, code)
         except signup.SignupError as error:
             return _code_page(request, purpose, flow, phone, i18n.gettext(str(error)), 422)
         if purpose == "register":
-            old = conn.execute("SELECT id, deleted_at FROM users WHERE email = %s", (phone,)).fetchone()
+            old = conn.execute("SELECT id, deleted_at, may_reregister FROM users WHERE email = %s",
+                               (phone,)).fetchone()
             if old and old[1] is None:
                 return _phone_page(request, purpose, phone, i18n.gettext(
                     "Этот номер уже зарегистрирован — войдите или восстановите пароль."), 422)
+            taken = conn.execute("SELECT 1 FROM users WHERE phone = %s AND id <> %s",
+                                 (phone, old[0] if old else 0)).fetchone()
+            if (old and not old[2]) or taken:
+                return _phone_page(request, purpose, phone, i18n.gettext(
+                    "Регистрация с этим номером недоступна. Обратитесь в поддержку."), 403)
             if old:
                 # Удалённому разрешили заново: старая запись остаётся под другим логином.
                 conn.execute("UPDATE users SET email = %s, phone = NULL WHERE id = %s",
@@ -713,6 +723,9 @@ def pay_status(user: User, ref: str):
         return {"status": payments.check(conn, ref)}
 
 
+INVOICES_PER_HOUR = 5
+
+
 @app.post("/pay/{ref}/kaspi", dependencies=[Depends(same_origin)])
 def pay_kaspi_invoice(request: Request, user: User, ref: str, phone: Annotated[str, Form()] = ""):
     """Счёт в приложение Kaspi на номер (свой или указанный)."""
@@ -721,6 +734,12 @@ def pay_kaspi_invoice(request: Request, user: User, ref: str, phone: Annotated[s
         if payment is None or payment["status"] != "pending":
             raise HTTPException(404, "Нет такого неоплаченного платежа")
         own = conn.execute("SELECT phone FROM users WHERE id = %s", (user,)).fetchone()[0]
+        # Счёт приходит в Kaspi от имени магазина: чужим номерам — не чаще нескольких раз.
+        sent = conn.execute(
+            """SELECT count(*) FROM user_actions WHERE user_id = %s AND action = 'payment_invoice'
+               AND at > now() - interval '1 hour'""", (user,)).fetchone()[0]
+    if sent >= INVOICES_PER_HOUR:
+        return RedirectResponse(f"/pay/{ref}?error=invoice", status_code=303)
     number = auth.normalize_phone(phone) if phone.strip() else own
     if not number:
         return RedirectResponse(f"/pay/{ref}?error=phone", status_code=303)
@@ -782,6 +801,10 @@ def contacts_page(request: Request, user: Viewer):
     return templates.TemplateResponse(request, "legal_contacts.html", {"fields": legal.FIELDS})
 
 
+# Дальше 500-й страницы никто не листает; огромный номер давал ошибку базы (OFFSET).
+MAX_PAGE = 500
+
+
 @app.get("/robots.txt")
 def robots() -> Response:
     lines = ["User-agent: *", "Allow: /",
@@ -789,6 +812,9 @@ def robots() -> Response:
                                                 "/subscriptions", "/research", "/welcome",
                                                 "/staff", "/export.xlsx", "/lang/")],
              "Disallow: /lots/*/research", "Disallow: /lots/*/questions",
+             # Фильтры, сортировки и страницы поиска — бесконечное число адресов одного и
+             # того же; в индекс идут сами закупки (sitemap) и чистые /lots, /announcements.
+             "Disallow: /*?", "Disallow: /balance", "Disallow: /pay/", "Disallow: /sources/",
              f"Sitemap: {SITE_URL}/sitemap.xml"]
     return Response("\n".join(lines) + "\n", media_type="text/plain")
 
@@ -846,13 +872,17 @@ def sitemap_part(kind: str) -> Response:
 @app.get("/analytics")
 def analytics(request: Request, user: Viewer, background: BackgroundTasks):
     market, stale = dashboard.market_cached()
-    with pool.connection() as conn:
-        if market is None:
-            market = dashboard.market(conn)
-        elif stale:
-            # Показываем прежние цифры сразу, а пересчёт — после ответа.
-            background.add_task(_recount_market)
-        context = {"m": market, "now": datetime.now(UTC)}
+    if market is None:
+        # Холодный кэш (после перезапуска): считает один запрос, остальные ждут его.
+        with _market_lock:
+            market, _ = dashboard.market_cached()
+            if market is None:
+                with pool.connection() as conn:
+                    market = dashboard.market(conn)
+    elif stale and not _market_lock.locked():
+        # Показываем прежние цифры сразу, а пересчёт — после ответа, один за раз.
+        background.add_task(_recount_market)
+    context = {"m": market, "now": datetime.now(UTC)}
     return templates.TemplateResponse(request, "dashboard.html", context)
 
 
@@ -915,7 +945,7 @@ def _search_context(request: Request, current: Filters, scope: str, total: int, 
 def lots_search(request: Request, user: Viewer, page: int = 1, per_page: int = PAGE_SIZE):
     form = parse_qs(request.url.query)
     current = Filters.from_form(form, staff=request.state.staff)
-    page = max(page, 1)
+    page = min(max(page, 1), MAX_PAGE)
     per_page = _per_page(per_page)
     now = datetime.now(UTC)
     where, params = current.where(now, "lots")
@@ -957,7 +987,7 @@ def lots_search(request: Request, user: Viewer, page: int = 1, per_page: int = P
 def announcements_search(request: Request, user: Viewer, page: int = 1, per_page: int = PAGE_SIZE):
     form = parse_qs(request.url.query)
     current = Filters.from_form(form, staff=request.state.staff)
-    page = max(page, 1)
+    page = min(max(page, 1), MAX_PAGE)
     per_page = _per_page(per_page)
     now = datetime.now(UTC)
     where, params = current.where(now, "announcements")
@@ -1171,9 +1201,17 @@ def research_fragment(request: Request, user: User, lot_id: int):
     )
 
 
+_market_lock = threading.Lock()
+
+
 def _recount_market() -> None:
-    with pool.connection() as conn:
-        dashboard.market(conn)
+    if not _market_lock.acquire(blocking=False):
+        return
+    try:
+        with pool.connection() as conn:
+            dashboard.market(conn)
+    finally:
+        _market_lock.release()
 
 
 _refreshing: set[int] = set()
@@ -1285,8 +1323,9 @@ def _announcement_context(request: Request, user: int | None, announcement_id: i
             lot.get("customerBin") for lot in lots]
         org_cards = {b: subjects.card(conn, b) for b in dict.fromkeys(filter(None, org_bins))}
     missing = [b for b, found in org_cards.items() if found is None]
-    if missing:
+    if missing and user is not None:
         # Карточки организации ещё нет — догрузим после ответа, следующий заход увидит.
+        # Гостям и поисковым роботам — только база: обход сайта не должен бить по порталу.
         background.add_task(_subjects_in_background, missing)
     text_phones = {lot["id"]: subjects.phones_in_text(lot.get("descriptionRu"),
                                                       info[lot["id"]].get("extra_desc"))
@@ -1478,8 +1517,8 @@ def toggle_source(request: Request, user: Paid, source_id: int):
     with pool.connection() as conn:
         row = conn.execute(
             """UPDATE sources SET active = NOT active
-               WHERE id = %s AND (%s OR added_by = %s OR auto) RETURNING domain, active""",
-            (source_id, request.state.role == "admin", user),
+               WHERE id = %s AND (%s OR added_by = %s OR (auto AND %s)) RETURNING domain, active""",
+            (source_id, request.state.role == "admin", user, request.state.role in auth.STAFF_ROLES),
         ).fetchone()
     if row:
         _audit(request, user, "source_toggle", row[0], active=row[1])
@@ -1498,7 +1537,7 @@ def action_log(request: Request, _: Staff, page: int = 1, per_page: int = 50):
     date_from = (query.get("from") or [""])[0]
     date_to = (query.get("to") or [""])[0]
     per_page = per_page if per_page in LOG_PAGE_SIZES else 50
-    page = max(page, 1)
+    page = min(max(page, 1), MAX_PAGE)
     clauses, params = ["true"], {}
     moderator = request.state.role != "admin"
     if moderator:
@@ -2076,6 +2115,10 @@ def reset_password(request: Request, staff: Staff, user_id: int):
     with pool.connection() as conn:
         if user_id == staff:
             login = conn.execute("SELECT email FROM users WHERE id = %s", (user_id,)).fetchone()[0]
+        elif request.state.role != "admin":
+            # Новый пароль клиента в руках модератора — это вход под клиентом, а он только у
+            # администратора. Клиент восстанавливает пароль сам, по SMS.
+            raise HTTPException(403, "Сбросить пароль клиента может только администратор")
         else:
             login = _other_user(conn, request, staff, user_id)
         password = auth.generate_password()

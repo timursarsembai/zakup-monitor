@@ -16,6 +16,7 @@ from typing import NamedTuple
 import psycopg
 
 from zakup import SITE_URL, bot, telegram
+from zakup.auth import ENTITLED_SQL
 from zakup.filters import REGIONS, Filters
 from zakup.goszakup import PORTAL_TZ
 
@@ -135,6 +136,13 @@ class PendingLot(NamedTuple):
 
 
 def pending(conn: psycopg.Connection, limit: int = 2000) -> list[PendingLot]:
+    # Тариф закончился или аккаунт отключён — совпадения не копятся до продления, а
+    # пропускаются: иначе после оплаты пришла бы пачка старых лотов.
+    conn.execute(
+        """UPDATE matches m SET notified_at = now()
+           FROM subscriptions s JOIN users u ON u.id = s.user_id
+           WHERE m.subscription_id = s.id AND m.notified_at IS NULL AND NOT (""" + ENTITLED_SQL + ")"
+    )
     rows = conn.execute(
         """SELECT s.id,
                   -- В общей группе видно, чья это подписка.

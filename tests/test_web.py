@@ -424,8 +424,8 @@ def test_moderator_manages_only_users_and_sees_log_without_admin(client, conn):
     assert client.post(f"/settings/users/{ids['owner@mail.kz']}/reset", headers=ORIGIN).status_code == 403
     assert client.post(f"/settings/users/{ids['client']}/role", data={"role": "admin"},
                        headers=ORIGIN).status_code == 403
-    assert "Новый пароль для client" in client.post(f"/settings/users/{ids['client']}/reset",
-                                                     headers=ORIGIN).text
+    # Сброс пароля клиенту — только администратор (иначе модератор входит под клиентом).
+    assert client.post(f"/settings/users/{ids['client']}/reset", headers=ORIGIN).status_code == 403
     assert "удалён" in client.post(f"/settings/users/{ids['client']}/delete", headers=ORIGIN).text
     assert client.post(f"/settings/users/{ids['client']}/restore", headers=ORIGIN).status_code == 403
     assert client.post("/settings/ai", data={"provider": "claude_code"}, headers=ORIGIN).status_code == 403
@@ -1054,3 +1054,44 @@ def test_legal_documents_use_requisites(client, conn):
     assert "ИП Тестов" in client.get("/privacy").text and "900101300123" in client.get("/contacts").text
     client.get("/lang/kk", headers={"referer": "https://testserver/offer"})
     assert "Жария оферта" in client.get("/offer").text
+
+
+def test_webhook_failure_is_retried_and_refund_not_recredited(conn, monkeypatch):
+    from zakup import payments
+
+    auth.set_password(conn, "+77011112233", "client-password-1")
+    uid = conn.execute("SELECT id FROM users").fetchone()[0]
+    conn.execute("INSERT INTO payments (ref, user_id, kind, quantity, amount) VALUES ('r1', %s, 'searches', 20, 4900)",
+                 (uid,))
+    conn.commit()
+    event = {"event_id": "e1", "event": "payment.received", "order_ref": "r1", "paid_amount": "4900.00"}
+    real = payments.fulfill
+    monkeypatch.setattr(payments, "fulfill", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("db")))
+    with pytest.raises(RuntimeError):
+        payments.handle_event(conn, event)
+    conn.rollback()
+    monkeypatch.setattr(payments, "fulfill", real)
+    assert payments.handle_event(conn, event) == "fulfilled"  # повтор kazpayment прошёл
+    assert payments.handle_event(conn, {"event_id": "e2", "event": "order.refunded", "order_ref": "r1"}) == "refunded"
+    again = {"event_id": "e3", "event": "payment.received", "order_ref": "r1", "paid_amount": 4900}
+    assert payments.handle_event(conn, again) == "skipped"
+    assert conn.execute("SELECT sum(delta) FROM search_ledger").fetchone()[0] == 20
+
+
+def test_search_price_never_above_bigger_pack():
+    from zakup import payments
+
+    prices = [payments.searches_price(n) for n in range(1, 130)]
+    assert prices == sorted(prices)
+    assert payments.searches_price(49) <= 11900 and payments.searches_price(99) <= 22900
+    assert payments.searches_price(5) == 1250 and payments.searches_price(30) == 7350
+
+
+def test_moderator_cannot_reset_client_password(client, conn):
+    auth.set_password(conn, "client", "client-password-1")
+    auth.set_password(conn, "amir", "amir-password-1")
+    conn.execute("UPDATE users SET role = 'moderator' WHERE email = 'amir'")
+    conn.commit()
+    uid = conn.execute("SELECT id FROM users WHERE email = 'client'").fetchone()[0]
+    client.post("/login", data={"email": "amir", "password": "amir-password-1"}, headers=ORIGIN)
+    assert client.post(f"/settings/users/{uid}/reset", headers=ORIGIN).status_code == 403

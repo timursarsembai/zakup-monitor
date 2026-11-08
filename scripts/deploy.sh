@@ -21,8 +21,12 @@ db_digest=$(docker compose exec -T postgres psql -U zakup -Atc \
   "SELECT digest FROM schema_state WHERE id = 1" 2>/dev/null || true)
 if [ "$file_digest" != "$db_digest" ]; then
   echo "Схема изменилась: применяю при остановленных сборщиках"
+  # Если миграция упадёт, службы не должны остаться остановленными.
+  trap 'echo "Миграция не прошла — поднимаю службы на старой схеме"; docker compose up -d; systemctl --user start zakup-research' EXIT
   docker compose stop worker archive specs research bot client-bot
+  systemctl --user stop zakup-research
   docker compose run --rm --no-deps --entrypoint zakup worker migrate
+  trap - EXIT
 fi
 
 docker compose up -d

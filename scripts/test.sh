@@ -9,6 +9,9 @@ docker compose build -q worker
 set +e
 docker compose run --rm --no-deps \
   -e TEST_DATABASE_URL="postgresql://zakup:${password}@postgres:5432/zakup_test" \
+  -e DATABASE_URL="postgresql://zakup:${password}@postgres:5432/zakup_test" \
+  -e ZAKUP_TELEGRAM_BOT_TOKEN= -e ZAKUP_CLIENT_BOT_TOKEN= -e ZAKUP_TELEGRAM_CHAT_ID= \
+  -e KAZPAYMENT_API_KEY= -e KAZPAYMENT_WEBHOOK_SECRET= -e GOSZAKUP_TOKEN= \
   --entrypoint pytest worker -q -p no:cacheprovider > "$out" 2>&1
 code=$?
 set -e

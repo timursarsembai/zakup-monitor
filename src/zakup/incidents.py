@@ -26,6 +26,8 @@ logger = logging.getLogger(__name__)
 OUTAGE_NOTICE = timedelta(minutes=30)
 # Статусы, при которых повтор той же ошибки не заводит новую запись.
 OPEN = ("new", "working")
+# Сколько молчать о повторах уже разобранной ошибки (кроме исправленной).
+QUIET = timedelta(days=1)
 
 _SECRETS = [
     (re.compile(r"postgres(?:ql)?://\S+"), "postgresql://…"),
@@ -82,10 +84,16 @@ def failed(stage: str, error: BaseException, conn: psycopg.Connection | None = N
 
 def _record(conn, stage: str, error: BaseException) -> None:
     mark = fingerprint(error)
+    # Та же ошибка, пока её разбирают, и сутки после разбора (кроме «исправлено» —
+    # тогда исправление не помогло и нужен новый разбор) — только счётчик, без сообщений.
     row = conn.execute(
-        "UPDATE incidents SET count = count + 1, last_at = now() "
-        "WHERE fingerprint = %s AND status = ANY(%s) RETURNING id",
-        (mark, list(OPEN)),
+        """UPDATE incidents SET count = count + 1, last_at = now()
+           WHERE id = (SELECT id FROM incidents WHERE fingerprint = %s
+                         AND (status = ANY(%s)
+                              OR (status <> 'fixed' AND finished_at > now() - %s))
+                       ORDER BY id DESC LIMIT 1)
+           RETURNING id""",
+        (mark, list(OPEN), QUIET),
     ).fetchone()
     if row:
         return

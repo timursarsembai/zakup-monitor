@@ -9,7 +9,7 @@ def _lot(conn, end):
     db.upsert_announcement(conn, {"id": 7, "name_ru": "Столы", "end_date": end.isoformat()})
     db.upsert_lot(conn, {"id": 70, "trd_buy_id": 7, "name_ru": "Стол", "amount": 500000})
     user = auth.set_password(conn, "owner@mail.kz", "long-enough-password")
-    conn.execute("UPDATE users SET telegram_chat_id = '42'")
+    conn.execute("UPDATE users SET telegram_chat_id = '42', paid_until = now() + interval '30 days'")
     return user
 
 
@@ -51,3 +51,13 @@ def test_no_reminder_for_fresh_or_removed_favorites(conn, monkeypatch):
     marks.set_mark(conn, user, 70, "")  # убрали из избранного
     conn.execute("UPDATE lot_marks SET reminded_hours = NULL")
     assert marks.remind(conn, NOW + timedelta(hours=9), pause=0) == 0
+
+
+def test_no_reminder_after_tariff_ends(conn, monkeypatch):
+    sent = []
+    monkeypatch.setattr(marks.telegram, "send_message", lambda chat, text: sent.append(chat))
+    user = _lot(conn, NOW + timedelta(hours=23))
+    conn.execute("UPDATE users SET paid_until = now() - interval '1 day', role = 'user'")
+    marks.set_mark(conn, user, 70, "interested")
+    conn.execute("UPDATE lot_marks SET status_at = %s", (NOW - timedelta(days=1),))
+    assert marks.remind(conn, NOW, pause=0) == 0 and sent == []

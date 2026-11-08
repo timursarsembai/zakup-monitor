@@ -12,6 +12,7 @@ from datetime import UTC, datetime, timedelta
 import psycopg
 
 from zakup import telegram
+from zakup.auth import ENTITLED_SQL
 from zakup.goszakup import PORTAL_TZ
 from zakup.matcher import lot_url
 
@@ -108,7 +109,7 @@ def remind(conn: psycopg.Connection, now: datetime | None = None, pause: float =
            JOIN lots l ON l.id = m.lot_id
            JOIN announcements a ON a.id = l.trd_buy_id
            WHERE m.status = ANY(%s) AND a.end_date > %s AND a.end_date <= %s
-             AND u.telegram_chat_id IS NOT NULL AND u.deleted_at IS NULL
+             AND u.telegram_chat_id IS NOT NULL AND """ + ENTITLED_SQL + """
            ORDER BY a.end_date""",
         (REMIND_STATUSES, now, now + timedelta(hours=max(REMIND_HOURS))),
     ).fetchall()
@@ -166,7 +167,7 @@ def announce_results(conn: psycopg.Connection, pause: float = 1.1) -> int:
            JOIN lot_results r ON r.lot_id = m.lot_id
            JOIN lots l ON l.id = m.lot_id
            WHERE m.status NOT IN ('', 'rejected') AND m.result_notified_at IS NULL
-             AND u.deleted_at IS NULL"""
+             AND """ + ENTITLED_SQL
     ).fetchall()
     sent = 0
     for (user_id, lot_id, status, chat_id, company_bin, outcome, reason, winner_bin,
