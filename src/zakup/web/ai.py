@@ -7,10 +7,10 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
 
 from zakup import (
-    auth,
     contacts,
     credits,
     i18n,
+    notify,
     questions,
     research,
     sources,
@@ -153,7 +153,7 @@ def research_list(request: Request, user: Paid, q: str = "", sources_open: int =
             (request.state.staff, user),
         ).fetchall()
         active = len(running)
-        source_rows = sources.listing(conn)
+        source_rows = sources.listing(conn, user, request.state.staff)
     items = []
     for row in rows:
         found = (row[3] or {}).get("items") or []
@@ -197,11 +197,18 @@ def add_source(
     city: Annotated[str, Form()] = "",
     note: Annotated[str, Form()] = "",
 ):
+    staff = request.state.staff
     with core.pool.connection() as conn:
-        domain = sources.add(conn, user, url, name, categories, city, note)
+        try:
+            domain = sources.add(conn, user, url, name, categories, city, note, staff=staff)
+        except sources.TooManyPending:
+            raise HTTPException(429, i18n.gettext("Слишком много источников ждут проверки")) from None
     if domain is None:
         raise HTTPException(422, i18n.gettext("Укажите адрес сайта, например zeta.kz"))
     _audit(request, user, "source_add", domain)
+    if not staff:
+        notify.send(f"zakup: клиент {request.state.email} добавил источник {domain} — "
+                    "проверьте в «Подбор товаров» → «Источники» и включите, если подходит.")
     return RedirectResponse("/research?sources_open=1#sources", status_code=303)
 
 
@@ -220,10 +227,14 @@ def source_contacts(request: Request, _: Paid, source_id: int):
 @router.post("/sources/{source_id}/toggle", dependencies=[Depends(same_origin)])
 def toggle_source(request: Request, user: Paid, source_id: int):
     with core.pool.connection() as conn:
+        # Сотрудник включает и непроверенный (это и есть одобрение); клиент — только свой,
+        # и его непроверенный от этого в подбор не попадёт.
+        staff = request.state.staff
         row = conn.execute(
-            """UPDATE sources SET active = NOT active
-               WHERE id = %s AND (%s OR added_by = %s OR (auto AND %s)) RETURNING domain, active""",
-            (source_id, request.state.role == "admin", user, request.state.role in auth.STAFF_ROLES),
+            """UPDATE sources SET active = CASE WHEN %s THEN NOT (active AND checked) ELSE NOT active END,
+                   checked = checked OR %s
+               WHERE id = %s AND (%s OR added_by = %s) RETURNING domain, active""",
+            (staff, staff, source_id, staff, user),
         ).fetchone()
     if row:
         _audit(request, user, "source_toggle", row[0], active=row[1])

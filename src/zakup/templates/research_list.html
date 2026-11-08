@@ -88,7 +88,7 @@
 <div class="sheet {{ 'open' if sources_open }}" id="sources" role="dialog" aria-modal="true" aria-label="{{ _("Источники") }}">
   <div class="sheet-inner">
     <div class="sheet-head"><b>{{ _("Источники для подбора") }}</b><button type="button" data-sources-close aria-label="{{ _("Закрыть") }}">✕</button></div>
-    <p class="muted">{{ _("Магазины и поставщики, которые ИИ проверяет в первую очередь. Сайты, где ИИ находил товары, добавляются сами (метка «ИИ»), свои источники добавьте ниже.") }}</p>
+    <p class="muted">{{ _("Магазины и поставщики, которые ИИ проверяет в первую очередь. Сайты, где ИИ находил товары, добавляются сами (метка «ИИ»), свои источники добавьте ниже.") }}{% if not request.state.staff %} {{ _("Новый источник попадёт в подбор после проверки модератором.") }}{% endif %}</p>
     <form class="add-source" method="post" action="/sources">
       <label><span>{{ _("Сайт") }}</span><input name="url" placeholder="zeta.kz" required autocapitalize="none" spellcheck="false"></label>
       <label><span>{{ _("Название") }}</span><input name="name" placeholder="Zeta"></label>
@@ -102,12 +102,13 @@
     {% for category, rows in ns.groups | dictsort %}
     <div class="src-group">
       <h3>{{ category }} <span class="muted">{{ rows | length }}</span></h3>
-      {% for id, domain, name, categories, city, note, auto, active, found, last_found, added_email, added_by, contact_count in rows %}
-      <div class="src {{ '' if active else 'off' }}">
+      {% for id, domain, name, categories, city, note, auto, active, found, last_found, added_email, added_by, contact_count, checked in rows %}
+      <div class="src {{ '' if active and checked else 'off' }}">
         <div><a href="https://{{ domain }}" target="_blank" rel="noopener noreferrer">{{ name or domain }}</a> <span class="muted">{{ domain }}</span>
-          <div class="muted">{% if auto %}<span class="tag ai">{{ _("ИИ") }}</span>{% else %}<span class="tag">{{ added_email if request.state.staff and added_email else _("вручную") }}</span>{% endif %}{% if city %}{{ city }} · {% endif %}{% if found %}{{ _("находили:") }} {{ found }}{% endif %}{% if note %} · {{ note }}{% endif %}</div></div>
+          <div class="muted">{% if not checked %}<span class="tag">{{ _("на проверке") }}</span> {% endif %}{% if auto %}<span class="tag ai">{{ _("ИИ") }}</span>{% else %}<span class="tag">{{ added_email if request.state.staff and added_email else _("вручную") }}</span>{% endif %}{% if city %}{{ city }} · {% endif %}{% if found %}{{ _("находили:") }} {{ found }}{% endif %}{% if note %} · {{ note }}{% endif %}</div></div>
         <div class="src-actions"><button type="button" data-contacts="/sources/{{ id }}/contacts" data-title="{{ name or domain }}">📞 {{ _("Контакты") }}{% if contact_count %} <span class="count">{{ contact_count }}</span>{% endif %}</button>
-        {% if is_admin or auto or added_by == me %}<form method="post" action="/sources/{{ id }}/toggle"><button>{{ _("Выключить") if active else _("Включить") }}</button></form>{% endif %}</div>
+        {% if request.state.staff and not checked %}<form method="post" action="/sources/{{ id }}/toggle"><button>{{ _("Одобрить") }}</button></form>
+        {% elif request.state.staff or added_by == me %}<form method="post" action="/sources/{{ id }}/toggle"><button>{{ _("Выключить") if active else _("Включить") }}</button></form>{% endif %}</div>
       </div>
       {% endfor %}
     </div>
