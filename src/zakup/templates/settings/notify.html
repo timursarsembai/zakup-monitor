@@ -32,6 +32,17 @@
   </form>
   {% if saved == "notify" %}<p class="note">{{ _("Сохранено.") }}</p>{% endif %}
 </section>
+<section class="panel">
+  <h2>{{ _("Напоминания по избранному") }}</h2>
+  <p class="muted">{{ _("Об избранных лотах бот напоминает в Telegram, пока идёт приём заявок, и сообщает итоги.") }}</p>
+  <form method="post" action="/settings/reminders">
+    <label><input type="checkbox" name="remind" value="wd2" {{ "checked" if "wd2" in remind_at }}> {{ _("за 2 рабочих дня до окончания") }}</label><br>
+    <label><input type="checkbox" name="remind" value="24" {{ "checked" if "24" in remind_at }}> {{ _("за сутки") }}</label><br>
+    <label><input type="checkbox" name="remind" value="3" {{ "checked" if "3" in remind_at }}> {{ _("за 3 часа") }}</label><br>
+    <label><input type="checkbox" name="results" value="1" {{ "checked" if notify_results }}> {{ _("итоги: кто выиграл, состоялась ли закупка") }}</label>
+    <div class="actions"><button>{{ _("Сохранить") }}</button></div>
+  </form>
+</section>
 {% if client_group %}
 <section class="panel">
   <h2>{{ _("Группа клиентов в Telegram") }}</h2>

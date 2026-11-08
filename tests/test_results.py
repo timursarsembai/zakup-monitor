@@ -97,7 +97,7 @@ def test_refresh_saves_results_and_marks_get_outcome(conn, monkeypatch):
     assert marks.announce_results(conn, pause=0) == 2
     # Избранное остаётся избранным, а в сообщении — выиграли или нет (по БИН).
     assert marks.of_user(conn, user, [70, 71]) == {70: ("interested", ""), 71: ("interested", "")}
-    assert any("Вы не выиграли / Сіз ұтпадыңыз" in text for text in sent)
+    assert any("Вы не выиграли" in text for text in sent)  # язык сайта не известен — по-русски
     assert marks.announce_results(conn, pause=0) == 0
 
 

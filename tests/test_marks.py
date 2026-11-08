@@ -33,10 +33,10 @@ def test_reminds_once_per_threshold(conn, monkeypatch):
     assert marks.remind(conn, NOW, pause=0) == 0  # до окончания больше суток
     later = NOW + timedelta(hours=7)
     assert marks.remind(conn, later, pause=0) == 1
-    assert sent[0][0] == "42" and "Осталось / Қалды: 23 ч" in sent[0][1] and "/lots/70" in sent[0][1]
+    assert sent[0][0] == "42" and "Осталось: 23 ч" in sent[0][1] and "/lots/70" in sent[0][1]
     assert marks.remind(conn, later + timedelta(minutes=10), pause=0) == 0
     assert marks.remind(conn, NOW + timedelta(hours=28), pause=0) == 1
-    assert "Осталось / Қалды: 2 ч" in sent[1][1]
+    assert "Осталось: 2 ч" in sent[1][1]
 
 
 def test_no_reminder_for_fresh_or_removed_favorites(conn, monkeypatch):
@@ -61,3 +61,25 @@ def test_no_reminder_after_tariff_ends(conn, monkeypatch):
     marks.set_mark(conn, user, 70, "interested")
     conn.execute("UPDATE lot_marks SET status_at = %s", (NOW - timedelta(days=1),))
     assert marks.remind(conn, NOW, pause=0) == 0 and sent == []
+
+
+def test_own_schedule_two_working_days_and_language(conn, monkeypatch):
+    sent = []
+    monkeypatch.setattr(marks.telegram, "send_message", lambda chat, text: sent.append(text))
+    # Окончание в понедельник: «за 2 рабочих дня» — в четверг (выходные не считаются).
+    end = datetime(2026, 11, 16, 6, 0, tzinfo=UTC)
+    assert marks._hours_before(end, "wd2") == 96
+    assert marks._hours_before(datetime(2026, 11, 12, 6, 0, tzinfo=UTC), "wd2") == 48
+    user = _lot(conn, datetime(2026, 11, 12, 6, 0, tzinfo=UTC))
+    conn.execute("UPDATE users SET remind_at = %s, notify_lang = 'kk'", (["wd2"],))
+    marks.set_mark(conn, user, 70, "interested")
+    conn.execute("UPDATE lot_marks SET status_at = %s", (NOW - timedelta(days=1),))
+    assert marks.remind(conn, NOW, pause=0) == 0
+    assert marks.remind(conn, NOW + timedelta(hours=25), pause=0) == 1
+    assert "Қалды: 1 күн 23 сағ" in sent[0] and "Осталось" not in sent[0]
+    # За сутки не выбрано — больше не напоминает.
+    assert marks.remind(conn, NOW + timedelta(hours=60), pause=0) == 0
+    # Все галочки сняты — напоминаний нет.
+    conn.execute("UPDATE users SET remind_at = '{}'")
+    conn.execute("UPDATE lot_marks SET reminded_hours = NULL")
+    assert marks.remind(conn, NOW + timedelta(hours=60), pause=0) == 0

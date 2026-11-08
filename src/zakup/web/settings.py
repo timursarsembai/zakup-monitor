@@ -17,6 +17,7 @@ from zakup import (
     credits,
     kaspi,
     legal,
+    marks,
     matcher,
     research,
     secrets_box,
@@ -102,10 +103,12 @@ def _telegram_tab(conn, request: Request, user: int, chat_id: str | None, is_sta
                                     (user,)).fetchone()),
         "linked": bool(chat_id and str(chat_id).startswith(telegram.CLIENT_PREFIX)),
         "paid": request.state.paid}
-    notify_lang = conn.execute("SELECT notify_lang FROM users WHERE id = %s", (user,)).fetchone()[0]
+    notify_lang, remind_at, notify_results = conn.execute(
+        "SELECT notify_lang, remind_at, notify_results FROM users WHERE id = %s", (user,)).fetchone()
     group_langs = dict(conn.execute("SELECT chat_id, notify_lang FROM telegram_groups")) if is_staff else {}
     return {"connected": bool(chat_id), "client_group": client_group, "notify_lang": notify_lang or "",
-            "group_langs": group_langs}
+            "group_langs": group_langs, "notify_results": notify_results,
+            "remind_at": marks.REMIND_DEFAULT if remind_at is None else remind_at}
 
 
 def _telegram_bot(is_staff: bool) -> dict:
@@ -567,6 +570,18 @@ def notify_language(request: Request, user: User, lang: Annotated[str, Form()] =
     with core.pool.connection() as conn:
         conn.execute("UPDATE users SET notify_lang = %s WHERE id = %s", (lang or None, user))
     _audit(request, user, "notify_lang", lang or "site")
+    return RedirectResponse("/settings?saved=notify#notify", status_code=303)
+
+
+@router.post("/settings/reminders", dependencies=[Depends(same_origin)])
+async def reminders(request: Request, user: User):
+    """Когда напоминать об избранных лотах и сообщать ли итоги."""
+    form = await request.form()
+    chosen = [o for o in marks.REMIND_OPTIONS if o in form.getlist("remind")]
+    with core.pool.connection() as conn:
+        conn.execute("UPDATE users SET remind_at = %s, notify_results = %s WHERE id = %s",
+                     (chosen, form.get("results") == "1", user))
+    _audit(request, user, "reminders", ",".join(chosen) or "off", results=form.get("results") == "1")
     return RedirectResponse("/settings?saved=notify#notify", status_code=303)
 
 

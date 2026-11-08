@@ -205,3 +205,16 @@ def test_moderator_cannot_reset_client_password(client, conn):
     uid = conn.execute("SELECT id FROM users WHERE email = 'client'").fetchone()[0]
     client.post("/login", data={"email": "amir", "password": "amir-password-1"}, headers=ORIGIN)
     assert client.post(f"/settings/users/{uid}/reset", headers=ORIGIN).status_code == 403
+
+
+def test_reminder_schedule_and_language_settings(client, conn):
+    _login(client)
+    page = client.get("/settings").text
+    assert "Напоминания по избранному" in page and "Язык уведомлений" in page
+    client.post("/settings/reminders", data={"remind": ["wd2", "3", "bogus"]}, headers=ORIGIN)
+    client.post("/settings/notify-lang", data={"lang": "both"}, headers=ORIGIN)
+    row = conn.execute("SELECT remind_at, notify_results, notify_lang FROM users WHERE email = 'owner@mail.kz'").fetchone()
+    assert row == (["wd2", "3"], False, "both")
+    assert client.post("/settings/notify-lang", data={"lang": "de"}, headers=ORIGIN).status_code == 422
+    client.get("/lang/kk", headers={"referer": "https://testserver/lots"})
+    assert conn.execute("SELECT ui_lang FROM users WHERE email = 'owner@mail.kz'").fetchone()[0] == "kk"
