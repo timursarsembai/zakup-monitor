@@ -4,7 +4,7 @@
 import pytest
 
 from tests.web_helpers import ORIGIN, _fake_sms, _flow, _login
-from zakup import auth, web
+from zakup import auth, signup
 
 
 def test_pages_redirect_to_login_and_back(client):
@@ -75,7 +75,7 @@ def test_register_by_phone_then_company(client, conn, monkeypatch):
     sent = _fake_sms(monkeypatch)
     assert "Регистрация скоро откроется" in client.get("/register").text
     assert client.post("/register", data={"phone": "87011112233"}, headers=ORIGIN).status_code == 403
-    web.signup.set_registration_open(conn, True)
+    signup.set_registration_open(conn, True)
     conn.commit()
     assert client.post("/register", data={"phone": "+7 727 111 22 33"}, headers=ORIGIN).status_code == 422
     page = client.post("/register", data={"phone": "8 (701) 111-22-33"}, headers=ORIGIN)
@@ -127,7 +127,7 @@ def test_forgot_password_by_sms_and_staff_login(client, conn, monkeypatch):
 def test_sms_limits_protect_balance(client, conn, monkeypatch):
     sent = _fake_sms(monkeypatch)
     auth.set_password(conn, "+77011112233", "old-password-1")
-    for _ in range(web.signup.PER_IP_HOUR):
+    for _ in range(signup.PER_IP_HOUR):
         client.post("/forgot", data={"phone": "87011112233"}, headers=ORIGIN)
     blocked = client.post("/forgot", data={"phone": "87011112233"}, headers=ORIGIN)
-    assert blocked.status_code == 429 and len(sent) == web.signup.PER_IP_HOUR
+    assert blocked.status_code == 429 and len(sent) == signup.PER_IP_HOUR

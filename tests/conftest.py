@@ -5,7 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg_pool import ConnectionPool
 
-from zakup import auth, db, web
+from zakup import auth, db, tariff, web
 from zakup.goszakup import Page
 
 
@@ -100,14 +100,14 @@ def client(conn, monkeypatch):
     test_pool = ConnectionPool(
         os.environ["TEST_DATABASE_URL"], min_size=1, max_size=2, open=False, timeout=5
     )
-    monkeypatch.setattr(web, "pool", test_pool)
+    monkeypatch.setattr(web.core, "pool", test_pool)
     # Карточки организаций догружаются с портала фоном — в тестах без сети.
-    monkeypatch.setattr(web, "_subjects_in_background", lambda bins: None)
+    monkeypatch.setattr(web.public, "_subjects_in_background", lambda bins: None)
     # Статистика посещений пишется в фоне — в тестах сразу: иначе фоновые потоки
     # занимают соединения тестового пула и тормозят следующие тесты.
-    monkeypatch.setattr(web, "_spawn", lambda job: job())
+    monkeypatch.setattr(web.core, "_spawn", lambda job: job())
     # Тариф кэшируется в памяти процесса — между тестами сбрасываем.
-    monkeypatch.setattr(web.tariff, "_cache", None)
+    monkeypatch.setattr(tariff, "_cache", None)
     auth.set_password(conn, "owner@mail.kz", "long-enough-password")
     conn.execute("UPDATE users SET role = 'admin' WHERE email = 'owner@mail.kz'")
     conn.commit()

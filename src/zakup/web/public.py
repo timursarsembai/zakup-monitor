@@ -1,0 +1,523 @@
+"""Открытые страницы: главная и поиск лотов/объявлений, страницы закупок, анализ рынка,
+документы, robots и sitemap, события из браузера.
+"""
+
+import json
+import threading
+from datetime import UTC, datetime, timedelta
+from importlib.resources import files
+from urllib.parse import parse_qs, urlsplit
+
+import httpx
+import psycopg
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from fastapi.responses import RedirectResponse, Response
+
+from zakup import (
+    SITE_URL,
+    ai_config,
+    dashboard,
+    details,
+    i18n,
+    legal,
+    marks,
+    research,
+    results,
+    spec,
+    subjects,
+    trends,
+    visits,
+)
+from zakup.filters import (
+    STATUS_NAMES,
+    Filters,
+)
+from zakup.goszakup import GoszakupError, parse_date
+from zakup.matcher import PORTAL_ANNOUNCEMENT_URL
+from zakup.web import core
+from zakup.web.ai import _research_view
+from zakup.web.core import (
+    DETAIL_TTL,
+    MAX_PAGE,
+    PAGE_SIZE,
+    Viewer,
+    _audit,
+    _editing,
+    _per_page,
+    _safe_next,
+    _search_context,
+    _track,
+    _track_search,
+    _user_groups,
+    logger,
+    same_origin,
+    templates,
+)
+
+router = APIRouter()
+
+
+@router.get("/lang/{code}")
+def switch_language(request: Request, code: str):
+    """Переключатель Рус/Қаз: запоминает выбор и возвращает на ту же страницу."""
+    if code not in i18n.LANGUAGES:
+        raise HTTPException(404, "нет такого языка")
+    back = request.headers.get("referer") or "/"
+    parts = urlsplit(back)
+    target = _safe_next(parts.path + (f"?{parts.query}" if parts.query else ""))
+    if parts.netloc and parts.netloc != request.headers.get("host"):
+        target = "/"
+    response = RedirectResponse(target, status_code=303)
+    response.set_cookie(i18n.COOKIE, code, max_age=365 * 86400, secure=True, samesite="lax")
+    return response
+
+
+@router.get("/healthz")
+def healthz() -> dict:
+    return {"ok": True}
+
+
+@router.get("/")
+def home(request: Request, user: Viewer, page: int = 1, per_page: int = PAGE_SIZE):
+    """Главная — поиск объявлений, открыт всем, как на портале."""
+    return announcements_search(request, user, page, per_page)
+
+
+@router.get("/favicon.ico")
+def favicon() -> Response:
+    """Браузеры и поисковики спрашивают иконку по этому адресу без ссылки на странице."""
+    return Response(files("zakup").joinpath("static/favicon.ico").read_bytes(),
+                    media_type="image/x-icon", headers={"Cache-Control": "public, max-age=86400"})
+
+
+@router.get("/offer")
+def offer_page(request: Request, user: Viewer):
+    return templates.TemplateResponse(request, "legal_offer.html", {"docs_date": legal.DOCS_DATE})
+
+
+@router.get("/privacy")
+def privacy_page(request: Request, user: Viewer):
+    return templates.TemplateResponse(request, "legal_privacy.html", {"docs_date": legal.DOCS_DATE})
+
+
+@router.get("/contacts")
+def contacts_page(request: Request, user: Viewer):
+    return templates.TemplateResponse(request, "legal_contacts.html", {"fields": legal.FIELDS})
+
+
+@router.get("/robots.txt")
+def robots() -> Response:
+    lines = ["User-agent: *", "Allow: /",
+             *[f"Disallow: {path}" for path in ("/settings", "/log", "/my", "/matches",
+                                                "/subscriptions", "/research", "/welcome",
+                                                "/staff", "/export.xlsx", "/lang/")],
+             "Disallow: /lots/*/research", "Disallow: /lots/*/questions",
+             # Фильтры, сортировки и страницы поиска — бесконечное число адресов одного и
+             # того же; в индекс идут сами закупки (sitemap) и чистые /lots, /announcements.
+             "Disallow: /*?", "Disallow: /balance", "Disallow: /pay/", "Disallow: /sources/",
+             f"Sitemap: {SITE_URL}/sitemap.xml"]
+    return Response("\n".join(lines) + "\n", media_type="text/plain")
+
+
+SITEMAP_CHUNK = 20_000
+
+
+@router.get("/sitemap.xml")
+def sitemap_index() -> Response:
+    """Открытые объявления и лоты — для поисковиков. Индекс ведёт на части по 20 000."""
+    with core.pool.connection() as conn:
+        anns, lots_n = conn.execute(
+            """SELECT (SELECT count(*) FROM announcements WHERE end_date > now() AND detail IS NOT NULL),
+                      (SELECT count(*) FROM lots l JOIN announcements a ON a.id = l.trd_buy_id
+                       WHERE a.end_date > now() AND a.detail IS NOT NULL)"""
+        ).fetchone()
+    parts = [f"{SITE_URL}/sitemap-static.xml"]
+    parts += [f"{SITE_URL}/sitemap-a-{i}.xml" for i in range((anns + SITEMAP_CHUNK - 1) // SITEMAP_CHUNK)]
+    parts += [f"{SITE_URL}/sitemap-l-{i}.xml" for i in range((lots_n + SITEMAP_CHUNK - 1) // SITEMAP_CHUNK)]
+    body = "".join(f"<sitemap><loc>{url}</loc></sitemap>" for url in parts)
+    return Response('<?xml version="1.0" encoding="UTF-8"?>'
+                    f'<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{body}</sitemapindex>',
+                    media_type="application/xml")
+
+
+@router.get("/sitemap-{kind}.xml")
+def sitemap_part(kind: str) -> Response:
+    if kind == "static":
+        urls = [(f"{SITE_URL}{path}", None) for path in ("/", "/announcements", "/analytics", "/pricing", "/offer", "/privacy", "/contacts")]
+    else:
+        prefix, _, index = kind.partition("-")
+        if prefix not in ("a", "l") or not index.isdigit():
+            raise HTTPException(404, "Нет такой части")
+        offset = int(index) * SITEMAP_CHUNK
+        with core.pool.connection() as conn:
+            if prefix == "a":
+                rows = conn.execute(
+                    """SELECT id, last_update_date FROM announcements
+                       WHERE end_date > now() AND detail IS NOT NULL ORDER BY id
+                       LIMIT %s OFFSET %s""", (SITEMAP_CHUNK, offset)).fetchall()
+                urls = [(f"{SITE_URL}/a/{i}", d) for i, d in rows]
+            else:
+                rows = conn.execute(
+                    """SELECT l.id, l.last_update_date FROM lots l JOIN announcements a ON a.id = l.trd_buy_id
+                       WHERE a.end_date > now() AND a.detail IS NOT NULL ORDER BY l.id
+                       LIMIT %s OFFSET %s""", (SITEMAP_CHUNK, offset)).fetchall()
+                urls = [(f"{SITE_URL}/lots/{i}", d) for i, d in rows]
+    body = "".join(f"<url><loc>{url}</loc>{f'<lastmod>{d.date().isoformat()}</lastmod>' if d else ''}</url>"
+                   for url, d in urls)
+    return Response('<?xml version="1.0" encoding="UTF-8"?>'
+                    f'<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{body}</urlset>',
+                    media_type="application/xml")
+
+
+@router.get("/analytics/trends")
+def analytics_trends(days: int = 30):
+    """Динамика рынка за период (вкладка «Динамика» в «Анализе рынка»): открыто всем, с кэшем."""
+    return trends.cached(core.pool.connection, days)
+
+
+@router.get("/analytics")
+def analytics(request: Request, user: Viewer, background: BackgroundTasks):
+    market, stale = dashboard.market_cached()
+    if market is None:
+        # Холодный кэш (после перезапуска): считает один запрос, остальные ждут его.
+        with _market_lock:
+            market, _ = dashboard.market_cached()
+            if market is None:
+                with core.pool.connection() as conn:
+                    market = dashboard.market(conn)
+    elif stale and not _market_lock.locked():
+        # Показываем прежние цифры сразу, а пересчёт — после ответа, один за раз.
+        background.add_task(_recount_market)
+    context = {"m": market, "now": datetime.now(UTC)}
+    return templates.TemplateResponse(request, "dashboard.html", context)
+
+
+@router.post("/t/event", dependencies=[Depends(same_origin)])
+async def track_event(request: Request):
+    """События из браузера: окно «платная функция» (какая функция), смена вида и т.п."""
+    body = await request.body()
+    if len(body) > 2000:
+        raise HTTPException(413)
+    try:
+        data = json.loads(body)
+        name, props = str(data.get("name", "")), data.get("props") or {}
+    except (ValueError, AttributeError):
+        raise HTTPException(400) from None
+    if name in visits.EVENT_NAMES and name != "search" and isinstance(props, dict):
+        _track(request, name, {str(k)[:40]: str(v)[:200] for k, v in list(props.items())[:10]})
+    return Response(status_code=204)
+
+
+@router.get("/lots")
+def lots_search(request: Request, user: Viewer, page: int = 1, per_page: int = PAGE_SIZE):
+    form = parse_qs(request.url.query)
+    current = Filters.from_form(form, staff=request.state.staff)
+    page = min(max(page, 1), MAX_PAGE)
+    per_page = _per_page(per_page)
+    now = datetime.now(UTC)
+    where, params = current.where(now, "lots")
+    with core.pool.connection() as conn:
+        rows = conn.execute(
+            f"""SELECT l.id, l.lot_number, a.id, a.number_anno, a.name_ru,
+                       coalesce(a.customer_name_ru, l.customer_name_ru, a.org_name_ru),
+                       l.name_ru, coalesce(l.extra_desc, l.description_ru), l.count,
+                       l.unit_name, l.price, l.amount, l.prepayment, a.trade_method_id,
+                       l.status_id, a.end_date, coalesce(nullif(l.kato, '{{}}'), a.kato),
+                       r.outcome, r.winner_name, r.winner_total,
+                       jsonb_array_length(r.offers), r.reason,
+                       l.name_kz, a.name_kz,
+                       l.extra_desc_kz, l.unit_name_kz
+                FROM lots l JOIN announcements a ON true
+                LEFT JOIN lot_results r ON r.lot_id = l.id
+                WHERE {where} ORDER BY {current.order_by("lots")}
+                LIMIT {per_page} OFFSET {(page - 1) * per_page}""",
+            params,
+        ).fetchall()
+        total = conn.execute(
+            f"SELECT count(*) FROM lots l, announcements a WHERE {where}", params
+        ).fetchone()[0]
+        lot_marks = marks.of_user(conn, user, [row[0] for row in rows]) if user else {}
+        stats = conn.execute(
+            """SELECT (SELECT count(*) FROM announcements WHERE end_date > now()),
+                      (SELECT count(*) FROM announcements
+                       WHERE end_date > now() AND details_fetched_at IS NULL),
+                      (SELECT max(updated_at) FROM sync_state)"""
+        ).fetchone()
+        groups = _user_groups(conn, user)
+        editing = _editing(conn, user, form)
+    _track_search(request, "lots", current, form, page, total)
+    context = _search_context(request, current, "lots", total, page, form, now, per_page)
+    context.update(rows=rows, marks=lot_marks, stats=stats, groups=groups, editing=editing)
+    return templates.TemplateResponse(request, "lots.html", context)
+
+
+@router.get("/announcements")
+def announcements_search(request: Request, user: Viewer, page: int = 1, per_page: int = PAGE_SIZE):
+    form = parse_qs(request.url.query)
+    current = Filters.from_form(form, staff=request.state.staff)
+    page = min(max(page, 1), MAX_PAGE)
+    per_page = _per_page(per_page)
+    now = datetime.now(UTC)
+    where, params = current.where(now, "announcements")
+    with core.pool.connection() as conn:
+        rows = conn.execute(
+            f"""SELECT a.id, a.number_anno,
+                       coalesce(a.count_lots,
+                                (SELECT count(*) FROM lots c WHERE c.trd_buy_id = a.id)),
+                       a.name_ru, coalesce(a.org_name_ru, a.customer_name_ru),
+                       a.trade_method_id, a.start_date, a.end_date, a.total_sum, a.status_id,
+                       a.prepayment_max, a.detail->'RefBuyStatus'->>'nameRu',
+                       a.detail->'RefTradeMethods'->>'nameRu',
+                       -- Авансы лотов без повторов: 30 и 100, а не 30, 30, 100.
+                       (SELECT array_agg(DISTINCT coalesce(p.prepayment, 0) ORDER BY coalesce(p.prepayment, 0))
+                        FROM lots p WHERE p.trd_buy_id = a.id),
+                       a.name_kz, a.detail->'RefTradeMethods'->>'nameKz',
+                       a.detail->'RefBuyStatus'->>'nameKz', a.detail->'Organizer'->>'nameKz'
+                FROM announcements a WHERE {where} ORDER BY {current.order_by("announcements")}
+                LIMIT {per_page} OFFSET {(page - 1) * per_page}""",
+            params,
+        ).fetchall()
+        total = conn.execute(
+            f"SELECT count(*) FROM announcements a WHERE {where}", params
+        ).fetchone()[0]
+        groups = _user_groups(conn, user)
+        editing = _editing(conn, user, form)
+    _track_search(request, "announcements", current, form, page, total)
+    context = _search_context(request, current, "announcements", total, page, form, now,
+                              per_page)
+    context.update(rows=rows, groups=groups, editing=editing)
+    return templates.TemplateResponse(request, "announcements.html", context)
+
+
+@router.get("/a/{announcement_id}")
+def announcement(request: Request, user: Viewer, announcement_id: int, background: BackgroundTasks):
+    context = _announcement_context(request, user, announcement_id, background)
+    if user:
+        _audit(request, user, "view_announcement", f"/a/{announcement_id}")
+    return templates.TemplateResponse(request, "announcement.html", context)
+
+
+@router.get("/lots/{lot_id}")
+def lot_page(request: Request, user: Viewer, lot_id: int, background: BackgroundTasks):
+    with core.pool.connection() as conn:
+        row = conn.execute("SELECT trd_buy_id FROM lots WHERE id = %s", (lot_id,)).fetchone()
+    if row is None or row[0] is None:
+        raise HTTPException(404, "Такого лота нет в базе")
+    context = _announcement_context(request, user, row[0], background)
+    lot = next((lot for lot in context["lots"] if lot["id"] == lot_id), None)
+    if lot is None:
+        raise HTTPException(404, "Лот удалён из объявления")
+    with core.pool.connection() as conn:
+        # Результаты подбора — платная часть (тариф или сотрудник), у каждого клиента свои.
+        job, done = _research_view(request, conn, user, lot_id) if user and request.state.paid else (None, None)
+        lot_info = research.lot_context(conn, lot_id)
+        provider = ai_config.provider(conn)
+    if user:
+        _audit(request, user, "view_lot", f"/lots/{lot_id}")
+    context.update(lot=lot, others=[other for other in context["lots"] if other["id"] != lot_id],
+                   here=request.url.path, job=job, done=done, lot_info=lot_info,
+                   region=research.default_region(lot_info) if lot_info else "",
+                   manual_links=research.manual_links(
+                       lot_info, research.default_region(lot_info) if lot_info else ""),
+                   provider_name=research.PROVIDERS.get(provider, provider),
+                   targets=research.TARGETS,
+                   is_admin=request.state.role == "admin")
+    return templates.TemplateResponse(request, "lot.html", context)
+
+
+_market_lock = threading.Lock()
+
+
+def _recount_market() -> None:
+    if not _market_lock.acquire(blocking=False):
+        return
+    try:
+        with core.pool.connection() as conn:
+            dashboard.market(conn)
+    finally:
+        _market_lock.release()
+
+
+_refreshing: set[int] = set()
+
+
+def _refresh_in_background(announcement_id: int, with_detail: bool, with_results: bool) -> None:
+    """Перечитывает объявление с портала после ответа страницы: пользователь не ждёт
+    портал, а следующий заход увидит свежие данные. Одно объявление — один раз."""
+    if announcement_id in _refreshing:
+        return
+    _refreshing.add(announcement_id)
+    try:
+        with core.pool.connection() as conn:
+            if with_detail:
+                details.fetch_one(conn, core._goszakup(), announcement_id)
+            if with_results:
+                results.refresh(conn, core._goszakup(), announcement_id)
+    except (GoszakupError, httpx.HTTPError, psycopg.Error) as error:
+        logger.warning("background refresh of %s failed: %s", announcement_id, error)
+    finally:
+        _refreshing.discard(announcement_id)
+
+
+def _subjects_in_background(bins: list[str]) -> None:
+    try:
+        with core.pool.connection() as conn:
+            subjects.ensure(conn, core._goszakup(), *bins)
+    except (GoszakupError, httpx.HTTPError, psycopg.Error) as error:
+        logger.warning("background subjects %s failed: %s", bins, error)
+
+
+def _announcement_context(request: Request, user: int | None, announcement_id: int,
+                          background: BackgroundTasks) -> dict:
+    """user=None — гость или поисковый робот: только данные из базы, портал не трогаем."""
+    with core.pool.connection() as conn:
+        row = conn.execute(
+            """SELECT detail, details_fetched_at, end_date, results, results_fetched_at
+               FROM announcements WHERE id = %s""",
+            (announcement_id,),
+        ).fetchone()
+        if row is None:
+            raise HTTPException(404, "Такого объявления нет в базе")
+        detail, fetched_at, end_date, outcome, results_at = row
+        now = datetime.now(UTC)
+        stale = fetched_at is None or now - fetched_at > (
+            DETAIL_TTL if end_date and end_date > now else timedelta(days=1)
+        )
+        ended = bool(end_date and end_date < now)
+        refresh_error = None
+        if detail is None and user is None:
+            raise HTTPException(404, "Подробности объявления ещё загружаются")
+        if detail is None:
+            # Подробностей ещё нет совсем (сборщик не дошёл) — тут без портала никак.
+            try:
+                details.fetch_one(conn, core._goszakup(), announcement_id)
+                if ended:
+                    results.refresh(conn, core._goszakup(), announcement_id)
+            except GoszakupError:
+                conn.rollback()
+            detail, fetched_at, outcome, results_at = conn.execute(
+                """SELECT detail, details_fetched_at, results, results_fetched_at
+                   FROM announcements WHERE id = %s""",
+                (announcement_id,),
+            ).fetchone()
+            if detail is None:
+                raise HTTPException(502, "Портал сейчас не отвечает, попробуйте через минуту")
+        elif user is not None and (stale or (ended and results.stale(results_at, now))):
+            background.add_task(_refresh_in_background, announcement_id, stale,
+                                ended and results.stale(results_at, now))
+        subscribed = {
+            r[0]: r[1]
+            for r in conn.execute(
+                """SELECT m.lot_id, string_agg(s.name, ', ') FROM matches m
+                   JOIN subscriptions s ON s.id = m.subscription_id
+                   JOIN lots l ON l.id = m.lot_id
+                   WHERE s.user_id = %s AND l.trd_buy_id = %s GROUP BY m.lot_id""",
+                (user, announcement_id),
+            )
+        }
+    files, seen = [], set()
+    for file in (detail.get("Files") or []) + [
+        f for lot in detail.get("Lots") or [] for f in lot.get("Files") or []
+    ]:
+        if file.get("id") not in seen and file.get("filePath"):
+            seen.add(file.get("id"))
+            files.append(file)
+    for file in detail.get("GeneralFiles") or []:
+        if file.get("filePathRu"):
+            files.append({"nameRu": file.get("nameRu"), "filePath": file["filePathRu"],
+                          "originalName": None})
+    protocols = [f for f in files if "протокол" in (f.get("nameRu") or "").lower()]
+    documents = [f for f in files if f not in protocols]
+    lots = [lot for lot in detail.get("Lots") or [] if not lot.get("isDeleted")]
+    info = {lot["id"]: details.parse_lot(lot) for lot in lots}
+    with core.pool.connection() as conn:
+        specs = {r[0]: (r[1], r[2], r[3]) for r in conn.execute(
+            "SELECT lot_id, text, error, text_kk FROM lot_specs WHERE lot_id = ANY(%s)",
+            (list(info),))}
+        # Готовые выжимки — тоже платная часть.
+        summaries = {r[0]: {"status": r[1], "result": r[2], "error": r[3]} for r in conn.execute(
+            "SELECT lot_id, status, result, error FROM spec_summaries WHERE lot_id = ANY(%s)",
+            (list(info),))} if request.state.paid else {}
+        lot_marks = marks.of_user(conn, user, list(info)) if user else {}
+        lot_results = results.by_lot(conn, list(info))
+        company_bin = (conn.execute(
+            "SELECT company_bin FROM users WHERE id = %s", (user,)
+        ).fetchone() or (None,))[0]
+        org_bins = [detail.get("customerBin"), detail.get("orgBin")] + [
+            lot.get("customerBin") for lot in lots]
+        org_cards = {b: subjects.card(conn, b) for b in dict.fromkeys(filter(None, org_bins))}
+    missing = [b for b, found in org_cards.items() if found is None]
+    if missing and user is not None:
+        # Карточки организации ещё нет — догрузим после ответа, следующий заход увидит.
+        # Гостям и поисковым роботам — только база: обход сайта не должен бить по порталу.
+        background.add_task(_subjects_in_background, missing)
+    text_phones = {lot["id"]: subjects.phones_in_text(lot.get("descriptionRu"),
+                                                      info[lot["id"]].get("extra_desc"))
+                   for lot in lots}
+    # Сначала лоты с авансом побольше, дальше по номеру.
+    lots.sort(key=lambda lot: (-(info[lot["id"]]["prepayment"] or 0), lot.get("lotNumber") or ""))
+    return {
+        "a": detail,
+        "lots": lots,
+        "info": info,
+        "subscribed": subscribed,
+        "marks": lot_marks,
+        "specs": specs,
+        "summaries": summaries,
+        "results": lot_results,
+        "contracts": (outcome or {}).get("contracts") or [],
+        "contracts_by_lot": results.contracts_by_lot(outcome),
+        "appeals": (outcome or {}).get("appeals") or [],
+        "results_at": results_at,
+        "now": now,
+        "company_bin": company_bin,
+        "org_cards": org_cards,
+        "text_phones": text_phones,
+        "lot_numbers": {lot["id"]: lot.get("lotNumber") for lot in lots},
+        "here": request.url.path,
+        "documents": documents,
+        "protocols": protocols,
+        "end": parse_date(detail.get("endDate")),
+        "dt": parse_date,
+        "fetched_at": fetched_at,
+        "refresh_error": refresh_error,
+        "spec_file": spec.spec_file,
+        "portal_url": PORTAL_ANNOUNCEMENT_URL.format(announcement_id),
+        "status_names": STATUS_NAMES,
+    }
+
+
+@router.get("/a/{announcement_id}/lots/{lot_id}/spec")
+def lot_spec(request: Request, viewer: Viewer, announcement_id: int, lot_id: int, refresh: int = 0):
+    with core.pool.connection() as conn:
+        row = conn.execute(
+            "SELECT detail FROM announcements WHERE id = %s", (announcement_id,)
+        ).fetchone()
+        lot = next(
+            (item for item in ((row[0] or {}).get("Lots") or []) if item.get("id") == lot_id), None
+        ) if row else None
+        url = spec.spec_file(lot) if lot else None
+        if url is None:
+            text, error = None, "У лота нет файла технической спецификации."
+        else:
+            if refresh and viewer:
+                # Повтор после ошибки: прошлую ошибку из кэша не берём.
+                conn.execute(
+                    "DELETE FROM lot_specs WHERE lot_id = %s AND text IS NULL", (lot_id,)
+                )
+            if viewer:
+                text, error = spec.get(conn, lot_id, url)
+            else:
+                # Гостям и роботам — только уже сохранённый текст, без скачивания с портала.
+                cached = conn.execute("SELECT text FROM lot_specs WHERE lot_id = %s",
+                                      (lot_id,)).fetchone()
+                text = cached[0] if cached else None
+                error = None if text else i18n.gettext("Текст ещё не загружен — откройте PDF.")
+            if i18n.language() == "kk":
+                kazakh = conn.execute(
+                    "SELECT text_kk FROM lot_specs WHERE lot_id = %s", (lot_id,)
+                ).fetchone()
+                text = (kazakh and kazakh[0]) or text
+    return templates.TemplateResponse(
+        request, "spec_fragment.html", {"text": text, "error": error, "url": url, "lot_id": lot_id}
+    )

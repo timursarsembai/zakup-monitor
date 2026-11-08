@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 import pytest
 
 from tests.web_helpers import ORIGIN, _announcement_with_lots, _login, _signed
-from zakup import auth, web
+from zakup import auth, kazpayment, payments
 
 
 def test_search_balance_charge_refund_history(client, conn):
@@ -65,11 +65,11 @@ def test_admin_edits_tariff_shown_to_clients(client, conn):
 
 
 def test_pay_tariff_and_searches_via_webhook_and_poll(client, conn, monkeypatch):
-    from zakup import credits, payments
+    from zakup import credits
 
     monkeypatch.setenv("KAZPAYMENT_WEBHOOK_SECRET", "whsec")
     orders = []
-    monkeypatch.setattr(web.kazpayment, "create_order",
+    monkeypatch.setattr(kazpayment, "create_order",
                         lambda ref, amount, comment, phone=None: orders.append((ref, amount, phone)) or f"https://kazpayment.kz/pay/{ref}")
     auth.set_password(conn, "+77011112233", "client-password-1")
     conn.execute("UPDATE users SET role = 'user', phone = email WHERE email = '+77011112233'")
@@ -83,10 +83,10 @@ def test_pay_tariff_and_searches_via_webhook_and_poll(client, conn, monkeypatch)
     page = client.get(f"/pay/{ref}").text
     assert "9 900 ₸" in page and "Выставить счёт в Kaspi" in page and f"https://kazpayment.kz/pay/{ref}" in page
     sent = []
-    monkeypatch.setattr(web.kazpayment, "remote_invoice", lambda r, p: sent.append((r, p)) or True)
+    monkeypatch.setattr(kazpayment, "remote_invoice", lambda r, p: sent.append((r, p)) or True)
     assert client.post(f"/pay/{ref}/kaspi", headers=ORIGIN, follow_redirects=False).headers["location"].endswith("sent=1")
     assert sent == [(ref, "+77011112233")]
-    monkeypatch.setattr(web.payments.kazpayment, "order_status", lambda r: {"status": "pending"})
+    monkeypatch.setattr(payments.kazpayment, "order_status", lambda r: {"status": "pending"})
     assert client.get(f"/pay/{ref}/status").json() == {"status": "pending"}
     raw, headers = _signed({"event_id": "e1", "event": "payment.received", "order_ref": ref,
                             "amount": 9900, "paid_amount": 9900, "late": False})
@@ -115,7 +115,6 @@ def test_pay_tariff_and_searches_via_webhook_and_poll(client, conn, monkeypatch)
 
 
 def test_webhook_failure_is_retried_and_refund_not_recredited(conn, monkeypatch):
-    from zakup import payments
 
     auth.set_password(conn, "+77011112233", "client-password-1")
     uid = conn.execute("SELECT id FROM users").fetchone()[0]
@@ -137,7 +136,6 @@ def test_webhook_failure_is_retried_and_refund_not_recredited(conn, monkeypatch)
 
 
 def test_search_price_never_above_bigger_pack():
-    from zakup import payments
 
     prices = [payments.searches_price(n) for n in range(1, 130)]
     assert prices == sorted(prices)

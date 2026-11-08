@@ -3,7 +3,7 @@
 
 
 from tests.web_helpers import ORIGIN, _announcement_with_lots, _login
-from zakup import db, details, web
+from zakup import db, details, results, spec, web
 
 
 def test_announcement_page_shows_lots_and_loads_spec(client, conn, monkeypatch):
@@ -30,9 +30,9 @@ def test_announcement_page_shows_lots_and_loads_spec(client, conn, monkeypatch):
     for text in ("Приобретение столика", "88448423-ЗЦП1", "аванс 30%", "г.Қонаев, мкр.5",
                  "Проект договора", "Техническая спецификация", "data-end="):
         assert text in page.text
-    monkeypatch.setattr(web.spec, "get", lambda conn, lot_id, url: (None, "портал недоступен"))
+    monkeypatch.setattr(spec, "get", lambda conn, lot_id, url: (None, "портал недоступен"))
     assert "Обновить" in client.get("/a/77/lots/5/spec").text
-    monkeypatch.setattr(web.spec, "get", lambda conn, lot_id, url: ("Столик, дерево", None))
+    monkeypatch.setattr(spec, "get", lambda conn, lot_id, url: ("Столик, дерево", None))
     fragment = client.get("/a/77/lots/5/spec?refresh=1")
     assert "Столик, дерево" in fragment.text
     assert client.get("/a/404404").status_code == 404
@@ -43,9 +43,9 @@ def test_finished_announcement_shows_winners_and_contracts(client, conn, monkeyp
 
     _announcement(conn)
     conn.commit()
-    monkeypatch.setattr(web.results.spec, "download", lambda url: b"pdf")
-    monkeypatch.setattr(web.results, "protocol_text", lambda pdf: PROTOCOL)
-    monkeypatch.setattr(web, "_goszakup", lambda: FakeClient())
+    monkeypatch.setattr(results.spec, "download", lambda url: b"pdf")
+    monkeypatch.setattr(results, "protocol_text", lambda pdf: PROTOCOL)
+    monkeypatch.setattr(web.core, "_goszakup", lambda: FakeClient())
     # Подробности свежие: перечитывать объявление не нужно, только итоги.
     conn.execute("UPDATE announcements SET details_fetched_at = now()")
     conn.commit()
@@ -64,10 +64,10 @@ def test_search_finds_finished_lots_with_winner(client, conn, monkeypatch):
     _announcement(conn)
     conn.execute("UPDATE announcements SET status_id = 350, disable_person = false")
     conn.execute("UPDATE lots SET status_id = 360 WHERE id = 70")
-    monkeypatch.setattr(web.results.spec, "download", lambda url: b"pdf")
-    monkeypatch.setattr(web.results, "protocol_text", lambda pdf: PROTOCOL)
+    monkeypatch.setattr(results.spec, "download", lambda url: b"pdf")
+    monkeypatch.setattr(results, "protocol_text", lambda pdf: PROTOCOL)
     detail = conn.execute("SELECT detail FROM announcements WHERE id = 7").fetchone()[0]
-    web.results.parse_announcement(conn, 7, detail)
+    results.parse_announcement(conn, 7, detail)
     conn.commit()
     _login(client)
     base = "/lots?applied=1&deadline_mode="
@@ -75,8 +75,8 @@ def test_search_finds_finished_lots_with_winner(client, conn, monkeypatch):
     page = client.get(base + "&stage=done").text
     assert "Весы" in page and "🏁" in page and "37 950.00" in page and "−15.7%" in page
     # Разобранный протокол второй раз не качается.
-    monkeypatch.setattr(web.results.spec, "download", lambda url: 1 / 0)
-    assert web.results.parse_pending(conn, 10) == 0
+    monkeypatch.setattr(results.spec, "download", lambda url: 1 / 0)
+    assert results.parse_pending(conn, 10) == 0
 
 
 def test_announcements_page_lot_page_and_portal_fields(client, conn):
@@ -140,7 +140,7 @@ def test_spec_shown_from_database_without_portal(client, conn, monkeypatch):
         '[{"id": 9, "nameRu": "Техническая спецификация", "filePath": "https://ows.goszakup.gov.kz/download/9"}]')""")
     conn.execute("INSERT INTO lot_specs (lot_id, file_url, text) VALUES (5001, 'https://ows.goszakup.gov.kz/download/9', 'Бумага офисная А4, 80 г/м2')")
     conn.commit()
-    monkeypatch.setattr(web.details, "fetch_one", lambda *a: (_ for _ in ()).throw(AssertionError("portal")))
+    monkeypatch.setattr(details, "fetch_one", lambda *a: (_ for _ in ()).throw(AssertionError("portal")))
     _login(client)
     page = client.get("/lots/5001").text
     assert "Бумага офисная А4, 80 г/м2" in page and 'data-loaded="1"' in page
@@ -259,6 +259,6 @@ def test_legal_documents_use_requisites(client, conn):
 
 
 def test_spec_tables_rendered_as_table():
-    blocks = web._spec_blocks("Заголовок\nНаименование | Кол-во\nСтол | 5\nИтого")
+    blocks = web.core._spec_blocks("Заголовок\nНаименование | Кол-во\nСтол | 5\nИтого")
     assert blocks == [("text", "Заголовок"), ("table", [["Наименование", "Кол-во"], ["Стол", "5"]]),
                       ("text", "Итого")]

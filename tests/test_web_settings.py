@@ -3,7 +3,7 @@
 
 
 from tests.web_helpers import ORIGIN, _login
-from zakup import auth, web
+from zakup import auth, kaspi, research, web
 
 
 def test_settings_link_redirects_to_bot(client, monkeypatch):
@@ -61,13 +61,13 @@ def test_settings_tabs_and_ai_models(client, conn, monkeypatch):
     assert conn.execute("SELECT ai_provider, ai_model, ai_model_light FROM users WHERE role = 'admin'"
                         ).fetchone() == ("anthropic", "claude-opus-5-5", "claude-sonnet-5-5")
     # Поиск — своя модель, выжимка и вопросы поставщику — своя.
-    assert web.research.light_model(conn) == ("anthropic", "claude-sonnet-5-5")
-    monkeypatch.setattr(web.research, "provider_models",
+    assert research.light_model(conn) == ("anthropic", "claude-sonnet-5-5")
+    monkeypatch.setattr(research, "provider_models",
                         lambda provider, key: [("claude-x", "Claude X")] if key == "sk-ant-x" else [])
     assert client.get("/settings/ai/models?provider=anthropic").json() == [["claude-x", "Claude X"]]
     client.post("/settings/ai", data={"provider": "claude_code", "model": "ignored"}, headers=ORIGIN)
     assert conn.execute("SELECT ai_model FROM users WHERE role = 'admin'").fetchone()[0] is None
-    assert web.research.light_model(conn) == ("claude_code", "haiku")
+    assert research.light_model(conn) == ("claude_code", "haiku")
 
 
 def test_admin_manages_roles_disable_delete(client, conn):
@@ -137,7 +137,7 @@ def test_proxy_settings_hide_password(client, conn, monkeypatch):
     assert saved.headers["location"] == "/settings?saved=proxy#ai"
     page = client.get("/settings").text
     assert "81.1.2.3:12323" in page and "topsecret" not in page
-    monkeypatch.setattr(web.kaspi, "search", lambda query, proxy, *a, **k: [{"name": "x"}])
+    monkeypatch.setattr(kaspi, "search", lambda query, proxy, *a, **k: [{"name": "x"}])
     assert "Прокси работает" in client.post("/settings/proxy", data={"action": "test"}, headers=ORIGIN).text
     client.post("/settings/proxy", data={"action": "delete"}, headers=ORIGIN)
     assert "Прокси не задан" in client.get("/settings").text
@@ -194,7 +194,7 @@ def test_client_settings_and_group_button(client, conn, monkeypatch):
     assert go.headers["location"] == "https://t.me/+join"
     link = client.post("/settings/telegram/link", headers=origin, follow_redirects=False)
     assert link.headers["location"].startswith("https://t.me/tenderim_kz_bot?start=")
-    assert web._user_groups(conn, uid) == []
+    assert web.core._user_groups(conn, uid) == []
 
 
 def test_moderator_cannot_reset_client_password(client, conn):

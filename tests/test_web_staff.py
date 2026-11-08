@@ -3,7 +3,7 @@
 
 
 from tests.web_helpers import ORIGIN, _announcement_with_lots, _login
-from zakup import auth, web
+from zakup import auth, insights, web
 
 
 def test_action_log(client, conn):
@@ -49,7 +49,7 @@ def test_staff_dashboard_and_market_trends(client, conn):
     assert login.headers["location"] == "/dashboard"
     page = client.get("/dashboard").text
     assert "Дашборд платформы" in page and 'href="/dashboard" class="brand"' in page
-    for section in web.insights.SECTIONS:
+    for section in insights.SECTIONS:
         for days in (7, 365):
             assert client.get(f"/dashboard/data?section={section}&days={days}").status_code == 200
     assert client.get("/dashboard/data?section=nope").status_code == 404
@@ -71,7 +71,7 @@ def test_visits_and_events_are_recorded(client, conn, monkeypatch):
     conn.execute("INSERT INTO geo_kz VALUES ('2.27.130.0', '2.27.131.255', 'г. Астана', 'Астана')")
     conn.commit()
     # Записи идут в фоне — в тесте пишем сразу.
-    monkeypatch.setattr(web, "_spawn", lambda job: job())
+    monkeypatch.setattr(web.core, "_spawn", lambda job: job())
     browser = {"user-agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0) Mobile/15E148 Safari/604.1",
                "referer": "https://www.google.com/", "sec-fetch-dest": "document", "x-forwarded-for": "2.27.130.7"}
     first = client.get("/analytics?utm_source=tg&utm_campaign=launch", headers=browser)

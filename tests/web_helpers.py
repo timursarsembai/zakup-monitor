@@ -3,7 +3,7 @@
 import hashlib
 import hmac
 
-from zakup import db, details, web
+from zakup import db, details, signup
 
 ORIGIN = {"origin": "https://testserver"}
 
@@ -36,9 +36,9 @@ def _announcement_with_lots(conn):
 
 def _fake_sms(monkeypatch, code="1234"):
     sent = []
-    monkeypatch.setattr(web.signup.kazpayment, "request_otp",
+    monkeypatch.setattr(signup.kazpayment, "request_otp",
                         lambda phone: sent.append(phone) or f"req-{len(sent)}")
-    monkeypatch.setattr(web.signup.kazpayment, "verify_otp",
+    monkeypatch.setattr(signup.kazpayment, "verify_otp",
                         lambda request_id, entered: "77011112233" if entered == code else None)
     return sent
 
