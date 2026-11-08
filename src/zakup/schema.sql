@@ -417,3 +417,33 @@ CREATE TABLE IF NOT EXISTS seller_contacts (
 ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_at timestamptz;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_by bigint;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS may_reregister boolean NOT NULL DEFAULT false;
+-- Клиенты: вход по телефону (логин = телефон в виде +7XXXXXXXXXX).
+ALTER TABLE users ADD COLUMN IF NOT EXISTS phone text;
+CREATE UNIQUE INDEX IF NOT EXISTS users_phone ON users (phone) WHERE phone IS NOT NULL;
+-- SMS-коды: регистрация и восстановление пароля. flow — случайный ключ шага в адресе.
+CREATE TABLE IF NOT EXISTS otp_requests (
+    id          bigserial PRIMARY KEY,
+    flow        text NOT NULL UNIQUE,
+    purpose     text NOT NULL,                 -- 'register' или 'reset'
+    phone       text NOT NULL,
+    request_id  text NOT NULL,
+    ip          text,
+    attempts    integer NOT NULL DEFAULT 0,
+    verified_at timestamptz,
+    used_at     timestamptz,
+    created_at  timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS otp_requests_created ON otp_requests (created_at);
+-- Организации клиентов со шага регистрации. Закрытая база: только для сотрудников.
+CREATE TABLE IF NOT EXISTS client_orgs (
+    user_id    bigint PRIMARY KEY REFERENCES users (id) ON DELETE CASCADE,
+    kind       text NOT NULL,                  -- 'ip', 'too', 'other'
+    bin        text NOT NULL,
+    name       text NOT NULL,
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+-- Общие настройки сайта (например, открыта ли регистрация).
+CREATE TABLE IF NOT EXISTS app_settings (
+    key   text PRIMARY KEY,
+    value text NOT NULL
+);

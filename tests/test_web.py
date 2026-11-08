@@ -44,7 +44,7 @@ def test_pages_redirect_to_login_and_back(client):
 def test_wrong_password_shows_error(client):
     response = _login(client, password="wrong-password")
     assert response.status_code == 401
-    assert "Неверный логин или пароль" in response.text
+    assert "Неверный телефон или пароль" in response.text
     assert "zakup_session" not in response.cookies
 
 
@@ -713,3 +713,78 @@ def test_research_hides_offers_without_margin(client, conn):
     _login(client)
     page = client.get("/lots/5001").text
     assert "Дешёвая бумага" in page and "Дорогая бумага" not in page
+
+
+def _fake_sms(monkeypatch, code="1234"):
+    sent = []
+    monkeypatch.setattr(web.signup.kazpayment, "request_otp",
+                        lambda phone: sent.append(phone) or f"req-{len(sent)}")
+    monkeypatch.setattr(web.signup.kazpayment, "verify_otp",
+                        lambda request_id, entered: "77011112233" if entered == code else None)
+    return sent
+
+
+def _flow(page: str) -> str:
+    return page.split('name="flow" value="', 1)[1].split('"', 1)[0]
+
+
+def test_register_by_phone_then_company(client, conn, monkeypatch):
+    sent = _fake_sms(monkeypatch)
+    assert "Регистрация скоро откроется" in client.get("/register").text
+    assert client.post("/register", data={"phone": "87011112233"}, headers=ORIGIN).status_code == 403
+    web.signup.set_registration_open(conn, True)
+    conn.commit()
+    assert client.post("/register", data={"phone": "+7 727 111 22 33"}, headers=ORIGIN).status_code == 422
+    page = client.post("/register", data={"phone": "8 (701) 111-22-33"}, headers=ORIGIN)
+    assert sent == ["+77011112233"] and "+77011112233" in page.text
+    flow = _flow(page.text)
+    data = {"flow": flow, "code": "1234", "password": "long-password-1", "password2": "other-password-1"}
+    assert "Пароли не совпадают" in client.post("/register/code", data=data, headers=ORIGIN).text
+    data["password2"] = data["password"]
+    data["code"] = "0000"
+    assert "Неверный код. Осталось попыток: 4" in client.post("/register/code", data=data, headers=ORIGIN).text
+    data["code"] = "1234"
+    done = client.post("/register/code", data=data, headers=ORIGIN, follow_redirects=False)
+    assert done.headers["location"] == "/welcome/company"
+    assert conn.execute("SELECT role, phone FROM users WHERE email = '+77011112233'").fetchone() == (
+        "user", "+77011112233")
+    # Тот же flow второй раз не работает.
+    assert client.post("/register/code", data=data, headers=ORIGIN).status_code == 410
+    assert "Ваша организация" in client.get("/welcome/company").text
+    saved = client.post("/welcome/company", data={"kind": "ip", "bin": "900101300123", "name": "ИП Тест"},
+                        headers=ORIGIN, follow_redirects=False)
+    assert saved.headers["location"] == "/"
+    assert conn.execute("SELECT kind, bin, name FROM client_orgs").fetchone() == ("ip", "900101300123", "ИП Тест")
+    # Повторная регистрация того же номера — отказ.
+    assert "уже зарегистрирован" in client.post("/register", data={"phone": "87011112233"},
+                                               headers=ORIGIN).text
+    client.post("/logout", headers=ORIGIN)
+    ok = client.post("/login", data={"email": "8 701 111 22 33", "password": "long-password-1"},
+                     headers=ORIGIN, follow_redirects=False)
+    assert ok.status_code == 303
+
+
+def test_forgot_password_by_sms_and_staff_login(client, conn, monkeypatch):
+    _fake_sms(monkeypatch)
+    auth.set_password(conn, "+77011112233", "old-password-1")
+    assert "не зарегистрирован" in client.post("/forgot", data={"phone": "87051112233"}, headers=ORIGIN).text
+    page = client.post("/forgot", data={"phone": "87011112233"}, headers=ORIGIN).text
+    done = client.post("/forgot/code", data={"flow": _flow(page), "code": "1234", "password": "new-password-1",
+                                             "password2": "new-password-1"}, headers=ORIGIN, follow_redirects=False)
+    assert done.status_code == 303
+    assert auth.login(conn, "+77011112233", "new-password-1", None, None)
+    assert not auth.login(conn, "+77011112233", "old-password-1", None, None)
+    client.post("/logout", headers=ORIGIN)
+    assert "Вход для сотрудников" in client.get("/staff/login").text
+    ok = client.post("/staff/login", data={"email": "owner@mail.kz", "password": "long-enough-password"},
+                     headers=ORIGIN, follow_redirects=False)
+    assert ok.status_code == 303
+
+
+def test_sms_limits_protect_balance(client, conn, monkeypatch):
+    sent = _fake_sms(monkeypatch)
+    auth.set_password(conn, "+77011112233", "old-password-1")
+    for _ in range(web.signup.PER_IP_HOUR):
+        client.post("/forgot", data={"phone": "87011112233"}, headers=ORIGIN)
+    blocked = client.post("/forgot", data={"phone": "87011112233"}, headers=ORIGIN)
+    assert blocked.status_code == 429 and len(sent) == web.signup.PER_IP_HOUR

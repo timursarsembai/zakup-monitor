@@ -71,6 +71,21 @@ def normalize_email(email: str) -> str:
     return email.strip().lower()
 
 
+def normalize_phone(raw: str) -> str | None:
+    """Казахстанский мобильный в виде +7XXXXXXXXXX: «8 701 111-22-33», «+7 (701)…».
+    Клиенты входят по телефону: он же их логин в users.email."""
+    digits = "".join(c for c in raw or "" if c.isdigit())
+    if len(digits) == 11 and digits[0] in "78":
+        digits = digits[1:]
+    if len(digits) != 10 or digits[0] != "7" or digits[1] not in "04567":
+        return None
+    return "+7" + digits
+
+
+def is_phone_login(login: str) -> bool:
+    return login.startswith("+7") and len(login) == 12 and login[1:].isdigit()
+
+
 def too_many_failures(conn: psycopg.Connection, email: str, ip: str | None) -> bool:
     row = conn.execute(
         """SELECT count(*) FILTER (WHERE email = %(email)s),

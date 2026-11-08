@@ -1,0 +1,38 @@
+{% extends "_auth.html" %}
+{% block auth_title %}{{ _("Ваша организация") }}{% endblock %}
+{% block card %}
+<form class="card" method="post" action="/welcome/company">
+  <h1>{{ _("Ваша организация") }}</h1>
+  <p class="hint">{{ _("От чьего имени вы участвуете в госзакупках. По БИН/ИИН сайт отметит ваши предложения в итогах закупок.") }}</p>
+  {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+  <div class="choice" role="radiogroup" aria-label="{{ _("Форма") }}">
+    {% for key, label in kinds.items() %}<label><input type="radio" name="kind" value="{{ key }}" {% if kind == key %}checked{% endif %} required>{{ _(label) }}</label>{% endfor %}
+  </div>
+  <div class="field">
+    <label for="bin">{{ _("БИН или ИИН") }}</label>
+    <input id="bin" name="bin" inputmode="numeric" maxlength="12" pattern="\d{12}" value="{{ bin }}" required data-bin>
+  </div>
+  <div class="field">
+    <label for="name">{{ _("Название") }} <span class="muted" data-bin-status></span></label>
+    <input id="name" name="name" maxlength="300" value="{{ name }}" required>
+  </div>
+  <button class="submit">{{ _("Готово") }}</button>
+</form>
+<script>
+  // По 12 цифрам БИН подставляем название с портала госзакупок (если оно там есть).
+  const binInput = document.querySelector("[data-bin]");
+  const nameInput = document.getElementById("name");
+  const status = document.querySelector("[data-bin-status]");
+  binInput.addEventListener("input", async () => {
+    const value = binInput.value.replace(/\D/g, "");
+    if (value.length !== 12) return;
+    status.textContent = "…";
+    try {
+      const response = await fetch("/welcome/company/lookup?bin=" + value);
+      const data = response.ok ? await response.json() : null;
+      if (data && data.name) { if (!nameInput.value) nameInput.value = data.name; status.textContent = {{ _("— найдено на портале")|tojson }}; }
+      else status.textContent = "";
+    } catch { status.textContent = ""; }
+  });
+</script>
+{% endblock %}

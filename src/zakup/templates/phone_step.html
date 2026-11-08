@@ -1,0 +1,19 @@
+{% extends "_auth.html" %}
+{% block auth_title %}{{ title }}{% endblock %}
+{% block card %}
+{% if closed %}
+<div class="card"><h1>{{ title }}</h1><p class="hint">{{ _("Регистрация скоро откроется.") }}</p></div>
+{% else %}
+<form class="card" method="post" action="{{ action }}">
+  <h1>{{ title }}</h1>
+  <p class="hint">{{ hint }}</p>
+  {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+  <div class="field">
+    <label for="phone">{{ _("Мобильный телефон") }}</label>
+    <input id="phone" name="phone" type="tel" inputmode="tel" placeholder="+7 7__ ___ __ __" value="{{ phone }}" autocomplete="tel" required autofocus>
+  </div>
+  <button class="submit">{{ _("Получить код по SMS") }}</button>
+</form>
+{% endif %}
+{% endblock %}
+{% block foot %}<a href="/login">{{ _("Уже есть аккаунт? Войти") }}</a>{% endblock %}
