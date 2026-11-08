@@ -54,7 +54,6 @@ PROMPT = """Ты помогаешь поставщику на госзакупк
   и скидка за объём, наличие и срок поставки, доставка до места поставки,
   документы (сертификаты, СТ РК/ГОСТ, гарантия), счёт-фактура и НДС, условия оплаты.
 Не больше 10 вопросов в списке. Пиши по-русски, ничего не выдумывай."""
-MODELS = research.SUMMARY_MODELS
 
 
 def _item(conn: psycopg.Connection, lot_id: int, url: str) -> dict[str, Any] | None:
@@ -67,16 +66,14 @@ def request(conn: psycopg.Connection, lot_id: int, url: str) -> str | None:
     """Ставит в очередь (если нет готового). None — такого предложения нет."""
     if _item(conn, lot_id, url) is None:
         return None
-    provider = (conn.execute(
-        "SELECT ai_provider FROM users WHERE role = 'admin' ORDER BY id LIMIT 1"
-    ).fetchone() or ("claude_code",))[0] or "claude_code"
+    provider, model = research.light_model(conn)
     row = conn.execute(
         """INSERT INTO supplier_questions (lot_id, url, provider, model) VALUES (%s, %s, %s, %s)
            ON CONFLICT (lot_id, url) DO UPDATE SET status = 'queued', error = NULL,
                provider = excluded.provider, model = excluded.model, created_at = now()
            WHERE supplier_questions.status = 'error'
            RETURNING status""",
-        (lot_id, url, provider, MODELS[provider]),
+        (lot_id, url, provider, model),
     ).fetchone()
     conn.commit()
     return row[0] if row else of(conn, lot_id, url)["status"]

@@ -339,17 +339,22 @@ def test_settings_tabs_and_ai_models(client, conn, monkeypatch):
         assert f'role="tab" data-tab' in page and tab in page
     assert 'value="claude-sonnet-5-5"' in page
     monkeypatch.setenv("ZAKUP_SECRET_KEY", Fernet.generate_key().decode())
+    assert "Модель для выжимки и вопросов поставщику" in page
     saved = client.post("/settings/ai", data={"provider": "anthropic", "api_key": "sk-ant-x",
-                                               "model": "claude-opus-5-5"},
+                                               "model": "claude-opus-5-5",
+                                               "model_light": "claude-sonnet-5-5"},
                         headers=ORIGIN, follow_redirects=False)
     assert saved.headers["location"] == "/settings?saved=ai#ai"
-    assert conn.execute("SELECT ai_provider, ai_model FROM users WHERE role = 'admin'").fetchone() == (
-        "anthropic", "claude-opus-5-5")
+    assert conn.execute("SELECT ai_provider, ai_model, ai_model_light FROM users WHERE role = 'admin'"
+                        ).fetchone() == ("anthropic", "claude-opus-5-5", "claude-sonnet-5-5")
+    # Поиск — своя модель, выжимка и вопросы поставщику — своя.
+    assert web.research.light_model(conn) == ("anthropic", "claude-sonnet-5-5")
     monkeypatch.setattr(web.research, "provider_models",
                         lambda provider, key: [("claude-x", "Claude X")] if key == "sk-ant-x" else [])
     assert client.get("/settings/ai/models?provider=anthropic").json() == [["claude-x", "Claude X"]]
     client.post("/settings/ai", data={"provider": "claude_code", "model": "ignored"}, headers=ORIGIN)
     assert conn.execute("SELECT ai_model FROM users WHERE role = 'admin'").fetchone()[0] is None
+    assert web.research.light_model(conn) == ("claude_code", "haiku")
 
 
 def test_announcements_advance_column_groups_values(client, conn):

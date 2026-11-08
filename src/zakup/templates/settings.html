@@ -112,16 +112,22 @@
       {% for key, name in providers.items() %}
       <label class="provider"><input type="radio" name="provider" value="{{ key }}" {% if ai_provider == key %}checked{% endif %}>
         <span><b>{{ _(name) }}</b>
-        <span class="muted">{% if key == "claude_code" %}{{ _("Без ключей: работает по подписке владельца на этом сервере.") }}{% elif key in ai_keys %}{{ _("Ключ сохранён.") }}{% else %}{{ _("Нужен API-ключ.") }}{% endif %}</span></span></label>
+        <span class="muted">{% if key == "claude_code" %}{{ _("Без ключей: работает по подписке владельца на этом сервере.") }} {{ _("Поиск товаров — Sonnet, выжимка и вопросы поставщику — Haiku.") }}{% elif key in ai_keys %}{{ _("Ключ сохранён.") }}{% else %}{{ _("Нужен API-ключ.") }}{% endif %}</span></span></label>
       {% endfor %}
     </div>
     {% for key in ("anthropic", "openai") %}
     <div data-provider-fields="{{ key }}" {% if ai_provider != key %}hidden{% endif %}>
       <label class="field"><span>{{ _("API-ключ") }} {{ "Anthropic" if key == "anthropic" else "OpenAI" }}{% if key in ai_keys %} {{ _("— сохранён; введите новый, чтобы заменить") }}{% endif %}</span>
         <input name="api_key" type="password" autocomplete="off" placeholder="{{ 'sk-ant-…' if key == 'anthropic' else 'sk-…' }}" {% if ai_provider != key %}disabled{% endif %}></label>
-      <label class="field"><span>{{ _("Модель") }}</span>
+      <label class="field"><span>{{ _("Модель для поиска товаров") }} <span class="muted">{{ _("— ищет в интернете, нужна сильная модель") }}</span></span>
         <select name="model" data-models="{{ key }}" {% if ai_provider != key %}disabled{% endif %}>
           {% for model_id, label in models[key] %}<option value="{{ model_id }}" {% if ai_provider == key and ai_model == model_id %}selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select></label>
+      {% set light_default = light_defaults[key] %}{% set light = ai_model_light if ai_provider == key else light_default %}
+      <label class="field"><span>{{ _("Модель для выжимки и вопросов поставщику") }} <span class="muted">{{ _("— без интернета, хватит быстрой и дешёвой") }}</span></span>
+        <select name="model_light" data-models="{{ key }}" {% if ai_provider != key %}disabled{% endif %}>
+          {% for model_id, label in models[key] %}<option value="{{ model_id }}" {% if light == model_id %}selected{% endif %}>{{ label }}</option>{% endfor %}
+          {% if light not in models[key]|map("first")|list %}<option value="{{ light }}" selected>{{ light }}</option>{% endif %}
         </select></label>
       {% if key in ai_keys %}<p class="muted" data-models-status="{{ key }}"></p>{% endif %}
     </div>
@@ -208,11 +214,16 @@
     // Если ключ сохранён — подтягиваем актуальный список моделей у провайдера.
     for (const status of aiForm.querySelectorAll("[data-models-status]")) {
       const provider = status.dataset.modelsStatus;
-      const select = aiForm.querySelector(`[data-models="${provider}"]`);
+      const selects = aiForm.querySelectorAll(`[data-models="${provider}"]`);
       fetch(`/settings/ai/models?provider=${provider}`).then((r) => r.ok ? r.json() : null).then((models) => {
         if (!models || !models.length) return;
-        const current = select.value;
-        select.replaceChildren(...models.map(([id, label]) => new Option(label, id, false, id === current)));
+        for (const select of selects) {
+          const current = select.value;
+          const options = models.map(([id, label]) => new Option(label, id, false, id === current));
+          // Сохранённой модели нет в списке провайдера — оставляем её, чтобы не сбросить молча.
+          if (current && !models.some(([id]) => id === current)) options.unshift(new Option(current, current, false, true));
+          select.replaceChildren(...options);
+        }
         status.textContent = `${ {{ _("Список моделей загружен у провайдера:")|tojson }} } ${models.length}.`;
       }).catch(() => {});
     }

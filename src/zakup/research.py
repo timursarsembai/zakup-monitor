@@ -579,18 +579,28 @@ def run_job(conn: psycopg.Connection, job: dict[str, Any]) -> dict[str, Any]:
     return found
 
 
+def light_model(conn: psycopg.Connection) -> tuple[str, str]:
+    """(провайдер, модель) для коротких задач без интернета: выжимка, вопросы поставщику.
+    Модель выбирает администратор отдельно от модели поиска товаров."""
+    provider, model = conn.execute(
+        "SELECT ai_provider, ai_model_light FROM users WHERE role = 'admin' ORDER BY id LIMIT 1"
+    ).fetchone() or ("claude_code", None)
+    provider = provider or "claude_code"
+    if provider == "claude_code" or not model:
+        model = SUMMARY_MODELS[provider]
+    return provider, model
+
+
 def request_summary(conn: psycopg.Connection, lot_id: int) -> str:
     """Ставит выжимку в очередь (если её ещё нет или прошлая не удалась). Статус."""
-    provider = (conn.execute(
-        "SELECT ai_provider FROM users WHERE role = 'admin' ORDER BY id LIMIT 1"
-    ).fetchone() or ("claude_code",))[0] or "claude_code"
+    provider, model = light_model(conn)
     row = conn.execute(
         """INSERT INTO spec_summaries (lot_id, provider, model) VALUES (%s, %s, %s)
            ON CONFLICT (lot_id) DO UPDATE SET status = 'queued', error = NULL,
                provider = excluded.provider, model = excluded.model, created_at = now()
            WHERE spec_summaries.status = 'error'
            RETURNING status""",
-        (lot_id, provider, SUMMARY_MODELS[provider]),
+        (lot_id, provider, model),
     ).fetchone()
     conn.commit()
     if row:

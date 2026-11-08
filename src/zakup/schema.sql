@@ -400,3 +400,5 @@ CREATE TABLE IF NOT EXISTS supplier_questions (
     finished_at timestamptz,
     PRIMARY KEY (lot_id, url)
 );
+-- Отдельная модель для коротких задач (выжимка, вопросы поставщику); пусто — по умолчанию.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS ai_model_light text;

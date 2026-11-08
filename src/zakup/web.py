@@ -1168,7 +1168,8 @@ def _settings_page(request: Request, user: int, *, sent: str = "", saved: str = 
             "SELECT telegram_chat_id, company_bin FROM users WHERE id = %s", (user,)
         ).fetchone()
         groups = _user_groups(conn, user)
-        ai = conn.execute("SELECT ai_provider, ai_model FROM users WHERE id = %s", (user,)).fetchone()
+        ai = conn.execute("SELECT ai_provider, ai_model, ai_model_light FROM users WHERE id = %s",
+                          (user,)).fetchone()
         ai_keys = secrets_box.saved_providers(conn, user)
         users = conn.execute(
             """SELECT u.id, u.email, u.role, u.telegram_chat_id IS NOT NULL,
@@ -1192,10 +1193,12 @@ def _settings_page(request: Request, user: int, *, sent: str = "", saved: str = 
             "groups": groups,
             "ai_provider": ai[0],
             "ai_model": ai[1] or "",
+            "ai_model_light": ai[2] or research.SUMMARY_MODELS.get(ai[0] or "claude_code", ""),
             "ai_keys": ai_keys,
             "providers": research.PROVIDERS,
             "default_models": research.DEFAULT_MODELS,
             "models": research.MODELS,
+            "light_defaults": research.SUMMARY_MODELS,
             "tab": tab or {"ai": "ai", "bin": "company"}.get(saved),
             "users": users,
             "me": user,
@@ -1316,6 +1319,7 @@ def save_ai(
     user: Admin,
     provider: Annotated[str, Form()],
     model: Annotated[str, Form()] = "",
+    model_light: Annotated[str, Form()] = "",
     api_key: Annotated[str, Form()] = "",
 ):
     if provider not in research.PROVIDERS:
@@ -1332,11 +1336,13 @@ def save_ai(
                                   status_code=422, tab="ai")
         # У Claude Code модель не выбирается: берётся модель по умолчанию.
         chosen = None if provider == "claude_code" else (model.strip()[:100] or None)
+        light = None if provider == "claude_code" else (model_light.strip()[:100] or None)
         conn.execute(
-            "UPDATE users SET ai_provider = %s, ai_model = %s WHERE id = %s",
-            (provider, chosen, user),
+            "UPDATE users SET ai_provider = %s, ai_model = %s, ai_model_light = %s WHERE id = %s",
+            (provider, chosen, light, user),
         )
-    _audit(request, user, "settings_ai", provider, model=chosen, new_key=bool(api_key.strip()))
+    _audit(request, user, "settings_ai", provider, model=chosen, model_light=light,
+           new_key=bool(api_key.strip()))
     return RedirectResponse("/settings?saved=ai#ai", status_code=303)
 
 
