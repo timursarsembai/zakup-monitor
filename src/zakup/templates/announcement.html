@@ -39,8 +39,8 @@
     <dt>{{ _("Способ закупки") }}</dt><dd>{{ loc(a.RefTradeMethods) or "—" }}</dd>
     <dt>{{ _("Тип закупки") }}</dt><dd>{{ (loc(a.RefTypeTrade) or "—")|trim }}</dd>
     <dt>{{ _("Вид предмета") }}</dt><dd>{{ loc(a.RefSubjectType) or "—" }}</dd>
-    <dt>{{ _("Организатор") }}</dt><dd>{% if a.Organizer %}{{ loc(a.Organizer) }}{% else %}{{ loc(a, "orgNameRu") }}{% endif %}{{ org_contacts(org_cards.get(a.orgBin), a.orgNameRu or "") }}</dd>
-    {% if a.customerBin and a.customerBin != a.orgBin %}<dt>{{ _("Заказчик") }}</dt><dd>{{ loc(a, "customerNameRu") }}{{ org_contacts(org_cards.get(a.customerBin), a.customerNameRu or "") }}</dd>{% endif %}
+    <dt>{{ _("Организатор") }}</dt><dd>{{ org_link(a.orgBin, loc(a.Organizer) if a.Organizer else loc(a, "orgNameRu")) }}{{ org_contacts(org_cards.get(a.orgBin), a.orgNameRu or "") }}</dd>
+    {% if a.customerBin and a.customerBin != a.orgBin %}<dt>{{ _("Заказчик") }}</dt><dd>{{ org_link(a.customerBin, loc(a, "customerNameRu")) }}{{ org_contacts(org_cards.get(a.customerBin), a.customerNameRu or "") }}</dd>{% endif %}
   </dl>
   <div class="aside">
     <div class="muted">{{ _("Сумма закупки") }}</div>

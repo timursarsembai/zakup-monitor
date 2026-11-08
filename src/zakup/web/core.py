@@ -18,6 +18,7 @@ import psycopg
 from fastapi import Depends, HTTPException, Request
 from fastapi.responses import Response
 from fastapi.templating import Jinja2Templates
+from markupsafe import Markup, escape
 from psycopg_pool import ConnectionPool
 
 from zakup import (
@@ -27,6 +28,7 @@ from zakup import (
     config,
     i18n,
     legal,
+    orgs,
     tariff,
     visits,
 )
@@ -138,6 +140,15 @@ def _structured_demand(*, name, description, url, end, amount, count, unit, cust
 
 
 templates.env.globals["structured_demand"] = _structured_demand
+
+
+def _org_link(bin_: str | None, name: str | None) -> Markup:
+    """Название организации — ссылкой на её страницу (только юрлица, у ИП страниц нет)."""
+    text = escape(name or bin_ or "")
+    return Markup(f'<a href="/org/{bin_}">{text}</a>') if orgs.is_company(bin_) else text
+
+
+templates.env.globals["org_link"] = _org_link
 
 
 def _tariff() -> dict:

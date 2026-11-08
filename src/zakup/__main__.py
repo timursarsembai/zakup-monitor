@@ -33,7 +33,7 @@ def _parser() -> argparse.ArgumentParser:
     more.add_argument("--part", choices=["open", "finished", "all"], default="all",
                       help="open — открытые (быстрый круг), finished — завершённые и протоколы")
     sub.add_parser("payments", help="запасная проверка неоплаченных заказов kazpayment")
-    orgs = sub.add_parser("subjects", help="догрузить контакты заказчиков открытых объявлений")
+    orgs = sub.add_parser("subjects", help="догрузить карточки организаций: заказчики, организаторы, победители")
     orgs.add_argument("--limit", type=int, default=600)
     sub.add_parser("client-bot", help="клиентский Telegram-бот и группа клиентов (постоянно)")
     sub.add_parser("autofix", help="дежурный: разбирает и исправляет сбои (на хосте, постоянно)")

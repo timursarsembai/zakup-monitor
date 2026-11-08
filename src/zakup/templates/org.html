@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% from "_contacts.html" import org_contacts, contacts_styles with context %}
+{% set name = pick(o.name_ru, o.name_kz) %}
+{% block title %}{{ name }} — {{ _("БИН") }} {{ o.bin }}: {{ _("госзакупки и контакты") }}{% endblock %}
+{% block description %}{{ name }}, {{ _("БИН") }} {{ o.bin }}.{% if o.buyer.total %} {{ _("Госзакупки:") }} {{ o.buyer.total }} {{ _("объявл. на") }} {{ o.buyer.amount | money }} ₸{% if o.buyer.open %}, {{ _("сейчас открыто:") }} {{ o.buyer.open }}{% endif %}.{% endif %}{% if o.seller.wins %} {{ _("Побед в закупках:") }} {{ o.seller.wins }} {{ _("на") }} {{ o.seller.amount | money }} ₸.{% endif %}{% if o.card and (o.card.phones or o.card.addresses) %} {{ _("Телефоны и адрес.") }}{% endif %}{% endblock %}
+{% block structured %}
+{% set org = {"@context": "https://schema.org", "@type": "Organization", "name": name, "taxID": o.bin,
+              "url": site_url ~ "/org/" ~ o.bin} %}
+{% if o.card %}
+  {% if o.card.phones %}{% set __ = org.update({"telephone": o.card.phones[0].number}) %}{% endif %}
+  {% if o.card.email %}{% set __ = org.update({"email": o.card.email}) %}{% endif %}
+  {% if o.card.addresses %}{% set __ = org.update({"address": o.card.addresses[0]}) %}{% endif %}
+  {% if o.card.website %}{% set __ = org.update({"sameAs": o.card.website}) %}{% endif %}
+{% endif %}
+<script type="application/ld+json">{{ [
+  org,
+  {"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [
+    {"@type": "ListItem", "position": 1, "name": _("Закупки"), "item": site_url ~ "/announcements"},
+    {"@type": "ListItem", "position": 2, "name": name, "item": site_url ~ "/org/" ~ o.bin}]}
+] | tojson }}</script>
+{% endblock %}
+{% block style %}
+{{ contacts_styles() }}
+  .org-head { margin-bottom: 18px; }
+  .org-head h1 { margin: 4px 0 6px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; margin: 16px 0 6px; }
+  .tile { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+  .tile b { display: block; font-size: 22px; line-height: 1.25; }
+  h2 { font-size: 18px; margin: 28px 0 10px; }
+  td.when { white-space: nowrap; font-variant-numeric: tabular-nums; }
+{% endblock %}
+{% block main %}
+<p class="crumbs muted"><a href="/announcements">{{ _("Закупки") }}</a> {{ _("→ организация") }}</p>
+<div class="org-head">
+  <h1>{{ name }}</h1>
+  <div class="muted">{{ _("БИН") }} {{ o.bin }}</div>
+  {% if o.card %}{{ org_contacts(o.card, o.name_ru) }}{% endif %}
+</div>
+
+<div class="tiles">
+  {% if o.buyer.total %}
+  <div class="tile"><span class="muted">{{ _("Объявил закупок") }}</span><b>{{ o.buyer.total }}</b><span class="muted">{{ _("на") }} {{ o.buyer.amount | money }} ₸</span></div>
+  <div class="tile"><span class="muted">{{ _("Открыто сейчас") }}</span><b>{{ o.buyer.open }}</b></div>
+  {% if o.discount is not none %}<div class="tile"><span class="muted">{{ _("Снижение цены на торгах") }}</span><b>{{ '%.1f'|format(o.discount * 100) }}%</b><span class="muted">{{ _("в среднем от плановой суммы") }}</span></div>{% endif %}
+  {% endif %}
+  {% if o.seller.wins or o.offered %}
+  <div class="tile"><span class="muted">{{ _("Побед в закупках") }}</span><b>{{ o.seller.wins }}</b>{% if o.seller.wins %}<span class="muted">{{ _("на") }} {{ o.seller.amount | money }} ₸</span>{% endif %}</div>
+  <div class="tile"><span class="muted">{{ _("Подавал заявки на лоты") }}</span><b>{{ o.offered }}</b></div>
+  {% endif %}
+</div>
+<p class="muted">{{ _("По открытым данным портала goszakup.gov.kz, собранным Tenderim; пополняется каждый день.") }}</p>
+
+{% macro announcements_table(rows) %}
+<div class="table-wrap"><table>
+  <tr><th>{{ _("Объявление") }}</th><th>{{ _("Лотов") }}</th><th>{{ _("Сумма, ₸") }}</th><th>{{ _("Приём заявок до") }}</th></tr>
+  {% for r in rows %}
+  <tr>
+    <td><a href="/a/{{ r.id }}">{{ pick(r.name_ru, r.name_kz) or r.number_anno }}</a><div class="muted">№ {{ r.number_anno or r.id }}</div></td>
+    <td class="num">{{ r.count_lots or "" }}</td>
+    <td class="num">{{ r.total_sum | money if r.total_sum is not none else "" }}</td>
+    <td class="when">{{ (r.end_date|local).strftime("%d.%m.%Y %H:%M") if r.end_date else "—" }}</td>
+  </tr>
+  {% endfor %}
+</table></div>
+{% endmacro %}
+
+{% if o.open %}
+<h2>{{ _("Открытые закупки") }}</h2>
+{{ announcements_table(o.open) }}
+{% endif %}
+
+{% if o.their_winners %}
+<h2>{{ _("Кто выигрывает у этого заказчика") }}</h2>
+<div class="table-wrap"><table>
+  <tr><th>{{ _("Поставщик") }}</th><th>{{ _("Побед") }}</th><th>{{ _("Сумма, ₸") }}</th></tr>
+  {% for w in o.their_winners %}
+  <tr><td>{{ org_link(w.bin, w.name) }}</td><td class="num">{{ w.wins }}</td><td class="num">{{ w.amount | money if w.amount is not none else "" }}</td></tr>
+  {% endfor %}
+</table></div>
+{% endif %}
+
+{% if o.wins %}
+<h2>{{ _("Победы в закупках") }}</h2>
+<div class="table-wrap"><table>
+  <tr><th>{{ _("Лот") }}</th><th>{{ _("Заказчик") }}</th><th>{{ _("Плановая сумма, ₸") }}</th><th>{{ _("Сумма победы, ₸") }}</th></tr>
+  {% for w in o.wins %}
+  <tr>
+    <td><a href="/lots/{{ w.id }}">{{ pick(w.name_ru, w.name_kz) or w.id }}</a>{% if w.end_date %}<div class="muted">{{ (w.end_date|local).strftime("%d.%m.%Y") }}</div>{% endif %}</td>
+    <td>{{ org_link(w.customer_bin, w.customer) }}</td>
+    <td class="num">{{ w.amount | money if w.amount is not none else "" }}</td>
+    <td class="num">{{ w.winner_total | money if w.winner_total is not none else "" }}</td>
+  </tr>
+  {% endfor %}
+</table></div>
+{% endif %}
+
+{% if o.their_customers %}
+<h2>{{ _("Главные заказчики") }}</h2>
+<div class="table-wrap"><table>
+  <tr><th>{{ _("Заказчик") }}</th><th>{{ _("Побед") }}</th><th>{{ _("Сумма, ₸") }}</th></tr>
+  {% for c in o.their_customers %}
+  <tr><td>{{ org_link(c.bin, c.name) }}</td><td class="num">{{ c.wins }}</td><td class="num">{{ c.amount | money if c.amount is not none else "" }}</td></tr>
+  {% endfor %}
+</table></div>
+{% endif %}
+
+{% if o.past %}
+<h2>{{ _("Прошедшие закупки") }}</h2>
+{{ announcements_table(o.past) }}
+{% endif %}
+{% endblock %}

@@ -24,6 +24,7 @@ from zakup import (
     legal,
     marks,
     og,
+    orgs,
     research,
     results,
     spec,
@@ -185,6 +186,16 @@ LLMS_TXT = """# Tenderim
 """
 
 
+@router.get("/org/{bin_}")
+def org_page(request: Request, user: Viewer, bin_: str):
+    """Открытая страница организации: закупки заказчика, победы и участие поставщика."""
+    with core.pool.connection() as conn:
+        profile = orgs.profile(conn, bin_)
+    if profile is None:
+        raise HTTPException(404, "Такой организации нет в базе")
+    return templates.TemplateResponse(request, "org.html", {"o": profile})
+
+
 @router.get("/offer")
 def offer_page(request: Request, user: Viewer):
     return templates.TemplateResponse(request, "legal_offer.html", {"docs_date": legal.DOCS_DATE})
@@ -248,9 +259,12 @@ def sitemap_index() -> Response:
         anns = conn.execute(
             "SELECT count(*) FROM announcements WHERE end_date > now() AND detail IS NOT NULL").fetchone()[0]
     lots_n = len(_live_lots())
+    with core.pool.connection() as conn:
+        orgs_n = len(orgs.sitemap_bins(conn))
     parts = [f"{SITE_URL}/sitemap-static.xml"]
     parts += [f"{SITE_URL}/sitemap-a-{i}.xml" for i in range((anns + SITEMAP_CHUNK - 1) // SITEMAP_CHUNK)]
     parts += [f"{SITE_URL}/sitemap-l-{i}.xml" for i in range((lots_n + SITEMAP_CHUNK - 1) // SITEMAP_CHUNK)]
+    parts += [f"{SITE_URL}/sitemap-o-{i}.xml" for i in range((orgs_n + SITEMAP_CHUNK - 1) // SITEMAP_CHUNK)]
     body = "".join(f"<sitemap><loc>{url}</loc></sitemap>" for url in parts)
     return Response('<?xml version="1.0" encoding="UTF-8"?>'
                     f'<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{body}</sitemapindex>',
@@ -263,7 +277,7 @@ def sitemap_part(kind: str) -> Response:
         urls = [(f"{SITE_URL}{path}", None) for path in ("/", "/announcements", "/lots", "/analytics", "/pricing", "/offer", "/privacy", "/contacts")]
     else:
         prefix, _, index = kind.partition("-")
-        if prefix not in ("a", "l") or not index.isdigit():
+        if prefix not in ("a", "l", "o") or not index.isdigit():
             raise HTTPException(404, "Нет такой части")
         offset = int(index) * SITEMAP_CHUNK
         with core.pool.connection() as conn:
@@ -273,6 +287,9 @@ def sitemap_part(kind: str) -> Response:
                        WHERE end_date > now() AND detail IS NOT NULL ORDER BY id
                        LIMIT %s OFFSET %s""", (SITEMAP_CHUNK, offset)).fetchall()
                 urls = [(f"{SITE_URL}/a/{i}", d) for i, d in rows]
+            elif prefix == "o":
+                bins = orgs.sitemap_bins(conn)[offset:offset + SITEMAP_CHUNK]
+                urls = [(f"{SITE_URL}/org/{b}", None) for b in bins]
             else:
                 rows = _live_lots()[offset:offset + SITEMAP_CHUNK]
                 urls = [(f"{SITE_URL}/lots/{i}", d) for i, d in rows]

@@ -51,14 +51,23 @@ def save(conn: psycopg.Connection, bin_: str, subject: dict[str, Any] | None) ->
 
 
 def refresh(conn: psycopg.Connection, client: Client, limit: int = 300) -> int:
-    """Догружает заказчиков открытых объявлений, которых нет или карточка устарела."""
+    """Догружает карточки, которых нет или они устарели: сначала заказчиков и организаторов
+    открытых объявлений, потом победителей-юрлиц (для страниц организаций), потом
+    заказчиков прошлых закупок. Обычные запросы к API портала, по одному БИН."""
     bins = [row[0] for row in conn.execute(
         f"""SELECT b FROM (
-                SELECT DISTINCT unnest(ARRAY[a.customer_bin, a.org_bin]) AS b
-                FROM announcements a WHERE a.end_date > now()) open_bins
-            LEFT JOIN subjects s ON s.bin = open_bins.b
+                SELECT DISTINCT ON (b) b, priority FROM (
+                    SELECT unnest(ARRAY[customer_bin, org_bin]) AS b,
+                           CASE WHEN end_date > now() THEN 0 ELSE 2 END AS priority
+                    FROM announcements
+                    UNION ALL
+                    SELECT winner_bin, 1 FROM lot_results
+                    WHERE outcome = 'winner' AND winner_bin ~ '^\\d{{4}}[4-6]\\d{{7}}$'
+                ) wanted ORDER BY b, priority) ranked
+            LEFT JOIN subjects s ON s.bin = ranked.b
             WHERE b ~ '^\\d{{12}}$'
               AND (s.bin IS NULL OR s.fetched_at < now() - interval '{REFRESH_AFTER}')
+            ORDER BY priority
             LIMIT %s""",
         (limit,),
     )]

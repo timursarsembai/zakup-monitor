@@ -86,7 +86,7 @@
     <dl class="facts">
       <dt>{{ _("Номер лота") }}</dt><dd>{{ lot.lotNumber }}</dd>
       {% if i.extra_desc %}<dt>{{ _("Доп. характеристика") }}</dt><dd>{{ pick(i.extra_desc, i.extra_desc_kz) }}</dd>{% endif %}
-      <dt>{{ _("Заказчик") }}</dt><dd>{{ loc(lot, "customerNameRu") or "—" }}{% if not link or lot.customerBin not in (a.customerBin, a.orgBin) %}{{ org_contacts(org_cards.get(lot.customerBin), lot.customerNameRu or "", text_phones.get(lot.id, [])) }}{% elif text_phones.get(lot.id) %}{{ org_contacts(none, "", text_phones[lot.id]) }}{% endif %}</dd>
+      <dt>{{ _("Заказчик") }}</dt><dd>{{ org_link(lot.customerBin, loc(lot, "customerNameRu")) if loc(lot, "customerNameRu") else "—" }}{% if not link or lot.customerBin not in (a.customerBin, a.orgBin) %}{{ org_contacts(org_cards.get(lot.customerBin), lot.customerNameRu or "", text_phones.get(lot.id, [])) }}{% elif text_phones.get(lot.id) %}{{ org_contacts(none, "", text_phones[lot.id]) }}{% endif %}</dd>
       {% set places = [] %}{% for p in lot.Plans or [] %}{% for k in p.PlansKato or [] %}{% set place = loc(k, "fullDeliveryPlaceNameRu") %}{% if place and place|trim not in places %}{% set __ = places.append(place|trim) %}{% endif %}{% endfor %}{% endfor %}
       {% if places %}<dt>{{ _("Место поставки") }}</dt><dd>{{ places|join("; ") }}</dd>{% endif %}
       {% if i.supply_date %}<dt>{{ _("Срок поставки") }}</dt><dd>{{ i.supply_date }}</dd>{% endif %}
@@ -122,8 +122,8 @@
       </div>
     </div>
     {% if r.outcome == "winner" %}
-    <p style="margin:10px 0 0"><b>{{ r.winner_name }}</b> <span class="muted">{{ _("БИН") }} {{ r.winner_bin }}</span>{% if r.winner_total is not none %} — <b>{{ r.winner_total | money }} ₸</b>{% if lot.amount %} <span class="muted">(−{{ '%.1f'|format((1 - (r.winner_total|float) / lot.amount) * 100) }}{{ _("% от плана)") }}</span>{% endif %}{% endif %}</p>
-    {% if r.second_name %}<p class="muted" style="margin:4px 0 0">{{ _("Второе место:") }} {{ r.second_name }}{{ _(", БИН") }} {{ r.second_bin }}</p>{% endif %}
+    <p style="margin:10px 0 0"><b>{{ org_link(r.winner_bin, r.winner_name) }}</b> <span class="muted">{{ _("БИН") }} {{ r.winner_bin }}</span>{% if r.winner_total is not none %} — <b>{{ r.winner_total | money }} ₸</b>{% if lot.amount %} <span class="muted">(−{{ '%.1f'|format((1 - (r.winner_total|float) / lot.amount) * 100) }}{{ _("% от плана)") }}</span>{% endif %}{% endif %}</p>
+    {% if r.second_name %}<p class="muted" style="margin:4px 0 0">{{ _("Второе место:") }} {{ org_link(r.second_bin, r.second_name) }}{{ _(", БИН") }} {{ r.second_bin }}</p>{% endif %}
     {% else %}
     <p style="margin:10px 0 0">{{ _("Закупка не состоялась") }}{% if r.reason %} {{ _("в связи с") }} {{ r.reason }}{% endif %}.</p>
     {% endif %}
@@ -133,7 +133,7 @@
       {% for o in r.offers %}
       <tr{% if o.bin == r.winner_bin %} style="font-weight:600"{% endif %}>
         <td>{{ loop.index }}</td>
-        <td>{{ o.name }}{% if company_bin and o.bin == company_bin %} <span class="badge sub">{{ _("вы") }}</span>{% endif %}</td>
+        <td>{{ org_link(o.bin, o.name) }}{% if company_bin and o.bin == company_bin %} <span class="badge sub">{{ _("вы") }}</span>{% endif %}</td>
         <td>{{ o.bin }}</td>
         <td class="num">{{ o.price | money if o.price else "" }}</td>
         <td class="num">{{ o.total | money if o.total else "" }}</td>

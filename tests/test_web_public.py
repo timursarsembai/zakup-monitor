@@ -325,3 +325,41 @@ def test_preview_images_and_llms_txt(client, conn):
     assert client.get("/og/lot/999999.png").status_code == 404
     llms = client.get("/llms.txt")
     assert llms.status_code == 200 and "# Tenderim" in llms.text and "https://zakup.sarsembai.com/lots" in llms.text
+
+
+def test_organization_pages_for_customer_and_supplier(client, conn):
+    customer, supplier, person = "990740001111", "050540002222", "651114400549"
+    db.upsert_announcement(conn, {"id": 900, "number_anno": "900-1", "name_ru": "Ремонт крыши",
+                                  "total_sum": 2000000, "customer_bin": customer,
+                                  "customer_name_ru": "ГУ Школа №9", "org_bin": customer,
+                                  "org_name_ru": "ГУ Школа №9", "end_date": "2026-11-01 09:00:00"})
+    details.save(conn, {"id": 900, "nameRu": "Ремонт крыши", "endDate": "2026-11-01 09:00:00",
+                        "customerBin": customer, "customerNameRu": "ГУ Школа №9",
+                        "Lots": [{"id": 9001, "trdBuyId": 900, "lotNumber": "R-1", "nameRu": "Ремонт кровли",
+                                  "amount": 2000000, "count": 1, "customerBin": customer,
+                                  "customerNameRu": "ГУ Школа №9"}]})
+    conn.execute("UPDATE lots SET customer_bin = %s WHERE id = 9001", (customer,))
+    conn.execute(
+        """INSERT INTO lot_results (lot_id, outcome, winner_bin, winner_name, winner_total, offers)
+           VALUES (9001, 'winner', %s, 'ТОО Кровля', 1800000, %s)""",
+        (supplier, db.Jsonb([{"bin": supplier, "name": "ТОО Кровля", "total": "1800000"},
+                             {"bin": person, "name": "ИП Иванов", "total": "1900000"}])))
+    conn.execute("INSERT INTO subjects (bin, name_ru, phone, email, website, addresses, fetched_at) "
+                 "VALUES (%s, 'ГУ Школа №9', '+7 727 111 22 33', 'school9@mail.kz', '', '[]', now())", (customer,))
+    conn.commit()
+    page = client.get(f"/org/{customer}").text
+    assert "<h1>ГУ Школа №9</h1>" in page and "Объявил закупок" in page and "school9@mail.kz" in page
+    assert f'href="/org/{supplier}">ТОО Кровля</a>' in page and "10.0%" in page
+    assert '"taxID": "990740001111"' in page and "/a/900" in page
+    seller = client.get(f"/org/{supplier}").text
+    assert "Побед в закупках" in seller and "/lots/9001" in seller and f'href="/org/{customer}"' in seller
+    # ИП (ИИН с датой рождения) — без страницы и без ссылки; неизвестный БИН — 404.
+    assert client.get(f"/org/{person}").status_code == 404
+    assert client.get("/org/990740009999").status_code == 404
+    assert client.get("/org/abc").status_code == 404
+    lot = client.get("/lots/9001").text
+    assert f'href="/org/{customer}"' in lot and f'href="/org/{person}"' not in lot and "ИП Иванов" in lot
+    index = client.get("/sitemap.xml").text
+    assert "sitemap-o-0.xml" in index
+    part = client.get("/sitemap-o-0.xml").text
+    assert f"/org/{customer}" in part and f"/org/{supplier}" in part and person not in part

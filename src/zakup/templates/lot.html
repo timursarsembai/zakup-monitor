@@ -101,7 +101,7 @@
   <div>
     <div class="muted">{{ _("Объявление №") }} {{ a.numberAnno or a.id }} · {{ loc(a.RefTradeMethods) or "" }} · {{ loc(a.RefBuyStatus) or "" }}</div>
     <a class="title" href="/a/{{ a.id }}">{{ loc(a) }}</a>
-    <div class="muted">{% if a.Organizer %}{{ loc(a.Organizer) }}{% else %}{{ loc(a, "orgNameRu") }}{% endif %}</div>
+    <div class="muted">{{ org_link(a.orgBin, loc(a.Organizer) if a.Organizer else loc(a, "orgNameRu")) }}</div>
   </div>
   <div class="side">
     <div>{{ _("до") }} {{ (end|local).strftime("%d.%m.%Y %H:%M") if end else "—" }}</div>
