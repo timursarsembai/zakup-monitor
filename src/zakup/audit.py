@@ -19,6 +19,7 @@ ACTIONS = {
     "login_failed": "Неудачный вход",
     "logout": "Выход",
     "payment_start": "Перешёл к оплате",
+    "payment_invoice": "Счёт в Kaspi на номер",
     "otp_sent": "Отправлен SMS-код",
     "register": "Регистрация",
     "password_reset_sms": "Восстановил пароль по SMS",

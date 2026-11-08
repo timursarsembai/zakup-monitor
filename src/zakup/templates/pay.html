@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}{{ _("Оплата") }}{% endblock %}
+{% block style %}
+  .pay { max-width: 720px; }
+  .summary { border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin: 10px 0 16px; display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: center; }
+  .summary b.sum { font-size: 26px; }
+  .ways { display: grid; gap: 12px; }
+  .way { border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  .way h2 { font-size: 17px; margin: 0 0 6px; }
+  .way form { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
+  .way input { padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); font: inherit; font-size: 16px; }
+  .go { padding: 10px 16px; border: 0; border-radius: 8px; background: var(--accent); color: var(--on-accent); font: inherit; font-weight: 600; cursor: pointer; }
+  .kaspi { background: #f14635; color: #fff; }
+  .qr-frame { width: 100%; height: 640px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+  .state { padding: 12px 14px; border-radius: 10px; margin: 10px 0; }
+  .state.ok { background: color-mix(in srgb, #1e9e5a 16%, transparent); }
+  .state.bad { background: color-mix(in srgb, #d93025 14%, transparent); }
+  .mobile-only { display: none; } @media (max-width: 760px) { .mobile-only { display: block; } }
+{% endblock %}
+{% block main %}
+<div class="pay">
+<h1>{{ _("Оплата") }}</h1>
+<div class="summary">
+  <div><b>{% if p.kind == "tariff" %}{{ _("Тариф на") }} {{ p.quantity }} {{ _("дней") }}{% else %}{{ p.quantity }} {{ _("поисков товаров с ИИ") }}{% endif %}</b>
+    <div class="muted">{{ _("Заказ") }} {{ p.ref }} · {{ (p.created_at|local).strftime("%d.%m.%Y %H:%M") }}</div></div>
+  <b class="sum">{{ "{:,}".format(p.amount).replace(",", " ") }} ₸</b>
+</div>
+
+<div data-pay-state data-ref="{{ p.ref }}" data-status="{{ p.status }}">
+{% if p.status == "paid" %}
+  <p class="state ok">✓ {{ _("Оплачено.") }} {% if p.kind == "tariff" %}{{ _("Платные функции открыты.") }} <a href="/">{{ _("Перейти к закупкам →") }}</a>{% else %}{{ _("Поиски начислены на баланс.") }} <a href="/balance">{{ _("Баланс →") }}</a>{% endif %}</p>
+{% elif p.status == "cancelled" %}
+  <p class="state bad">{{ _("Заказ отменён.") }} <a href="/pricing">{{ _("Оформить заново") }}</a></p>
+{% else %}
+  {% if sent %}<p class="state ok">{{ _("Счёт отправлен в приложение Kaspi. Откройте Kaspi → Уведомления или Платежи и подтвердите оплату.") }}</p>{% endif %}
+  {% if error == "nokaspi" %}<p class="state bad">{{ _("Kaspi не принял счёт на этот номер — возможно, на нём нет Kaspi. Укажите другой номер или оплатите по QR.") }}</p>
+  {% elif error %}<p class="state bad">{{ _("Не удалось выставить счёт. Попробуйте ещё раз или оплатите по QR.") }}</p>{% endif %}
+  <p class="muted" data-waiting>⏳ {{ _("Ждём оплату — страница обновится сама.") }}</p>
+  <div class="ways">
+    <section class="way">
+      <h2>{{ _("Счёт в приложение Kaspi") }}</h2>
+      <p class="muted">{{ _("Счёт придёт в Kaspi на номер — подтвердите его в приложении.") }}</p>
+      <form method="post" action="/pay/{{ p.ref }}/kaspi">
+        <input name="phone" type="tel" inputmode="tel" value="{{ phone or '' }}" placeholder="+7 7__ ___ __ __" aria-label="{{ _("Номер в Kaspi") }}">
+        <button class="go kaspi">{{ _("Выставить счёт в Kaspi") }}</button>
+      </form>
+    </section>
+    {% if token %}
+    <section class="way mobile-only">
+      <h2>{{ _("Оплатить в Kaspi с этого телефона") }}</h2>
+      <form method="post" action="https://kazpayment.kz/api/public/pay/{{ token }}/go"><button class="go kaspi">{{ _("Открыть Kaspi и оплатить") }}</button></form>
+    </section>
+    {% endif %}
+    {% if p.pay_url %}
+    <section class="way">
+      <h2>{{ _("QR-код — Kaspi или любой банк") }}</h2>
+      <p class="muted">{{ _("Нажмите «Оплатить», отсканируйте код в приложении банка. Код действует 3 минуты, его можно выпустить заново.") }}</p>
+      <iframe class="qr-frame" src="{{ p.pay_url | safe_url }}" title="{{ _("Оплата по QR") }}" loading="lazy" referrerpolicy="no-referrer"></iframe>
+    </section>
+    {% endif %}
+  </div>
+{% endif %}
+</div>
+<p class="muted">{{ _("Платёж принимает kazpayment.kz через кассу Kaspi. Деньги поступают напрямую нам, данные карты мы не видим.") }}</p>
+</div>
+<script>
+  // Пока ждём оплату — раз в 5 секунд спрашиваем статус; оплачено → перезагружаем страницу.
+  (() => {
+    const box = document.querySelector("[data-pay-state]");
+    if (!box || box.dataset.status !== "pending") return;
+    const tick = async () => {
+      try {
+        const response = await fetch(`/pay/${box.dataset.ref}/status`);
+        const data = response.ok ? await response.json() : null;
+        if (data && data.status !== "pending") { location.replace(`/pay/${box.dataset.ref}`); return; }
+      } catch {}
+      setTimeout(tick, 5000);
+    };
+    setTimeout(tick, 5000);
+  })();
+</script>
+{% endblock %}

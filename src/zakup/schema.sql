@@ -482,3 +482,4 @@ CREATE TABLE IF NOT EXISTS payment_events (
     event       text,
     received_at timestamptz NOT NULL DEFAULT now()
 );
+ALTER TABLE payments ADD COLUMN IF NOT EXISTS checked_at timestamptz;

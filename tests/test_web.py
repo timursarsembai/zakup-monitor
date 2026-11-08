@@ -942,9 +942,17 @@ def test_pay_tariff_and_searches_via_webhook_and_poll(client, conn, monkeypatch)
     uid = conn.execute("SELECT id FROM users WHERE email = '+77011112233'").fetchone()[0]
     client.post("/login", data={"email": "87011112233", "password": "client-password-1"}, headers=ORIGIN)
     go = client.post("/pay/tariff", headers=ORIGIN, follow_redirects=False)
-    assert go.headers["location"].startswith("https://kazpayment.kz/pay/zk-")
     ref, amount, phone = orders[0]
+    assert go.headers["location"] == f"/pay/{ref}"
     assert amount == 9900 and phone == "+77011112233"
+    page = client.get(f"/pay/{ref}").text
+    assert "9 900 ₸" in page and "Выставить счёт в Kaspi" in page and f"https://kazpayment.kz/pay/{ref}" in page
+    sent = []
+    monkeypatch.setattr(web.kazpayment, "remote_invoice", lambda r, p: sent.append((r, p)) or True)
+    assert client.post(f"/pay/{ref}/kaspi", headers=ORIGIN, follow_redirects=False).headers["location"].endswith("sent=1")
+    assert sent == [(ref, "+77011112233")]
+    monkeypatch.setattr(web.payments.kazpayment, "order_status", lambda r: {"status": "pending"})
+    assert client.get(f"/pay/{ref}/status").json() == {"status": "pending"}
     raw, headers = _signed({"event_id": "e1", "event": "payment.received", "order_ref": ref,
                             "amount": 9900, "paid_amount": 9900, "late": False})
     assert client.post("/webhooks/kazpayment", content=raw, headers={**headers, "x-kazpayment-signature": "sha256=bad"}).status_code == 401
@@ -968,6 +976,7 @@ def test_pay_tariff_and_searches_via_webhook_and_poll(client, conn, monkeypatch)
     assert payments.poll(conn) == 0  # уже выдано
     page = client.get("/pricing").text
     assert "оплачено" in page and "Мои оплаты" in page
+    assert "✓ Оплачено" in client.get(f"/pay/{ref}").text
 
 
 def test_spec_tables_rendered_as_table():

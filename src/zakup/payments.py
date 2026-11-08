@@ -36,7 +36,7 @@ def searches_price(count: int) -> int:
 
 def create(conn: psycopg.Connection, user_id: int, kind: str, quantity: int, amount: int,
            phone: str | None, title: str) -> str:
-    """Заводит платёж у себя и заказ у kazpayment. Возвращает ссылку на оплату."""
+    """Заводит платёж у себя и заказ у kazpayment. Возвращает наш номер платежа."""
     ref = f"zk-{user_id}-{secrets.token_hex(5)}"
     conn.execute(
         """INSERT INTO payments (ref, user_id, kind, quantity, amount) VALUES (%s, %s, %s, %s, %s)""",
@@ -46,7 +46,7 @@ def create(conn: psycopg.Connection, user_id: int, kind: str, quantity: int, amo
     pay_url = kazpayment.create_order(ref, amount, title, phone)
     conn.execute("UPDATE payments SET pay_url = %s WHERE ref = %s", (pay_url, ref))
     conn.commit()
-    return pay_url
+    return ref
 
 
 def fulfill(conn: psycopg.Connection, ref: str, paid_amount: int, late: bool = False) -> bool:
@@ -147,3 +147,36 @@ def history(conn: psycopg.Connection, user_id: int) -> list[tuple]:
            WHERE user_id = %s ORDER BY created_at DESC LIMIT 50""",
         (user_id,),
     ).fetchall()
+
+
+def get(conn: psycopg.Connection, ref: str, user_id: int) -> dict[str, Any] | None:
+    row = conn.execute(
+        """SELECT ref, kind, quantity, amount, status, pay_url, created_at, paid_at, checked_at
+           FROM payments WHERE ref = %s AND user_id = %s""",
+        (ref, user_id),
+    ).fetchone()
+    keys = ("ref", "kind", "quantity", "amount", "status", "pay_url", "created_at", "paid_at", "checked_at")
+    return dict(zip(keys, row)) if row else None
+
+
+def check(conn: psycopg.Connection, ref: str) -> str:
+    """Статус для страницы оплаты: спрашивает kazpayment не чаще раза в 10 секунд."""
+    row = conn.execute(
+        """UPDATE payments SET checked_at = now() WHERE ref = %s AND status = 'pending'
+             AND (checked_at IS NULL OR checked_at < now() - interval '10 seconds')
+           RETURNING ref""",
+        (ref,),
+    ).fetchone()
+    conn.commit()
+    if row:
+        try:
+            order = kazpayment.order_status(ref)
+            if order.get("status") == "paid":
+                fulfill(conn, ref, int(order.get("paidAmount") or 0))
+            elif order.get("status") == "cancelled":
+                conn.execute("UPDATE payments SET status = 'cancelled' WHERE ref = %s AND status = 'pending'",
+                             (ref,))
+                conn.commit()
+        except kazpayment.KazpaymentError as error:
+            logger.info("check %s: %s", ref, error.code)
+    return conn.execute("SELECT status FROM payments WHERE ref = %s", (ref,)).fetchone()[0]

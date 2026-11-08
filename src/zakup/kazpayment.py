@@ -92,3 +92,19 @@ def order_status(ref: str, transport: httpx.BaseTransport | None = None) -> dict
     from urllib.parse import quote
 
     return _get(f"/orders/{quote(ref, safe='')}", transport)
+
+
+def remote_invoice(ref: str, phone: str, transport: httpx.BaseTransport | None = None) -> bool:
+    """Счёт прямо в приложение Kaspi на номер покупателя."""
+    from urllib.parse import quote
+
+    data = _post(f"/orders/{quote(ref, safe='')}/remote", {"phone": phone}, transport)
+    return bool(data.get("sent"))
+
+
+def pay_token(pay_url: str | None) -> str | None:
+    """Токен страницы оплаты — последняя часть payUrl (для оплаты одним нажатием)."""
+    if not pay_url or "/pay/" not in pay_url:
+        return None
+    token = pay_url.rstrip("/").rsplit("/", 1)[-1]
+    return token if token.replace("-", "").replace("_", "").isalnum() else None

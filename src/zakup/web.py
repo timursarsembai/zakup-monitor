@@ -661,12 +661,54 @@ def pay_searches(request: Request, user: User, count: Annotated[int, Form()]):
 def _pay(request: Request, conn, user: int, kind: str, quantity: int, amount: int, title: str):
     phone = conn.execute("SELECT phone FROM users WHERE id = %s", (user,)).fetchone()[0]
     try:
-        url = payments.create(conn, user, kind, quantity, amount, phone, title)
+        ref = payments.create(conn, user, kind, quantity, amount, phone, title)
     except kazpayment.KazpaymentError as error:
         logger.warning("payment create failed: %s", error.code)
         return RedirectResponse("/pricing?error=pay", status_code=303)
     _audit(request, user, "payment_start", kind, quantity=quantity, amount=amount)
-    return RedirectResponse(url, status_code=303)
+    return RedirectResponse(f"/pay/{ref}", status_code=303)
+
+
+@app.get("/pay/{ref}")
+def pay_page(request: Request, user: User, ref: str, sent: str = "", error: str = ""):
+    """Своя страница оплаты: счёт в Kaspi на номер, оплата в Kaspi одним нажатием и QR
+    (страница kazpayment внутри нашей — они разрешают встраивание)."""
+    with pool.connection() as conn:
+        payment = payments.get(conn, ref, user)
+        if payment is None:
+            raise HTTPException(404, "Нет такого платежа")
+        phone = conn.execute("SELECT phone FROM users WHERE id = %s", (user,)).fetchone()[0]
+    return templates.TemplateResponse(request, "pay.html", {
+        "p": payment, "phone": phone, "token": kazpayment.pay_token(payment["pay_url"]),
+        "sent": sent, "error": error})
+
+
+@app.get("/pay/{ref}/status")
+def pay_status(user: User, ref: str):
+    with pool.connection() as conn:
+        if payments.get(conn, ref, user) is None:
+            raise HTTPException(404, "Нет такого платежа")
+        return {"status": payments.check(conn, ref)}
+
+
+@app.post("/pay/{ref}/kaspi", dependencies=[Depends(same_origin)])
+def pay_kaspi_invoice(request: Request, user: User, ref: str, phone: Annotated[str, Form()] = ""):
+    """Счёт в приложение Kaspi на номер (свой или указанный)."""
+    with pool.connection() as conn:
+        payment = payments.get(conn, ref, user)
+        if payment is None or payment["status"] != "pending":
+            raise HTTPException(404, "Нет такого неоплаченного платежа")
+        own = conn.execute("SELECT phone FROM users WHERE id = %s", (user,)).fetchone()[0]
+    number = auth.normalize_phone(phone) if phone.strip() else own
+    if not number:
+        return RedirectResponse(f"/pay/{ref}?error=phone", status_code=303)
+    try:
+        kazpayment.remote_invoice(ref, number)
+    except kazpayment.KazpaymentError as error:
+        code = "nokaspi" if error.code == "invoice_rejected" else "invoice"
+        return RedirectResponse(f"/pay/{ref}?error={code}", status_code=303)
+    _audit(request, user, "payment_invoice", ref)
+    return RedirectResponse(f"/pay/{ref}?sent=1", status_code=303)
 
 
 @app.post("/webhooks/kazpayment")
