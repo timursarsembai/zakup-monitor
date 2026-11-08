@@ -28,6 +28,8 @@
   .tile b { display: block; font-size: 22px; line-height: 1.25; }
   h2 { font-size: 18px; margin: 28px 0 10px; }
   td.when { white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .chips-row { display: flex; flex-wrap: wrap; gap: 6px 8px; }
+  .chips-row a { padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px; font-size: 14px; }
 {% endblock %}
 {% block main %}
 <p class="crumbs muted"><a href="/announcements">{{ _("Закупки") }}</a> {{ _("→ организация") }}</p>
@@ -63,6 +65,22 @@
   {% endfor %}
 </table></div>
 {% endmacro %}
+
+{% macro divisions(rows, region) %}<div class="chips-row">{% for c in rows %}{% if division_name(c.code) %}<a href="/category/{{ c.code }}{{ '/' ~ region if region }}">{{ division_name(c.code) }} · {{ c.lots }}</a>{% endif %}{% endfor %}</div>{% endmacro %}
+{% if o.buys_divisions or o.buys_names %}
+<h2>{{ _("Что чаще всего покупает") }}</h2>
+{% if o.buys_divisions %}{{ divisions(o.buys_divisions, none) }}{% endif %}
+{% if o.buys_names %}
+<div class="table-wrap" style="margin-top:12px"><table>
+  <tr><th>{{ _("Товар, работа, услуга") }}</th><th>{{ _("Лотов") }}</th><th>{{ _("Сумма, ₸") }}</th></tr>
+  {% for n in o.buys_names %}<tr><td>{{ pick(n.name_ru, n.name_kz) }}</td><td class="num">{{ n.lots }}</td><td class="num">{{ n.amount | money }}</td></tr>{% endfor %}
+</table></div>
+{% endif %}
+{% endif %}
+{% if o.sells_divisions %}
+<h2>{{ _("Что поставляет") }}</h2>
+{{ divisions(o.sells_divisions, none) }}
+{% endif %}
 
 {% if o.open %}
 <h2>{{ _("Открытые закупки") }}</h2>

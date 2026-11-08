@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}{{ _("Организации в госзакупках Казахстана") }}{% endblock %}
+{% block description %}{{ _("Справочник заказчиков и поставщиков госзакупок: БИН, контакты, сколько закупают и выигрывают. Фильтры по региону и форме: ИП, ТОО, АО, госучреждения.") }}{% endblock %}
+{% block style %}
+  .org-filter { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; margin: 12px 0 16px; }
+  .org-filter label { display: flex; flex-direction: column; gap: 3px; font-size: 13px; color: var(--muted); }
+  .org-filter input, .org-filter select { padding: 7px 9px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); font: inherit; min-width: 150px; }
+  .org-filter input[name=q] { min-width: 240px; }
+  .org-filter button { padding: 8px 16px; background: var(--accent); color: var(--on-accent); border: 0; font-weight: 600; }
+  .roles { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  .roles a { padding: 5px 12px; border: 1px solid var(--line); border-radius: 999px; color: var(--fg); }
+  .roles a.on { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  .pager { display: flex; gap: 10px; align-items: center; margin: 14px 0; }
+  .form-tag { font-size: 12px; color: var(--muted); }
+{% endblock %}
+{% block main %}
+<h1>{{ _("Организации") }}</h1>
+<p class="muted">{{ _("Заказчики и поставщики госзакупок по данным goszakup.gov.kz. Цифры — за всё время, что Tenderim собирает закупки.") }} <a href="/categories">{{ _("Категории") }}</a> · <a href="/regions">{{ _("Регионы") }}</a></p>
+{% macro link() %}{% set params = dict(f) %}{% set __ = params.update({"page": 1}) %}{% set __ = params.update(kwargs) %}/orgs?{{ params | urlencode }}{% endmacro %}
+<div class="roles">{% for key, label in roles.items() %}<a href="{{ link(role=key) }}" class="{{ 'on' if f.role == key }}">{{ _(label) }}</a>{% endfor %}</div>
+<form class="org-filter" method="get" action="/orgs">
+  <input type="hidden" name="role" value="{{ f.role }}">
+  <label>{{ _("Название или БИН/ИИН") }}<input name="q" value="{{ f.q }}" placeholder="{{ _("например, Аягоз") }}"></label>
+  <label>{{ _("Форма") }}<select name="form"><option value="">{{ _("Все") }}</option>{% for key, label in forms.items() %}<option value="{{ key }}" {% if f.form == key %}selected{% endif %}>{{ _(label) }}</option>{% endfor %}</select></label>
+  <label>{{ _("Регион") }}<select name="region"><option value="">{{ _("Весь Казахстан") }}</option>{% for key, label in regions.items() %}<option value="{{ key }}" {% if f.region == key %}selected{% endif %}>{{ _(label) }}</option>{% endfor %}</select></label>
+  <label>{{ _("Сортировка") }}<select name="sort">{% for key, label in sorts.items() %}<option value="{{ key }}" {% if f.sort == key %}selected{% endif %}>{{ _(label) }}</option>{% endfor %}</select></label>
+  <button>{{ _("Показать") }}</button>
+</form>
+<p class="muted">{{ _("Найдено:") }} {{ total }}</p>
+{% if rows %}
+<div class="table-wrap"><table>
+  <tr><th>{{ _("Организация") }}</th><th>{{ _("Регион") }}</th><th>{{ _("Закупок") }}</th><th>{{ _("На сумму, ₸") }}</th><th>{{ _("Открыто") }}</th><th>{{ _("Побед") }}</th><th>{{ _("На сумму, ₸") }}</th><th>{{ _("Заявок") }}</th></tr>
+  {% for r in rows %}
+  <tr>
+    <td><a href="/org/{{ r.bin }}">{{ pick(r.name_ru, r.name_kz) }}</a><div class="form-tag">{{ _(forms[r.form]) }} · {{ r.bin }}</div></td>
+    <td>{{ region_name(r.region) }}</td>
+    <td class="num">{{ r.buys or "" }}</td>
+    <td class="num">{{ r.buy_amount | money if r.buys else "" }}</td>
+    <td class="num">{{ r.open_now or "" }}</td>
+    <td class="num">{{ r.wins or "" }}</td>
+    <td class="num">{{ r.win_amount | money if r.wins else "" }}</td>
+    <td class="num">{{ r.offers or "" }}</td>
+  </tr>
+  {% endfor %}
+</table></div>
+{% if pages > 1 %}<div class="pager">{% if page > 1 %}<a href="{{ link(page=page - 1) }}">← {{ _("Назад") }}</a>{% endif %}<span class="muted">{{ _("стр.") }} {{ page }} {{ _("из") }} {{ pages }}</span>{% if page < pages %}<a href="{{ link(page=page + 1) }}">{{ _("Дальше") }} →</a>{% endif %}</div>{% endif %}
+{% else %}<p class="muted">{{ _("Ничего не найдено — попробуйте убрать часть фильтров.") }}</p>{% endif %}
+{% endblock %}

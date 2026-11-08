@@ -18,6 +18,7 @@ from fastapi.responses import RedirectResponse, Response
 from zakup import (
     SITE_URL,
     ai_config,
+    catalog,
     dashboard,
     details,
     i18n,
@@ -33,6 +34,7 @@ from zakup import (
     visits,
 )
 from zakup.filters import (
+    REGIONS,
     STATUS_NAMES,
     Filters,
 )
@@ -186,6 +188,23 @@ LLMS_TXT = """# Tenderim
 """
 
 
+@router.get("/orgs")
+def orgs_page(request: Request, user: Viewer, role: str = "", form: str = "", region: str = "", q: str = "",
+              sort: str = "amount", page: int = 1):
+    """Справочник организаций: заказчики и поставщики с фильтрами по роли, форме, региону."""
+    role = role if role in orgs.ROLES else ""
+    region = region if region in REGIONS else ""
+    sort = sort if sort in orgs.SORTS else "amount"
+    with core.pool.connection() as conn:
+        rows, total = orgs.directory(conn, role=role, form=form, region=region, q=q, sort=sort, page=page)
+    page = min(max(page, 1), orgs.MAX_PAGE)
+    pages = min((total + orgs.PAGE_SIZE - 1) // orgs.PAGE_SIZE, orgs.MAX_PAGE)
+    return templates.TemplateResponse(request, "orgs.html", {
+        "rows": rows, "total": total, "page": page, "pages": pages,
+        "f": {"role": role, "form": form if form in orgs.FORMS else "", "region": region, "q": q, "sort": sort},
+        "roles": orgs.ROLES, "forms": orgs.FORMS, "sorts": orgs.SORTS, "regions": REGIONS})
+
+
 @router.get("/org/{bin_}")
 def org_page(request: Request, user: Viewer, bin_: str):
     """Открытая страница организации: закупки заказчика, победы и участие поставщика."""
@@ -194,6 +213,55 @@ def org_page(request: Request, user: Viewer, bin_: str):
     if profile is None:
         raise HTTPException(404, "Такой организации нет в базе")
     return templates.TemplateResponse(request, "org.html", {"o": profile})
+
+
+@router.get("/categories")
+def categories_page(request: Request, user: Viewer):
+    """Все категории закупок (разделы КПВЭД) с числом открытых лотов."""
+    with core.pool.connection() as conn:
+        totals = catalog.totals(conn, "division")
+    items = sorted(((code, totals.get(code, (0, 0))) for code in catalog.DIVISIONS), key=lambda i: -i[1][0])
+    return templates.TemplateResponse(request, "catalog_index.html", {"kind": "division", "items": items})
+
+
+@router.get("/regions")
+def regions_page(request: Request, user: Viewer):
+    with core.pool.connection() as conn:
+        totals = catalog.totals(conn, "region")
+    items = sorted(((code, totals.get(code, (0, 0))) for code in REGIONS), key=lambda i: -i[1][0])
+    return templates.TemplateResponse(request, "catalog_index.html", {"kind": "region", "items": items})
+
+
+def _catalog_page(request: Request, division: str | None, region: str | None):
+    if (division and division not in catalog.DIVISIONS) or (region and region not in REGIONS):
+        raise HTTPException(404, "Нет такой категории или региона")
+    with core.pool.connection() as conn:
+        data = catalog.page(conn, division, region)
+        counts = catalog.counts(conn)
+    # Соседние подборки: в категории — по регионам, в регионе — по категориям.
+    if division:
+        nearby = sorted(((r, n) for (d, r), (n, _) in counts.items() if d == division and r in REGIONS and n),
+                        key=lambda i: -i[1])
+    else:
+        nearby = sorted(((d, n) for (d, r), (n, _) in counts.items() if r == region and d in catalog.DIVISIONS and n),
+                        key=lambda i: -i[1])
+    return templates.TemplateResponse(request, "catalog_page.html", {
+        "division": division, "region": region, "d": data, "nearby": nearby})
+
+
+@router.get("/category/{division}")
+def category_page(request: Request, user: Viewer, division: str):
+    return _catalog_page(request, division, None)
+
+
+@router.get("/category/{division}/{region}")
+def category_region_page(request: Request, user: Viewer, division: str, region: str):
+    return _catalog_page(request, division, region)
+
+
+@router.get("/region/{region}")
+def region_page(request: Request, user: Viewer, region: str):
+    return _catalog_page(request, None, region)
 
 
 @router.get("/offer")
@@ -274,7 +342,11 @@ def sitemap_index() -> Response:
 @router.get("/sitemap-{kind}.xml")
 def sitemap_part(kind: str) -> Response:
     if kind == "static":
-        urls = [(f"{SITE_URL}{path}", None) for path in ("/", "/announcements", "/lots", "/analytics", "/pricing", "/offer", "/privacy", "/contacts")]
+        with core.pool.connection() as conn:
+            catalog_paths = catalog.sitemap_paths(conn)
+        urls = [(f"{SITE_URL}{path}", None) for path in (
+            "/", "/announcements", "/lots", "/orgs", "/analytics", "/pricing", "/offer", "/privacy", "/contacts",
+            *catalog_paths)]
     else:
         prefix, _, index = kind.partition("-")
         if prefix not in ("a", "l", "o") or not index.isdigit():

@@ -162,9 +162,10 @@ def _with_portal(args) -> int:
             if args.command == "rescan":
                 return _rescan(conn, client, args.days, args.max_pages)
             if args.command == "subjects":
-                from zakup import subjects
+                from zakup import orgs, subjects
 
                 print(f"subjects: {subjects.refresh(conn, client, args.limit)}")
+                orgs.refresh_directory(conn)  # справочник /orgs — с новыми закупками и итогами
                 return 0
             if args.command == "details":
                 return _details(conn, client, args.limit, args.part)

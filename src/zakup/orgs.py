@@ -23,7 +23,7 @@ def has_page(bin_: str | None) -> bool:
     return bool(bin_ and _BIN.match(bin_))
 
 
-def _rows(conn: psycopg.Connection, sql: str, params: tuple) -> list[dict[str, Any]]:
+def _rows(conn: psycopg.Connection, sql: str, params: tuple | dict) -> list[dict[str, Any]]:
     cursor = conn.execute(sql, params)
     names = [column.name for column in cursor.description]
     return [dict(zip(names, row, strict=True)) for row in cursor.fetchall()]
@@ -95,6 +95,21 @@ def profile(conn: psycopg.Connection, bin_: str, now: datetime | None = None) ->
         FROM lot_results r JOIN lots l ON l.id = r.lot_id LEFT JOIN announcements a ON a.id = l.trd_buy_id
         WHERE r.winner_bin = %(b)s AND r.outcome = 'winner'
         GROUP BY 1 ORDER BY 3 DESC, 4 DESC NULLS LAST LIMIT 10""", params) if seller["wins"] else []
+    # Что покупает (заказчик) и что поставляет (победитель): разделы КПВЭД и частые названия.
+    buys_divisions = _rows(conn, """
+        SELECT left(enstru[1], 2) AS code, count(*) AS lots, coalesce(sum(amount), 0) AS amount
+        FROM lots WHERE customer_bin = %(b)s AND cardinality(enstru) > 0
+        GROUP BY 1 ORDER BY 2 DESC, 3 DESC LIMIT 8""", params) if buyer["total"] else []
+    buys_names = _rows(conn, """
+        SELECT min(name_ru) AS name_ru, min(name_kz) AS name_kz, count(*) AS lots,
+               coalesce(sum(amount), 0) AS amount
+        FROM lots WHERE customer_bin = %(b)s AND name_ru IS NOT NULL
+        GROUP BY lower(name_ru) HAVING count(*) > 1 ORDER BY 3 DESC, 4 DESC LIMIT 12""", params) if buyer["total"] else []
+    sells_divisions = _rows(conn, """
+        SELECT left(l.enstru[1], 2) AS code, count(*) AS lots, coalesce(sum(r.winner_total), 0) AS amount
+        FROM lot_results r JOIN lots l ON l.id = r.lot_id
+        WHERE r.winner_bin = %(b)s AND r.outcome = 'winner' AND cardinality(l.enstru) > 0
+        GROUP BY 1 ORDER BY 2 DESC, 3 DESC LIMIT 8""", params) if seller["wins"] else []
     if not (buyer["total"] or seller["wins"] or offered):
         return None
     return {
@@ -102,6 +117,7 @@ def profile(conn: psycopg.Connection, bin_: str, now: datetime | None = None) ->
         "buyer": buyer, "open": open_list, "past": past_list, "their_winners": their_winners,
         "discount": float(discount) if discount is not None else None,
         "seller": seller, "offered": offered, "wins": wins, "their_customers": their_customers,
+        "buys_divisions": buys_divisions, "buys_names": buys_names, "sells_divisions": sells_divisions,
     }
 
 
@@ -112,3 +128,54 @@ def sitemap_bins(conn: psycopg.Connection) -> list[str]:
                            UNION SELECT org_bin FROM announcements
                            UNION SELECT winner_bin FROM lot_results WHERE outcome = 'winner') x
             WHERE b ~ '^\d{12}$' ORDER BY b""")]
+
+
+# --- Справочник /orgs: все организации с фильтрами (из org_directory) -----------------
+
+FORMS = {"ip": "ИП", "too": "ТОО", "ao": "АО", "gu": "Госучреждения", "gp": "Госпредприятия",
+         "oo": "Общественные объединения", "other": "Другие"}
+ROLES = {"": "Все", "buyer": "Заказчики", "seller": "Поставщики"}
+SORTS = {"amount": "По сумме закупок и побед", "buys": "Больше закупок", "wins": "Больше побед",
+         "open": "Больше открытых закупок", "name": "По названию"}
+_ORDER = {"amount": "greatest(buy_amount, win_amount) DESC", "buys": "buys DESC, buy_amount DESC",
+          "wins": "wins DESC, win_amount DESC", "open": "open_now DESC, buy_amount DESC",
+          "name": "name_ru"}
+PAGE_SIZE = 50
+MAX_PAGE = 200
+
+
+def refresh_directory(conn: psycopg.Connection) -> None:
+    conn.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY org_directory")
+    conn.commit()
+
+
+def directory(conn: psycopg.Connection, *, role: str = "", form: str = "", region: str = "", q: str = "",
+              sort: str = "amount", page: int = 1) -> tuple[list[dict[str, Any]], int]:
+    """Страница справочника и сколько всего подходит. Неизвестные значения фильтров — без фильтра."""
+    clauses, params = ["name_ru IS NOT NULL"], {}
+    if role == "buyer":
+        clauses.append("buys > 0")
+    elif role == "seller":
+        clauses.append("(wins > 0 OR offers > 0)")
+    if form in FORMS:
+        clauses.append("form = %(form)s")
+        params["form"] = form
+    if region:
+        clauses.append("region = %(region)s")
+        params["region"] = region
+    q = " ".join(q.split())[:100]
+    if q.isdigit():
+        clauses.append("bin LIKE %(bin)s")
+        params["bin"] = q + "%"
+    elif q:
+        clauses.append("(name_ru ILIKE %(q)s OR name_kz ILIKE %(q)s)")
+        params["q"] = "%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+    where = " AND ".join(clauses)
+    total = conn.execute(f"SELECT count(*) FROM org_directory WHERE {where}", params).fetchone()[0]
+    page = min(max(page, 1), MAX_PAGE)
+    rows = _rows(conn, f"""SELECT bin, name_ru, name_kz, form, region, buys, buy_amount, open_now,
+                                  wins, win_amount, offers
+                           FROM org_directory WHERE {where}
+                           ORDER BY {_ORDER.get(sort, _ORDER['amount'])}, bin
+                           LIMIT {PAGE_SIZE} OFFSET {(page - 1) * PAGE_SIZE}""", params)
+    return rows, total

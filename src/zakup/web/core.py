@@ -25,6 +25,7 @@ from zakup import (
     SITE_URL,
     audit,
     auth,
+    catalog,
     config,
     i18n,
     legal,
@@ -149,6 +150,9 @@ def _org_link(bin_: str | None, name: str | None) -> Markup:
 
 
 templates.env.globals["org_link"] = _org_link
+# Подборки: название категории КПВЭД и региона на языке интерфейса.
+templates.env.globals["division_name"] = lambda code: catalog.division_name(code, i18n.language())
+templates.env.globals["region_name"] = lambda code: i18n.gettext(REGIONS[code]) if code in REGIONS else ""
 
 
 def _tariff() -> dict:

@@ -327,7 +327,7 @@ def test_preview_images_and_llms_txt(client, conn):
     assert llms.status_code == 200 and "# Tenderim" in llms.text and "https://zakup.sarsembai.com/lots" in llms.text
 
 
-def test_organization_pages_for_customer_and_supplier(client, conn):
+def _org_data(conn):
     customer, supplier, person = "990740001111", "050540002222", "651114400549"
     db.upsert_announcement(conn, {"id": 900, "number_anno": "900-1", "name_ru": "Ремонт крыши",
                                   "total_sum": 2000000, "customer_bin": customer,
@@ -347,6 +347,11 @@ def test_organization_pages_for_customer_and_supplier(client, conn):
     conn.execute("INSERT INTO subjects (bin, name_ru, phone, email, website, addresses, fetched_at) "
                  "VALUES (%s, 'ГУ Школа №9', '+7 727 111 22 33', 'school9@mail.kz', '', '[]', now())", (customer,))
     conn.commit()
+    return customer, supplier, person
+
+
+def test_organization_pages_for_customer_and_supplier(client, conn):
+    customer, supplier, person = _org_data(conn)
     page = client.get(f"/org/{customer}").text
     assert "<h1>ГУ Школа №9</h1>" in page and "Объявил закупок" in page and "school9@mail.kz" in page
     assert f'href="/org/{supplier}">ТОО Кровля</a>' in page and "10.0%" in page
@@ -363,3 +368,41 @@ def test_organization_pages_for_customer_and_supplier(client, conn):
     assert "sitemap-o-0.xml" in index
     part = client.get("/sitemap-o-0.xml").text
     assert f"/org/{customer}" in part and f"/org/{supplier}" in part
+
+
+def test_organization_directory_filters(client, conn):
+    customer, supplier, person = _org_data(conn)
+    from zakup import orgs
+    orgs.refresh_directory(conn)
+    page = client.get("/orgs").text
+    assert "ГУ Школа №9" in page and "ТОО Кровля" in page and "ИП Иванов" in page and "Найдено: 3" in page
+    sellers = client.get("/orgs?role=seller").text
+    assert "ТОО Кровля" in sellers and "ИП Иванов" in sellers and "ГУ Школа №9" not in sellers
+    assert "ГУ Школа №9" in client.get("/orgs?role=buyer").text
+    only_ip = client.get("/orgs?form=ip").text
+    assert "ИП Иванов" in only_ip and "ТОО Кровля" not in only_ip
+    assert "ТОО Кровля" in client.get("/orgs?form=too").text
+    assert "ГУ Школа №9" in client.get("/orgs?form=gu").text
+    assert "ТОО Кровля" in client.get("/orgs?q=кровля").text and "Найдено: 1" in client.get("/orgs?q=0505").text
+    assert "Найдено: 0" in client.get("/orgs?q=%25_").text
+    assert client.get("/orgs?sort=evil;drop&region=zz&form=x&page=-5").status_code == 200
+    assert 'href="/orgs"' in client.get("/").text  # ссылка в меню
+
+
+def test_category_and_region_pages(client, conn):
+    _announcement_with_lots(conn)  # «Бумага А4» — ЕНС ТРУ 171211…, регион не указан
+    conn.execute("UPDATE lots SET kato = '{751410000}' WHERE id = 5001")
+    conn.commit()
+    index = client.get("/categories").text
+    assert "Бумага и изделия из бумаги" in index and 'href="/category/17"' in index
+    category = client.get("/category/17").text
+    assert "Госзакупки: Бумага и изделия из бумаги" in category and "/lots/5001" in category
+    assert 'href="/category/17/75"' in category  # Алматы
+    both = client.get("/category/17/75").text
+    assert "Бумага и изделия из бумаги — г. Алматы" in both and "/lots/5001" in both
+    region = client.get("/region/75").text
+    assert "Госзакупки: г. Алматы" in region and "/lots/5001" in region
+    assert client.get("/category/99").status_code == 404 and client.get("/region/00").status_code == 404
+    assert "Өңірлер бойынша" in client.get("/regions?lang=kk").text
+    static = client.get("/sitemap-static.xml").text
+    assert "/category/17/75" in static and "/orgs" in static

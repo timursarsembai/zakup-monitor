@@ -5,7 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg_pool import ConnectionPool
 
-from zakup import auth, db, tariff, web
+from zakup import auth, catalog, db, tariff, web
 from zakup.goszakup import Page
 
 
@@ -110,6 +110,7 @@ def client(conn, monkeypatch):
     monkeypatch.setattr(tariff, "_cache", None)
     # Список лотов для sitemap кэшируется на час — в каждом тесте свой.
     monkeypatch.setattr(web.public, "_sitemap_lots", {"at": 0.0, "rows": []})
+    monkeypatch.setattr(catalog, "_counts", {"at": 0.0, "rows": {}})
     auth.set_password(conn, "owner@mail.kz", "long-enough-password")
     conn.execute("UPDATE users SET role = 'admin' WHERE email = 'owner@mail.kz'")
     conn.commit()

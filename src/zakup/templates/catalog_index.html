@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% set heading = _("Госзакупки по категориям") if kind == "division" else _("Госзакупки по регионам") %}
+{% block title %}{{ heading }} — {{ _("Казахстан") }}{% endblock %}
+{% block description %}{{ heading }}: {{ _("открытые лоты goszakup.gov.kz, заказчики и победители. Обновляется несколько раз в час.") }}{% endblock %}
+{% block style %}
+  .cat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; margin-top: 16px; }
+  .cat-grid a { display: block; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; color: var(--fg); }
+  .cat-grid a:hover { border-color: var(--accent); }
+  .cat-grid b { display: block; }
+  .switch { margin: 0 0 6px; }
+{% endblock %}
+{% block main %}
+<h1>{{ heading }}</h1>
+<p class="switch">{% if kind == "division" %}<a href="/regions">{{ _("По регионам →") }}</a>{% else %}<a href="/categories">{{ _("По категориям →") }}</a>{% endif %} · <a href="/orgs">{{ _("Организации →") }}</a></p>
+<div class="cat-grid">
+  {% for code, (n, amount) in items %}
+  <a href="/{{ 'category' if kind == 'division' else 'region' }}/{{ code }}"><b>{{ division_name(code) if kind == "division" else region_name(code) }}</b>
+    <span class="muted">{% if n %}{{ _("открыто лотов:") }} {{ n }} · {{ amount | money }} ₸{% else %}{{ _("сейчас открытых лотов нет") }}{% endif %}</span></a>
+  {% endfor %}
+</div>
+{% if kind == "division" %}<p class="muted" style="margin-top:16px">{{ _("Категории — разделы классификатора КПВЭД по коду ЕНС ТРУ лота. У части работ и услуг кода нет — они есть в подборках по регионам и в поиске.") }}</p>{% endif %}
+{% endblock %}
