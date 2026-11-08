@@ -118,6 +118,28 @@ templates.env.globals["open_statuses"] = set(OPEN_STATUSES)
 templates.env.globals["site_url"] = SITE_URL
 
 
+def _structured_demand(*, name, description, url, end, amount, count, unit, customer) -> dict:
+    """Закупка в разметке schema.org: Demand — «организация ищет товар или услугу». У Demand
+    нет поля «покупатель» (seller — это продавец), поэтому заказчик — в описании."""
+    demand: dict[str, Any] = {"@context": "https://schema.org", "@type": "Demand", "name": name, "url": url}
+    text = " ".join(part for part in (f"{i18n.gettext('Заказчик')}: {customer}." if customer else "",
+                                      str(description or "")) if part)
+    if text:
+        demand["description"] = text[:1000]
+    if end:
+        demand["availabilityEnds"] = end.isoformat()
+    if amount is not None:
+        demand["priceSpecification"] = {"@type": "PriceSpecification", "price": float(amount),
+                                        "priceCurrency": "KZT"}
+    if count:
+        demand["eligibleQuantity"] = {"@type": "QuantitativeValue", "value": float(count),
+                                      **({"unitText": unit} if unit else {})}
+    return demand
+
+
+templates.env.globals["structured_demand"] = _structured_demand
+
+
 def _tariff() -> dict:
     """Тариф для шаблонов (окно «платная функция», страница тарифа) — из настроек."""
     try:

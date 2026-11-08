@@ -6,9 +6,38 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<title>{% block title %}{{ _("Закупки") }}{% endblock %} · Zakup</title>
+<title>{% block title %}{{ _("Закупки") }}{% endblock %} · Tenderim</title>
 <meta name="description" content="{% block description %}{{ _("Госзакупки Казахстана: поиск объявлений и лотов goszakup.gov.kz, итоги, победители, аналитика рынка.") }}{% endblock %}">
-<link rel="canonical" href="{{ site_url }}{{ request.url.path }}">
+{# Русская версия — адрес без параметров, казахская — ?lang=kk (у поисковиков нет cookie). #}
+{% set page_url = site_url ~ request.url.path %}
+{% set canonical = page_url ~ ("?lang=kk" if lang() == "kk" else "") %}
+<link rel="canonical" href="{{ canonical }}">
+<link rel="alternate" hreflang="ru" href="{{ page_url }}">
+<link rel="alternate" hreflang="kk" href="{{ page_url }}?lang=kk">
+<link rel="alternate" hreflang="x-default" href="{{ page_url }}">
+{# Превью ссылки в соцсетях и мессенджерах. #}
+<meta property="og:site_name" content="Tenderim">
+<meta property="og:type" content="website">
+<meta property="og:url" content="{{ canonical }}">
+<meta property="og:title" content="{{ self.title()|trim }}">
+<meta property="og:description" content="{{ self.description()|trim }}">
+<meta property="og:image" content="{% block og_image %}{{ site_url }}/og/site.png{% endblock %}{{ '?lang=kk' if lang() == 'kk' }}">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="{{ 'kk_KZ' if lang() == 'kk' else 'ru_RU' }}">
+<meta property="og:locale:alternate" content="{{ 'ru_RU' if lang() == 'kk' else 'kk_KZ' }}">
+<meta name="twitter:card" content="summary_large_image">
+{% if request.url.path == "/" %}
+<script type="application/ld+json">{{ [
+  {"@context": "https://schema.org", "@type": "Organization", "name": "Tenderim", "url": site_url,
+   "logo": site_url ~ "/static/icon-512.png"},
+  {"@context": "https://schema.org", "@type": "WebSite", "name": "Tenderim", "url": site_url,
+   "inLanguage": ["ru", "kk"],
+   "potentialAction": {"@type": "SearchAction", "target": site_url ~ "/lots?applied=1&q={search_term_string}",
+                       "query-input": "required name=search_term_string"}}
+] | tojson }}</script>
+{% endif %}
+{% block structured %}{% endblock %}
 <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon.png">
 <link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png">
 <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">

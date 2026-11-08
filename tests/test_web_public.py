@@ -288,3 +288,40 @@ def test_spec_loaded_later_shows_ready_summary(client, conn, monkeypatch):
     _login(client)
     page = client.get("/a/500/lots/5001/spec").text
     assert "Бумага офисная" in page and "data-summary-start" not in page
+
+
+def test_seo_tags_kazakh_url_and_structured_data(client, conn):
+    import json
+    _announcement_with_lots(conn)
+    page = client.get("/lots/5001").text
+    assert "<title>Бумага А4 — лот" in page and "· Tenderim</title>" in page
+    assert '<link rel="canonical" href="https://zakup.sarsembai.com/lots/5001">' in page
+    assert 'hreflang="kk" href="https://zakup.sarsembai.com/lots/5001?lang=kk"' in page
+    assert 'property="og:image" content="https://zakup.sarsembai.com/og/lot/5001.png"' in page
+    assert 'name="twitter:card" content="summary_large_image"' in page
+    assert "Госзакупка: Бумага А4" in page.split('name="description"', 1)[1].split(">", 1)[0]
+    blocks = [json.loads(chunk.split("</script>", 1)[0])
+              for chunk in page.split('<script type="application/ld+json">')[1:]]
+    demand = next(item for block in blocks for item in block if item["@type"] == "Demand")
+    assert demand["url"].endswith("/lots/5001") and demand["priceSpecification"]["priceCurrency"] == "KZT"
+    assert any(item["@type"] == "BreadcrumbList" for block in blocks for item in block)
+    # Казахская версия — по своему адресу, без cookie (как у поисковика), и запоминается.
+    kk = client.get("/lots/5001?lang=kk")
+    assert 'lang="kk"' in kk.text and '<link rel="canonical" href="https://zakup.sarsembai.com/lots/5001?lang=kk">' in kk.text
+    assert "zakup_lang=kk" in kk.headers["set-cookie"]
+    assert 'content="https://zakup.sarsembai.com/og/lot/5001.png?lang=kk"' in kk.text
+    robots = client.get("/robots.txt").text
+    assert "Allow: /*?lang=kk$" in robots and "Disallow: /*?" in robots
+    home = client.get("/").text
+    assert '"@type": "WebSite"' in home or '"@type":"WebSite"' in home
+
+
+def test_preview_images_and_llms_txt(client, conn):
+    _announcement_with_lots(conn)
+    for path in ("/og/site.png", "/og/lot/5001.png", "/og/a/500.png", "/og/lot/5001.png?lang=kk"):
+        image = client.get(path)
+        assert image.status_code == 200 and image.content[:8] == b"\x89PNG\r\n\x1a\n", path
+        assert image.headers["content-type"] == "image/png"
+    assert client.get("/og/lot/999999.png").status_code == 404
+    llms = client.get("/llms.txt")
+    assert llms.status_code == 200 and "# Tenderim" in llms.text and "https://zakup.sarsembai.com/lots" in llms.text

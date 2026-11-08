@@ -49,7 +49,7 @@ def pay_tariff(request: Request, user: User):
     with core.pool.connection() as conn:
         price = tariff.get(conn)["price"]
     return _pay(request, user, "tariff", payments.TARIFF_DAYS, price,
-                f"Zakup: тариф на {payments.TARIFF_DAYS} дней")
+                f"Tenderim: тариф на {payments.TARIFF_DAYS} дней")
 
 
 @router.post("/pay/searches", dependencies=[Depends(same_origin), Depends(not_impersonating)])

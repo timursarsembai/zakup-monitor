@@ -23,6 +23,7 @@ from zakup import (
     i18n,
     legal,
     marks,
+    og,
     research,
     results,
     spec,
@@ -96,6 +97,94 @@ def favicon() -> Response:
                     media_type="image/x-icon", headers={"Cache-Control": "public, max-age=86400"})
 
 
+# Картинки-превью для соцсетей: день в кэше у ботов и браузеров, в памяти — у нас.
+OG_HEADERS = {"Cache-Control": "public, max-age=86400"}
+
+
+def _og_response(key: tuple, render) -> Response:
+    try:
+        return Response(og.cached(key, render), media_type="image/png", headers=OG_HEADERS)
+    except og.Busy:
+        return Response(status_code=503, headers={"Retry-After": "5"})
+
+
+@router.get("/og/site.png")
+def og_site() -> Response:
+    lang = i18n.language()
+    return _og_response(("site", lang), lambda: og.site(lang))
+
+
+@router.get("/og/lot/{lot_id}.png")
+def og_lot(lot_id: int) -> Response:
+    lang, now = i18n.language(), datetime.now(UTC)
+    with core.pool.connection() as conn:
+        row = conn.execute(
+            """SELECT l.name_ru, l.name_kz, l.lot_number, l.amount,
+                      coalesce(l.customer_name_ru, a.customer_name_ru, a.org_name_ru), a.end_date
+               FROM lots l LEFT JOIN announcements a ON a.id = l.trd_buy_id WHERE l.id = %s""",
+            (lot_id,)).fetchone()
+    if row is None:
+        raise HTTPException(404, "Такого лота нет в базе")
+    name_ru, name_kz, number, amount, customer, end = row
+    kicker = f"{og.TEXTS[lang]['lot']} {number or lot_id}"
+    return _og_response(("lot", lot_id, lang, now.date(), end and end > now), lambda: og.card(
+        lang, kicker=kicker, title=i18n.pick(name_ru, name_kz), customer=customer, amount=amount,
+        end=end, now=now))
+
+
+@router.get("/og/a/{announcement_id}.png")
+def og_announcement(announcement_id: int) -> Response:
+    lang, now = i18n.language(), datetime.now(UTC)
+    with core.pool.connection() as conn:
+        row = conn.execute(
+            """SELECT name_ru, name_kz, number_anno, total_sum, coalesce(customer_name_ru, org_name_ru),
+                      end_date FROM announcements WHERE id = %s""", (announcement_id,)).fetchone()
+    if row is None:
+        raise HTTPException(404, "Такого объявления нет в базе")
+    name_ru, name_kz, number, amount, customer, end = row
+    kicker = f"{og.TEXTS[lang]['announcement']} {number or announcement_id}"
+    return _og_response(("a", announcement_id, lang, now.date(), end and end > now), lambda: og.card(
+        lang, kicker=kicker, title=i18n.pick(name_ru, name_kz), customer=customer, amount=amount,
+        end=end, now=now))
+
+
+@router.get("/llms.txt")
+def llms_txt() -> Response:
+    """Описание сайта для нейросетей (llmstxt.org): что здесь есть и как устроены адреса."""
+    return Response(LLMS_TXT.format(site=SITE_URL), media_type="text/plain; charset=utf-8",
+                    headers={"Cache-Control": "public, max-age=86400"})
+
+
+LLMS_TXT = """# Tenderim
+
+> Tenderim — сервис по государственным закупкам Казахстана. Собирает объявления и лоты
+> с портала goszakup.gov.kz (официальный API), показывает их удобнее, присылает новые лоты
+> по подпискам в Telegram, делает краткие выжимки технических спецификаций и с помощью ИИ
+> подбирает товары у поставщиков с расчётом маржи. Есть версии на русском и казахском.
+
+Данные о закупках — открытые сведения портала goszakup.gov.kz; первоисточник каждой
+закупки — ссылка «на портале» на её странице. Сведения обновляются несколько раз в час.
+
+## Закупки
+
+- [Поиск объявлений]({site}/announcements): открытые объявления о госзакупках, фильтры по региону, сумме, сроку, способу закупки.
+- [Поиск лотов]({site}/lots): то же по отдельным лотам.
+- Страница объявления: {site}/a/<id> — номер, заказчик, сроки, все лоты, документы, итоги и победители.
+- Страница лота: {site}/lots/<id> — товар или услуга, количество, цена, место поставки, техспецификация.
+- Казахская версия любой страницы: тот же адрес с ?lang=kk.
+- [Карта сайта]({site}/sitemap.xml): все открытые объявления и лоты.
+
+## Аналитика
+
+- [Анализ рынка]({site}/analytics): сколько закупок и на какие суммы по регионам, способам и категориям, динамика.
+
+## Сервис
+
+- [Тариф]({site}/pricing): что входит в подписку и сколько стоит.
+- [Публичная оферта]({site}/offer), [Политика конфиденциальности]({site}/privacy), [Контакты]({site}/contacts).
+"""
+
+
 @router.get("/offer")
 def offer_page(request: Request, user: Viewer):
     return templates.TemplateResponse(request, "legal_offer.html", {"docs_date": legal.DOCS_DATE})
@@ -120,7 +209,7 @@ def robots() -> Response:
              "Disallow: /lots/*/research", "Disallow: /lots/*/questions",
              # Фильтры, сортировки и страницы поиска — бесконечное число адресов одного и
              # того же; в индекс идут сами закупки (sitemap) и чистые /lots, /announcements.
-             "Disallow: /*?", "Disallow: /balance", "Disallow: /pay/", "Disallow: /sources/",
+             "Disallow: /*?", "Allow: /*?lang=kk$", "Disallow: /balance", "Disallow: /pay/", "Disallow: /sources/",
              f"Sitemap: {SITE_URL}/sitemap.xml"]
     return Response("\n".join(lines) + "\n", media_type="text/plain")
 
@@ -171,7 +260,7 @@ def sitemap_index() -> Response:
 @router.get("/sitemap-{kind}.xml")
 def sitemap_part(kind: str) -> Response:
     if kind == "static":
-        urls = [(f"{SITE_URL}{path}", None) for path in ("/", "/announcements", "/analytics", "/pricing", "/offer", "/privacy", "/contacts")]
+        urls = [(f"{SITE_URL}{path}", None) for path in ("/", "/announcements", "/lots", "/analytics", "/pricing", "/offer", "/privacy", "/contacts")]
     else:
         prefix, _, index = kind.partition("-")
         if prefix not in ("a", "l") or not index.isdigit():

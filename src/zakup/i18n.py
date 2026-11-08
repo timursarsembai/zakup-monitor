@@ -16,6 +16,8 @@ from zakup.i18n_kk import KK
 
 LANGUAGES = {"ru": "Рус", "kk": "Қаз"}
 COOKIE = "zakup_lang"
+# Казахская версия страницы по своему адресу (?lang=kk) — для поисковиков и hreflang.
+QUERY = "lang"
 _current: ContextVar[str] = ContextVar("lang", default="ru")
 
 

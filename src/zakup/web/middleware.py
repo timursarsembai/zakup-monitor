@@ -25,8 +25,16 @@ from zakup.web.core import (
 
 
 async def language(request: Request, call_next):
-    i18n.set_language(request.cookies.get(i18n.COOKIE))
-    return await call_next(request)
+    """Язык — из адреса (?lang=kk: своя страница для поисковиков, у них нет cookie),
+    иначе из cookie. Пришёл по ссылке ?lang=kk — дальше по сайту тоже на казахском."""
+    chosen = request.query_params.get(i18n.QUERY)
+    if chosen not in i18n.LANGUAGES:
+        chosen = None
+    i18n.set_language(chosen or request.cookies.get(i18n.COOKIE))
+    response = await call_next(request)
+    if chosen and request.cookies.get(i18n.COOKIE, "ru") != chosen:
+        response.set_cookie(i18n.COOKIE, chosen, max_age=365 * 86400, secure=True, samesite="lax")
+    return response
 
 
 async def page_views(request: Request, call_next):

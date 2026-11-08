@@ -47,7 +47,7 @@ def test_settings_tabs_and_ai_models(client, conn, monkeypatch):
 
     _login(client)
     page = client.get("/settings").text
-    assert "<title>Настройки · Zakup</title>" in page
+    assert "<title>Настройки · Tenderim</title>" in page
     for tab in ("Уведомления", "Аккаунт", "Искусственный интеллект", "Организация", "Пользователи"):
         assert 'role="tab" data-tab' in page and tab in page
     assert 'value="claude-sonnet-5-5"' in page
