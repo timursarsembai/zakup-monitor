@@ -7,6 +7,10 @@
   .lf .fl { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
   .lf input, .lf select { width: 100%; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); font: inherit; }
   .lf .pair { display: flex; gap: 6px; }
+  .lf .pair input { flex: 1 1 0; min-width: 0; }
+  .lf > div { min-width: 0; }
+  .lf .dates { grid-column: span 2; }
+  @media (max-width: 520px) { .lf .dates { grid-column: auto; } }
   .actions-row { display: flex; gap: 8px; align-items: center; }
   .primary { background: var(--accent); color: var(--on-accent); border-color: transparent; font-weight: 600; }
   details.multi { position: relative; }
@@ -31,7 +35,7 @@
     {{ multi("user", user_labels, chosen_users, _("Все")) }}</div>
   <div><span class="fl">{{ _("Действия") }}</span>
     {{ multi("action", actions, chosen_actions, _("Все")) }}</div>
-  <div><span class="fl">{{ _("Даты с — по") }}</span>
+  <div class="dates"><span class="fl">{{ _("Даты с — по") }}</span>
     <div class="pair"><input type="date" name="from" value="{{ date_from }}" aria-label="{{ _("с") }}"><input type="date" name="to" value="{{ date_to }}" aria-label="{{ _("по") }}"></div></div>
   <div><label class="fl" for="per-page">{{ _("Показывать по") }}</label>
     <select id="per-page" name="per_page">{% for n in page_sizes %}<option value="{{ n }}" {% if n == per_page %}selected{% endif %}>{{ n }}</option>{% endfor %}</select></div>
