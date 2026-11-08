@@ -1,4 +1,5 @@
 import os
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -18,6 +19,8 @@ def client(conn, monkeypatch):
     monkeypatch.setattr(web, "pool", test_pool)
     # Карточки организаций догружаются с портала фоном — в тестах без сети.
     monkeypatch.setattr(web, "_subjects_in_background", lambda bins: None)
+    # Тариф кэшируется в памяти процесса — между тестами сбрасываем.
+    monkeypatch.setattr(web.tariff, "_cache", None)
     auth.set_password(conn, "owner@mail.kz", "long-enough-password")
     conn.execute("UPDATE users SET role = 'admin' WHERE email = 'owner@mail.kz'")
     conn.commit()
@@ -463,7 +466,8 @@ def test_dashboard_is_home(client, conn):
     # Только общая аналитика, без личных блоков.
     for text in ("лотов под ваш фильтр", "Мои подписки", "Сроки по вашему фильтру"):
         assert text not in page.text, text
-    assert client.get("/?applied=1", follow_redirects=False).headers["location"] == "/announcements?applied=1"
+    # Главная — поиск объявлений; старые ссылки /?applied=1&… работают там же.
+    assert client.get("/?applied=1", follow_redirects=False).status_code == 200
 
 
 def test_kazakh_interface_and_data(client, conn):
@@ -913,3 +917,60 @@ def test_admin_edits_tariff_shown_to_clients(client, conn):
     assert "«Профи»" in page and "12 900 ₸" in page and "<li>избранное</li>" in page
     assert client.post("/settings/tariff", data={"name_ru": "x", "price": "0", "features_ru": "a"},
                        headers=ORIGIN).status_code == 422
+
+
+def _signed(body: dict, secret: str = "whsec") -> tuple[bytes, dict]:
+    import hashlib
+    import hmac
+    import json as _json
+
+    raw = _json.dumps(body).encode()
+    return raw, {"x-kazpayment-signature": "sha256=" + hmac.new(secret.encode(), raw, hashlib.sha256).hexdigest(),
+                 "content-type": "application/json"}
+
+
+def test_pay_tariff_and_searches_via_webhook_and_poll(client, conn, monkeypatch):
+    from zakup import credits, payments
+
+    monkeypatch.setenv("KAZPAYMENT_WEBHOOK_SECRET", "whsec")
+    orders = []
+    monkeypatch.setattr(web.kazpayment, "create_order",
+                        lambda ref, amount, comment, phone=None: orders.append((ref, amount, phone)) or f"https://kazpayment.kz/pay/{ref}")
+    auth.set_password(conn, "+77011112233", "client-password-1")
+    conn.execute("UPDATE users SET role = 'user', phone = email WHERE email = '+77011112233'")
+    conn.commit()
+    uid = conn.execute("SELECT id FROM users WHERE email = '+77011112233'").fetchone()[0]
+    client.post("/login", data={"email": "87011112233", "password": "client-password-1"}, headers=ORIGIN)
+    go = client.post("/pay/tariff", headers=ORIGIN, follow_redirects=False)
+    assert go.headers["location"].startswith("https://kazpayment.kz/pay/zk-")
+    ref, amount, phone = orders[0]
+    assert amount == 9900 and phone == "+77011112233"
+    raw, headers = _signed({"event_id": "e1", "event": "payment.received", "order_ref": ref,
+                            "amount": 9900, "paid_amount": 9900, "late": False})
+    assert client.post("/webhooks/kazpayment", content=raw, headers={**headers, "x-kazpayment-signature": "sha256=bad"}).status_code == 401
+    assert client.post("/webhooks/kazpayment", content=raw, headers=headers).status_code == 200
+    assert client.post("/webhooks/kazpayment", content=raw, headers=headers).status_code == 200  # повтор
+    until = conn.execute("SELECT paid_until FROM users WHERE id = %s", (uid,)).fetchone()[0]
+    assert until is not None and (until - datetime.now(UTC)).days in (29, 30)
+    # Повтор события не продлевает второй раз.
+    assert conn.execute("SELECT paid_until FROM users WHERE id = %s", (uid,)).fetchone()[0] == until
+    # Пакет поисков: недоплата не выдаёт, полная оплата через запасной опрос — выдаёт.
+    client.post("/pay/searches", data={"count": "20"}, headers=ORIGIN)
+    ref2, amount2, _ = orders[1]
+    assert amount2 == 4900 and payments.searches_price(30) == 7350 and payments.searches_price(5) == 1250
+    raw, headers = _signed({"event_id": "e2", "event": "payment.received", "order_ref": ref2,
+                            "amount": 4900, "paid_amount": 1000})
+    client.post("/webhooks/kazpayment", content=raw, headers=headers)
+    assert credits.balance(conn, uid) == 0
+    monkeypatch.setattr(payments.kazpayment, "order_status",
+                        lambda ref: {"status": "paid", "paidAmount": 4900} if ref == ref2 else {"status": "pending"})
+    assert payments.poll(conn) == 1 and credits.balance(conn, uid) == 20
+    assert payments.poll(conn) == 0  # уже выдано
+    page = client.get("/pricing").text
+    assert "оплачено" in page and "Мои оплаты" in page
+
+
+def test_spec_tables_rendered_as_table():
+    blocks = web._spec_blocks("Заголовок\nНаименование | Кол-во\nСтол | 5\nИтого")
+    assert blocks == [("text", "Заголовок"), ("table", [["Наименование", "Кол-во"], ["Стол", "5"]]),
+                      ("text", "Итого")]

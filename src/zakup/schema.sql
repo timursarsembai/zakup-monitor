@@ -462,3 +462,23 @@ CREATE TABLE IF NOT EXISTS search_ledger (
     created_at  timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS search_ledger_user ON search_ledger (user_id, created_at DESC);
+-- Платежи через kazpayment: тариф (quantity — дней) и пакеты поисков (quantity — поисков).
+CREATE TABLE IF NOT EXISTS payments (
+    id         bigserial PRIMARY KEY,
+    ref        text NOT NULL UNIQUE,           -- external_ref заказа у kazpayment
+    user_id    bigint NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    kind       text NOT NULL,                  -- 'tariff' или 'searches'
+    quantity   integer NOT NULL,
+    amount     integer NOT NULL,
+    status     text NOT NULL DEFAULT 'pending',  -- pending, paid, cancelled, refunded
+    pay_url    text,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    paid_at    timestamptz
+);
+CREATE INDEX IF NOT EXISTS payments_user ON payments (user_id, created_at DESC);
+-- Обработанные события вебхука: одно событие — одна выдача.
+CREATE TABLE IF NOT EXISTS payment_events (
+    event_id    text PRIMARY KEY,
+    event       text,
+    received_at timestamptz NOT NULL DEFAULT now()
+);

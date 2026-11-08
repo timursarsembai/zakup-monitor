@@ -15,10 +15,15 @@
   .calc input { width: 110px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); font: inherit; }
   .soon { margin-top: 14px; padding: 10px 12px; border-radius: 8px; background: color-mix(in srgb, var(--accent) 12%, transparent); }
   .status { padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line); margin-top: 12px; }
+  .status.bad { color: var(--bad); }
+  .buy { display: inline-block; margin-top: 10px; padding: 10px 16px; border: 0; border-radius: 8px; background: var(--accent); color: var(--on-accent); font: inherit; font-weight: 600; cursor: pointer; }
+  .buy.small { margin-top: 6px; padding: 6px 12px; }
 {% endblock %}
 {% block main %}
 <h1>{{ _("Тариф и цены") }}</h1>
 <p class="muted">{{ _("Поиск объявлений и лотов, страницы закупок и аналитика — бесплатно и без регистрации.") }}</p>
+{% if error == "pay" %}<p class="status bad">{{ _("Не удалось открыть оплату. Попробуйте через минуту или напишите нам.") }}</p>{% endif %}
+{% if need == "searches" %}<p class="status">{{ _("На балансе нет поисков — купите пакет или нужное количество.") }}</p>{% endif %}
 {% if paid_until %}<p class="status">✓ {{ _("Тариф оплачен до") }} <b>{{ (paid_until|local).strftime("%d.%m.%Y") }}</b></p>{% endif %}
 <div class="plans">
   {% set t = tariff() %}
@@ -28,19 +33,36 @@
     <ul>
       {% for item in (t.features_kk if lang() == "kk" else t.features_ru) %}<li>{{ item }}</li>{% endfor %}
     </ul>
-    <p class="muted">{{ _("Без пробного периода. Отменить можно в любой момент.") }}</p>
+    <p class="muted">{{ _("Без пробного периода. Оплата — на 30 дней, продлевается следующей оплатой.") }}</p>
+    {% if request.state.user_id %}<form method="post" action="/pay/tariff"><button class="buy">{{ _("Продлить на 30 дней") if paid_until else _("Оплатить") }} · {{ "{:,}".format(t.price).replace(",", " ") }} ₸</button></form>
+    {% else %}<a class="buy" href="/register">{{ _("Зарегистрироваться и оплатить") }}</a>{% endif %}
   </section>
   <section class="plan">
     <h2>{{ _("Поиск товаров с ИИ") }}</h2>
     <div class="price">250 ₸ <small>{{ _("за поиск") }}</small></div>
     <p>{{ _("ИИ читает техспецификацию, находит подходящие товары у продавцов Казахстана с ценами, контактами и маржой. «Найти ещё» — тоже поиск. Купленные и неиспользованные поиски со временем не сгорают.") }}</p>
     <div class="packs">
-      {% for count, price in packs %}<div class="pack"><b>{{ count }}</b>{{ _("поисков") }}<br>{{ "{:,}".format(price).replace(",", " ") }} ₸</div>{% endfor %}
+      {% for count, price in packs %}<form class="pack" method="post" action="/pay/searches"><b>{{ count }}</b>{{ _("поисков") }}<br>{{ "{:,}".format(price).replace(",", " ") }} ₸
+        <input type="hidden" name="count" value="{{ count }}">{% if request.state.user_id %}<button class="buy small">{{ _("Купить") }}</button>{% endif %}</form>{% endfor %}
     </div>
-    <div class="calc"><label>{{ _("Своё количество:") }} <input type="number" min="1" max="10000" value="30" data-calc></label> = <b data-calc-total></b> ₸</div>
+    <form class="calc" method="post" action="/pay/searches"><label>{{ _("Своё количество:") }} <input type="number" name="count" min="1" max="10000" value="30" data-calc></label> = <b data-calc-total></b> ₸
+      {% if request.state.user_id %}<button class="buy small">{{ _("Купить") }}</button>{% endif %}</form>
+    {% if not request.state.user_id %}<p><a class="buy" href="/register">{{ _("Зарегистрироваться и купить") }}</a></p>{% endif %}
   </section>
 </div>
-<p class="soon">{{ _("Оплата через Kaspi скоро появится на этой странице.") }}{% if not request.state.user_id %} <a href="/register">{{ _("Зарегистрируйтесь") }}</a>{{ _(", чтобы подключить тариф, когда откроется оплата.") }}{% endif %}</p>
+<p class="soon">{{ _("Оплата через Kaspi или QR любого банка. После оплаты доступ и поиски начисляются автоматически, обычно за минуту.") }}</p>
+{% if history %}
+<h2 style="font-size:17px;margin-top:22px">{{ _("Мои оплаты") }}</h2>
+<div class="table-wrap"><table>
+  <tr><th>{{ _("Когда") }}</th><th>{{ _("Что") }}</th><th>{{ _("Сумма") }}</th><th>{{ _("Статус") }}</th></tr>
+  {% for at, kind, qty, amount, status, paid_at, url in history %}
+  <tr><td class="muted">{{ (at|local).strftime("%d.%m.%Y %H:%M:%S") }}</td>
+    <td>{{ _("Тариф на") ~ " " ~ qty ~ " " ~ _("дней") if kind == "tariff" else qty ~ " " ~ _("поисков") }}</td>
+    <td>{{ "{:,}".format(amount).replace(",", " ") }} ₸</td>
+    <td>{% if status == "paid" %}✓ {{ _("оплачено") }}{% elif status == "pending" %}{% if url %}<a href="{{ url | safe_url }}">{{ _("ожидает оплаты →") }}</a>{% else %}{{ _("ожидает оплаты") }}{% endif %}{% elif status == "cancelled" %}{{ _("отменён") }}{% else %}{{ _("возврат") }}{% endif %}</td></tr>
+  {% endfor %}
+</table></div>
+{% endif %}
 <script>
   // Калькулятор: цена за поиск — по ближайшему пакету не больше выбранного количества.
   const PACKS = {{ packs | tojson }};

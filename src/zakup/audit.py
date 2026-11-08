@@ -18,6 +18,7 @@ ACTIONS = {
     "login": "Вход",
     "login_failed": "Неудачный вход",
     "logout": "Выход",
+    "payment_start": "Перешёл к оплате",
     "otp_sent": "Отправлен SMS-код",
     "register": "Регистрация",
     "password_reset_sms": "Восстановил пароль по SMS",

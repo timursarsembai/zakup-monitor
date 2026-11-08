@@ -33,6 +33,7 @@ def main() -> int:
     more.add_argument("--limit", type=int, default=2000)
     more.add_argument("--part", choices=["open", "finished", "all"], default="all",
                       help="open — открытые (быстрый круг), finished — завершённые и протоколы")
+    sub.add_parser("payments", help="запасная проверка неоплаченных заказов kazpayment")
     orgs = sub.add_parser("subjects", help="догрузить контакты заказчиков открытых объявлений")
     orgs.add_argument("--limit", type=int, default=600)
     sub.add_parser("bot", help="Telegram-бот: привязка чатов (работает постоянно)")
@@ -56,6 +57,13 @@ def main() -> int:
     if args.command == "migrate":
         with db.connect(os.environ["DATABASE_URL"]) as conn:
             db.migrate(conn)
+        return 0
+    if args.command == "payments":
+        from zakup import payments
+
+        with db.connect(os.environ["DATABASE_URL"]) as conn:
+            if os.environ.get("KAZPAYMENT_API_KEY"):
+                print(f"payments: {payments.poll(conn)}")
         return 0
     if args.command == "bot":
         bot.run(os.environ["DATABASE_URL"])

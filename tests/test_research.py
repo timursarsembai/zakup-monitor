@@ -221,3 +221,37 @@ def test_offers_without_margin_are_dropped():
     kept = research.without_loss(result, "1000.00")
     assert [i["url"] for i in kept["items"]] == ["a", "d"] and kept["dropped_no_margin"] == 2
     assert research.without_loss(result, None) is result
+
+
+def test_spec_from_excel_and_word_files():
+    import io
+    import zipfile
+
+    from openpyxl import Workbook
+
+    from zakup import spec
+
+    book = Workbook()
+    book.active.append(["Наименование", "Количество"])
+    book.active.append(["Стол офисный", 5])
+    book.create_sheet("Пустой")
+    data = io.BytesIO()
+    book.save(data)
+    assert "Стол офисный | 5" in spec.extract(data.getvalue())
+    empty = io.BytesIO()
+    Workbook().save(empty)
+    try:
+        spec.extract(empty.getvalue())
+    except spec.SpecError as error:
+        assert "нет текста" in str(error)
+    else:
+        raise AssertionError("ожидали SpecError")
+    w = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    doc = io.BytesIO()
+    with zipfile.ZipFile(doc, "w") as z:
+        z.writestr("word/document.xml", f'<w:document xmlns:w="{w}"><w:body>'
+                   '<w:p><w:r><w:t>Кровать металлическая</w:t></w:r></w:p>'
+                   '<w:tbl><w:tr><w:tc><w:p><w:r><w:t>Размер</w:t></w:r></w:p></w:tc>'
+                   '<w:tc><w:p><w:r><w:t>190x90</w:t></w:r></w:p></w:tc></w:tr></w:tbl></w:body></w:document>')
+    text = spec.extract(doc.getvalue())
+    assert "Кровать металлическая" in text and "Размер | 190x90" in text

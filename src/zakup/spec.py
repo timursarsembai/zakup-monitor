@@ -1,4 +1,4 @@
-"""Текст технической спецификации лота из PDF портала.
+"""Текст технической спецификации лота из файла портала (PDF, Excel, Word).
 
 Спецификация — PDF из двух частей, на казахском и на русском. Берём русскую
 и из неё раздел с характеристиками; не вышло — всю русскую часть.
@@ -56,13 +56,73 @@ def _clean(text: str) -> str:
     return "\n".join(line for line in lines if line)
 
 
+def _xlsx_pages(data: bytes) -> list[str]:
+    """Excel: каждый лист — «страница», строки — ячейки через « | »."""
+    from openpyxl import load_workbook
+
+    book = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+    pages = []
+    for sheet in book.worksheets:
+        rows = []
+        for row in sheet.iter_rows(values_only=True):
+            cells = [str(c).strip() for c in row if c is not None and str(c).strip()]
+            if cells:
+                rows.append(" | ".join(cells))
+        pages.append("\n".join(rows))
+    return pages
+
+
+def _docx_pages(data: bytes) -> list[str]:
+    """Word: абзацы и строки таблиц из word/document.xml (без сторонних библиотек)."""
+    import xml.etree.ElementTree as ET
+    import zipfile
+
+    ns = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+    root = ET.fromstring(zipfile.ZipFile(io.BytesIO(data)).read("word/document.xml"))
+    lines = []
+    for block in root.iter():
+        if block.tag == f"{ns}tr":
+            cells = ["".join(t.text or "" for t in cell.iter(f"{ns}t")).strip()
+                     for cell in block.iter(f"{ns}tc")]
+            if any(cells):
+                lines.append(" | ".join(c for c in cells if c))
+        elif block.tag == f"{ns}p" and not any(True for _ in block.iterfind(f".//{ns}tbl")):
+            text = "".join(t.text or "" for t in block.iter(f"{ns}t")).strip()
+            if text:
+                lines.append(text)
+    return ["\n".join(dict.fromkeys(lines))]
+
+
+def _pages(data: bytes) -> list[str]:
+    """Текст по страницам: PDF, а также Excel (xlsx) и Word (docx) — их тоже загружают."""
+    if data[:5] == b"%PDF-":
+        return [page.extract_text() or "" for page in PdfReader(io.BytesIO(data)).pages]
+    if data[:2] == b"PK":
+        import zipfile
+
+        names = zipfile.ZipFile(io.BytesIO(data)).namelist()
+        if any(n.startswith("xl/") for n in names):
+            return _xlsx_pages(data)
+        if "word/document.xml" in names:
+            return _docx_pages(data)
+        raise SpecError("архив или неизвестный формат файла — откройте файл")
+    if data[:4] == b"\xd0\xcf\x11\xe0":
+        raise SpecError("старый формат Excel/Word (xls/doc) — откройте файл")
+    # Без подписи формата — пробуем как PDF (бывает мусор перед заголовком).
+    return [page.extract_text() or "" for page in PdfReader(io.BytesIO(data)).pages]
+
+
 def extract_both(pdf: bytes) -> tuple[str, str | None]:
     """(русский текст, казахский текст). Русский — раздел с характеристиками,
     если он нашёлся, иначе вся русская часть; казахский — казахская часть целиком."""
     try:
-        pages = [page.extract_text() or "" for page in PdfReader(io.BytesIO(pdf)).pages]
-    except Exception as error:  # pypdf бросает много разных исключений на битых файлах
-        raise SpecError(f"не удалось прочитать PDF: {type(error).__name__}") from None
+        pages = _pages(pdf)
+    except SpecError:
+        raise
+    except Exception as error:  # битые файлы: pypdf, openpyxl и zip бросают разное
+        raise SpecError(f"не удалось прочитать файл: {type(error).__name__}") from None
+    if not any(page.strip() for page in pages):
+        raise SpecError("в файле нет текста — откройте файл")
     russian = [p for p in pages if any(marker in p for marker in _RUSSIAN_MARKERS)]
     kazakh = [p for p in pages if p not in russian] if russian else []
     text = _clean("\n".join(russian or pages))

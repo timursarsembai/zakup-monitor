@@ -2,6 +2,7 @@
    Импортировать with context: нужны info, marks, results, company_bin, here, a. #}
 {% from "_marks.html" import mark_control, mark_styles %}
 {% from "_contacts.html" import org_contacts, contacts_styles with context %}
+{% from "_spec_text.html" import spec_text with context %}
 
 {% macro lot_styles() %}
 {{ mark_styles() }}
@@ -45,6 +46,8 @@
   details.spec-full > summary { cursor: pointer; color: var(--accent); margin: 6px 0; }
   .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin 1s linear infinite; vertical-align: -2px; }
   @keyframes spin { to { transform: rotate(360deg); } }
+  .spec-table { border-collapse: collapse; white-space: normal; margin: 6px 0; }
+  .spec-table td { border: 1px solid var(--line); padding: 4px 8px; vertical-align: top; }
   .spec-text { white-space: pre-wrap; font-size: 14px; line-height: 1.5; margin-top: 8px; padding: 12px;
                border-radius: 8px; background: color-mix(in srgb, var(--fg) 4%, transparent); }
   ul.files { list-style: none; padding: 0; margin: 0; }
@@ -101,7 +104,7 @@
         <div class="summary-box" data-summary data-src="/lots/{{ lot.id }}/spec-summary">
           {% if s %}{% include "summary_fragment.html" %}{% else %}<button type="button" class="summary-btn" data-summary-start data-paid>📋 {{ _("Кратко: главное в таблице (ИИ)") }}</button>{% endif %}
         </div>
-        <details class="spec-full" {% if not (s and s.status == "done") %}open{% endif %}><summary>{{ _("Полный текст") }}</summary><div class="spec-text">{{ pick(cached[0], cached[2]) }}</div></details><p><a href="{{ spec_file(lot) | safe_url }}" target="_blank" rel="noopener">{{ _("Скачать PDF спецификации") }}</a></p>{% else %}<p class="muted">{{ _("Загружаю…") }}</p>{% endif %}</div>
+        <details class="spec-full" {% if not (s and s.status == "done") %}open{% endif %}><summary>{{ _("Полный текст") }}</summary>{{ spec_text(pick(cached[0], cached[2])) }}</details><p><a href="{{ spec_file(lot) | safe_url }}" target="_blank" rel="noopener">{{ _("Скачать файл спецификации") }}</a></p>{% else %}<p class="muted">{{ _("Загружаю…") }}</p>{% endif %}</div>
     </details>
     {% endif %}
   </div>

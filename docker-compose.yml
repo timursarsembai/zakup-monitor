@@ -9,6 +9,7 @@ x-app-env: &app-env
   ZAKUP_TELEGRAM_CHAT_ID: ${ZAKUP_TELEGRAM_CHAT_ID:-}
   ZAKUP_SECRET_KEY: ${ZAKUP_SECRET_KEY:-}
   KAZPAYMENT_API_KEY: ${KAZPAYMENT_API_KEY:-}
+  KAZPAYMENT_WEBHOOK_SECRET: ${KAZPAYMENT_WEBHOOK_SECRET:-}
 
 x-logging: &logging
   driver: json-file
@@ -50,7 +51,7 @@ services:
       - -c
       # Быстрый круг — раз в 2 минуты: новые объявления, их подробности (без них не
       # работают фильтры), совпадения и рассылка. Тяжёлое — в сервисе archive.
-      - zakup migrate; while true; do zakup sync; zakup rescan --days 3 --max-pages 4; zakup details --part open --limit 500; sleep 120; done
+      - zakup migrate; while true; do zakup sync; zakup rescan --days 3 --max-pages 4; zakup details --part open --limit 500; zakup payments; sleep 120; done
     environment: *app-env
     mem_limit: 256m
     logging: *logging

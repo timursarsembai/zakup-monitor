@@ -59,3 +59,36 @@ def verify_otp(request_id: str, code: str, transport: httpx.BaseTransport | None
     data = _post("/otp/verify", {"requestId": request_id, "code": code}, transport)
     phone = data.get("phone")
     return str(phone) if data.get("validated") and phone else None
+
+
+def _get(path: str, transport: httpx.BaseTransport | None = None) -> dict:
+    try:
+        with httpx.Client(timeout=httpx.Timeout(20, connect=5), transport=transport) as http:
+            response = http.get(f"{API}{path}", headers={"Authorization": f"Bearer {_key()}"})
+    except httpx.HTTPError as error:
+        raise KazpaymentError("network", type(error).__name__) from None
+    try:
+        data = response.json()
+    except ValueError:
+        data = {}
+    if response.status_code >= 400:
+        raise KazpaymentError(str(data.get("code") or f"http_{response.status_code}"))
+    return data
+
+
+def create_order(ref: str, amount: int, comment: str, phone: str | None = None,
+                 transport: httpx.BaseTransport | None = None) -> str:
+    """Заводит заказ (повтор с тем же ref безопасен). Возвращает ссылку на оплату."""
+    payload: dict[str, Any] = {"external_ref": ref, "amount": amount, "comment": comment[:200]}
+    if phone:
+        payload["customer_phone"] = phone
+    data = _post("/orders", payload, transport)
+    if not data.get("payUrl"):
+        raise KazpaymentError("bad_response", "нет payUrl")
+    return str(data["payUrl"])
+
+
+def order_status(ref: str, transport: httpx.BaseTransport | None = None) -> dict:
+    from urllib.parse import quote
+
+    return _get(f"/orders/{quote(ref, safe='')}", transport)

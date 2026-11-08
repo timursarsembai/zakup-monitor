@@ -5,13 +5,14 @@
 """
 
 import io
+import json
 import logging
 import os
 import time
 from contextlib import asynccontextmanager
 from decimal import Decimal, InvalidOperation
 from importlib.resources import files
-from typing import Annotated
+from typing import Annotated, Any
 from datetime import UTC, datetime, timedelta
 from urllib.parse import parse_qs, quote, urlencode, urlsplit
 
@@ -36,8 +37,10 @@ from zakup import (
     details,
     i18n,
     kaspi,
+    kazpayment,
     marks,
     matcher,
+    payments,
     questions,
     research,
     results,
@@ -116,6 +119,27 @@ def _tariff() -> dict:
 
 
 templates.env.globals["tariff"] = _tariff
+
+
+def _spec_blocks(text: str | None) -> list[tuple[str, Any]]:
+    """Текст спецификации кусками: строки с « | » (из Excel и таблиц Word) подряд —
+    таблица, остальное — обычный текст."""
+    blocks: list[tuple[str, Any]] = []
+    for line in (text or "").splitlines():
+        if " | " in line:
+            cells = [c.strip() for c in line.split(" | ")]
+            if blocks and blocks[-1][0] == "table":
+                blocks[-1][1].append(cells)
+            else:
+                blocks.append(("table", [cells]))
+        elif blocks and blocks[-1][0] == "text":
+            blocks[-1] = ("text", blocks[-1][1] + "\n" + line)
+        else:
+            blocks.append(("text", line))
+    return blocks
+
+
+templates.env.globals["spec_blocks"] = _spec_blocks
 templates.env.globals["_"] = i18n.gettext
 templates.env.filters["tr"] = i18n.gettext
 templates.env.globals["lang"] = i18n.language
@@ -587,26 +611,68 @@ def healthz() -> dict:
 
 @app.get("/")
 def home(request: Request, user: Viewer, page: int = 1, per_page: int = PAGE_SIZE):
-    """Главная — поиск закупок (лоты), открыт всем, как на портале."""
-    if request.url.query and "applied" in request.url.query and "page" not in request.url.query:
-        # Старые ссылки вида /?applied=1&… вели на поиск объявлений.
-        return RedirectResponse(f"/announcements?{request.url.query}", status_code=307)
-    return lots_search(request, user, page, per_page)
-
-
-# Пакеты поисков с ИИ: (сколько, цена ₸). Одиночный поиск — 250 ₸.
-SEARCH_PACKS = [(20, 4900), (50, 11900), (100, 22900)]
+    """Главная — поиск объявлений, открыт всем, как на портале."""
+    return announcements_search(request, user, page, per_page)
 
 
 @app.get("/pricing")
-def pricing(request: Request, user: Viewer):
-    paid_until = None
+def pricing(request: Request, user: Viewer, need: str = "", error: str = ""):
+    paid_until, history = None, []
     if user:
         with pool.connection() as conn:
             paid_until = conn.execute("SELECT paid_until FROM users WHERE id = %s AND paid_until > now()",
                                       (user,)).fetchone()
+            history = payments.history(conn, user)
     return templates.TemplateResponse(request, "pricing.html", {
-        "packs": SEARCH_PACKS, "paid_until": paid_until[0] if paid_until else None})
+        "packs": payments.SEARCH_PACKS, "search_price": payments.SEARCH_PRICE,
+        "paid_until": paid_until[0] if paid_until else None, "history": history,
+        "need": need, "error": error})
+
+
+@app.post("/pay/tariff", dependencies=[Depends(same_origin)])
+def pay_tariff(request: Request, user: User):
+    with pool.connection() as conn:
+        price = tariff.get(conn)["price"]
+        return _pay(request, conn, user, "tariff", payments.TARIFF_DAYS, price,
+                    f"Zakup: тариф на {payments.TARIFF_DAYS} дней")
+
+
+@app.post("/pay/searches", dependencies=[Depends(same_origin)])
+def pay_searches(request: Request, user: User, count: Annotated[int, Form()]):
+    if not 1 <= count <= payments.MAX_SEARCHES:
+        raise HTTPException(422, f"от 1 до {payments.MAX_SEARCHES} поисков")
+    with pool.connection() as conn:
+        return _pay(request, conn, user, "searches", count, payments.searches_price(count),
+                    f"Zakup: {count} поисков товаров с ИИ")
+
+
+def _pay(request: Request, conn, user: int, kind: str, quantity: int, amount: int, title: str):
+    phone = conn.execute("SELECT phone FROM users WHERE id = %s", (user,)).fetchone()[0]
+    try:
+        url = payments.create(conn, user, kind, quantity, amount, phone, title)
+    except kazpayment.KazpaymentError as error:
+        logger.warning("payment create failed: %s", error.code)
+        return RedirectResponse("/pricing?error=pay", status_code=303)
+    _audit(request, user, "payment_start", kind, quantity=quantity, amount=amount)
+    return RedirectResponse(url, status_code=303)
+
+
+@app.post("/webhooks/kazpayment")
+async def kazpayment_webhook(request: Request):
+    """Уведомление kazpayment об оплате. Подпись проверяется по сырому телу до разбора."""
+    body = await request.body()
+    if not payments.verify_signature(body, request.headers.get("x-kazpayment-signature")):
+        raise HTTPException(401, "bad signature")
+    try:
+        event = json.loads(body)
+    except ValueError:
+        raise HTTPException(400, "bad json") from None
+    if not isinstance(event, dict):
+        raise HTTPException(400, "bad json")
+    with pool.connection() as conn:
+        outcome = await run_in_threadpool(payments.handle_event, conn, event)
+    logger.info("kazpayment %s %s: %s", event.get("event"), event.get("order_ref"), outcome)
+    return {"ok": True}
 
 
 @app.get("/balance")
