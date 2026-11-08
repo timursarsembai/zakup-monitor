@@ -31,10 +31,12 @@ from starlette.concurrency import run_in_threadpool
 
 from zakup import (
     SITE_URL,
+    ai_config,
     audit,
     auth,
     bot,
     client_bot,
+    config,
     contacts,
     credits,
     dashboard,
@@ -1185,7 +1187,7 @@ _client: Client | None = None
 def _goszakup() -> Client:
     global _client
     if _client is None:
-        _client = Client(os.environ.get("GOSZAKUP_TOKEN", ""), delay=0, attempts=2)
+        _client = Client(config.goszakup_token(), delay=0, attempts=2)
     return _client
 
 
@@ -1211,9 +1213,7 @@ def lot_page(request: Request, user: Viewer, lot_id: int, background: Background
         # Результаты подбора — платная часть (тариф или сотрудник), у каждого клиента свои.
         job, done = _research_view(request, conn, user, lot_id) if user and request.state.paid else (None, None)
         lot_info = research.lot_context(conn, lot_id)
-        provider = (conn.execute(
-            "SELECT ai_provider FROM users WHERE role = 'admin' ORDER BY id LIMIT 1"
-        ).fetchone() or ("claude_code",))[0]
+        provider = ai_config.provider(conn)
     if user:
         _audit(request, user, "view_lot", f"/lots/{lot_id}")
     context.update(lot=lot, others=[other for other in context["lots"] if other["id"] != lot_id],

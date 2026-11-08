@@ -19,7 +19,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from zakup import db, notify
+from zakup import config, db, notify
 from zakup.incidents import redact
 
 logger = logging.getLogger(__name__)
@@ -101,7 +101,7 @@ DENIED = [*SECRET_PLACES, *[f"{tool}(./{path})" for tool in ("Edit", "Write") fo
 def _claude(prompt: str) -> dict:
     binary = shutil.which("claude") or os.path.expanduser("~/.local/bin/claude")
     command = [
-        binary, "-p", prompt, "--model", os.environ.get("ZAKUP_AUTOFIX_MODEL", "opus"),
+        binary, "-p", prompt, "--model", config.autofix_model(),
         "--output-format", "json", "--json-schema", json.dumps(RESULT_SCHEMA),
         "--allowedTools", ",".join(ALLOWED),
         "--disallowedTools", "WebFetch,WebSearch,Task,NotebookEdit",
@@ -190,7 +190,7 @@ def handle(row) -> tuple[str, str, str]:
 
 
 def run() -> None:
-    url = os.environ["DATABASE_URL"]
+    url = config.database_url()
     with db.connect(url) as conn:
         # Разбор прервался перезапуском службы. Заново не начинаем: если служба падает
         # посреди разбора, повтор по кругу запускал бы Claude и выкладку без конца.

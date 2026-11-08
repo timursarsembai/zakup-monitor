@@ -5,11 +5,12 @@
 Документация: https://kazpayment.kz/llms.txt
 """
 
-import os
 import secrets
 from typing import Any
 
 import httpx
+
+from zakup import config
 
 API = "https://kazpayment.kz/api/v1"
 
@@ -21,7 +22,7 @@ class KazpaymentError(Exception):
 
 
 def _key() -> str:
-    key = os.environ.get("KAZPAYMENT_API_KEY", "").strip()
+    key = config.kazpayment_key()
     if not key:
         raise KazpaymentError("not_configured", "KAZPAYMENT_API_KEY не задан")
     return key

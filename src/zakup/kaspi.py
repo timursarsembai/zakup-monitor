@@ -14,7 +14,7 @@ from urllib.parse import quote, urlsplit
 import httpx
 import psycopg
 
-from zakup import secrets_box
+from zakup import ai_config
 
 logger = logging.getLogger(__name__)
 
@@ -33,8 +33,7 @@ class Blocked(Exception):
 
 
 def proxy_url(conn: psycopg.Connection) -> str | None:
-    admin = conn.execute("SELECT id FROM users WHERE role = 'admin' ORDER BY id LIMIT 1").fetchone()
-    return secrets_box.user_key(conn, admin[0], PROXY_KEY) if admin else None
+    return ai_config.admin_key(conn, PROXY_KEY)
 
 
 def proxy_host(url: str | None) -> str:

@@ -2,13 +2,12 @@ import argparse
 import getpass
 import json
 import logging
-import os
 import sys
 import time
 from datetime import date, datetime, timedelta
 from datetime import time as day_time
 
-from zakup import audit, auth, bot, db, details, incidents, marks, matcher, results, sync
+from zakup import audit, auth, bot, config, db, details, incidents, marks, matcher, results, sync
 from zakup.goszakup import ENTITIES, PORTAL_TZ, Client
 
 # Сколько истории грузить, если start-from не запускали.
@@ -59,14 +58,14 @@ def main() -> int:
     logging.getLogger("httpx").setLevel(logging.WARNING)
 
     if args.command == "migrate":
-        with db.connect(os.environ["DATABASE_URL"]) as conn:
+        with db.connect(config.database_url()) as conn:
             db.migrate(conn)
         return 0
     if args.command == "payments":
         from zakup import payments
 
-        with db.connect(os.environ["DATABASE_URL"]) as conn:
-            if os.environ.get("KAZPAYMENT_API_KEY"):
+        with db.connect(config.database_url()) as conn:
+            if config.kazpayment_key():
                 print(f"payments: {payments.poll(conn)}")
         return 0
     if args.command == "autofix":
@@ -77,7 +76,7 @@ def main() -> int:
     if args.command == "tidy":
         from zakup import geo, visits
 
-        with db.connect(os.environ["DATABASE_URL"]) as conn:
+        with db.connect(config.database_url()) as conn:
             print(f"geo: {geo.update(conn)}, purged visits/events: {visits.purge(conn)}")
         return 0
     if args.command == "nightly":
@@ -87,22 +86,22 @@ def main() -> int:
     if args.command == "client-bot":
         from zakup import client_bot
 
-        client_bot.run(os.environ["DATABASE_URL"])
+        client_bot.run(config.database_url())
         return 0
     if args.command == "bot":
-        bot.run(os.environ["DATABASE_URL"])
+        bot.run(config.database_url())
         return 0
     if args.command == "specs":
         return _specs(args.limit, args.loop)
     if args.command == "research":
         from zakup import research
 
-        research.work(os.environ["DATABASE_URL"], args.providers.split(","), once=args.once)
+        research.work(config.database_url(), args.providers.split(","), once=args.once)
         return 0
     if args.command == "set-password":
         return _set_password(args.email)
     if args.command == "add-user":
-        with db.connect(os.environ["DATABASE_URL"]) as conn:
+        with db.connect(config.database_url()) as conn:
             row = conn.execute(
                 """INSERT INTO users (email, telegram_chat_id) VALUES (%s, %s)
                    ON CONFLICT (email) DO UPDATE SET telegram_chat_id = excluded.telegram_chat_id
@@ -113,18 +112,18 @@ def main() -> int:
         print(row[0])
         return 0
 
-    token = os.environ.get("GOSZAKUP_TOKEN", "").strip()
+    token = config.goszakup_token()
     if not token:
         print("GOSZAKUP_TOKEN не задан.", file=sys.stderr)
         return 2
     client = Client(
         token,
-        delay=float(os.environ.get("GOSZAKUP_REQUEST_DELAY") or 0.5),
+        delay=config.goszakup_delay(),
     )
     try:
         if args.command == "probe":
             return _probe(client)
-        with db.connect(os.environ["DATABASE_URL"]) as conn:
+        with db.connect(config.database_url()) as conn:
             if args.command == "start-from":
                 return _start_from(conn, client, args.since)
             if args.command == "rescan":
@@ -145,7 +144,7 @@ def _specs(limit: int, loop: bool) -> int:
     from zakup import spec
 
     while True:
-        with db.connect(os.environ["DATABASE_URL"]) as conn:
+        with db.connect(config.database_url()) as conn:
             done = spec.prefetch(conn, limit)
         print(f"specs: {done}", flush=True)
         if not loop:
@@ -167,7 +166,7 @@ def _set_password(email: str) -> int:
     if len(password) < auth.MIN_PASSWORD_LENGTH:
         print(f"Нужно не меньше {auth.MIN_PASSWORD_LENGTH} символов.", file=sys.stderr)
         return 1
-    with db.connect(os.environ["DATABASE_URL"]) as conn:
+    with db.connect(config.database_url()) as conn:
         user_id = auth.set_password(conn, email, password)
     print(f"Пароль задан, пользователь {user_id}. Старые сессии закрыты.")
     return 0

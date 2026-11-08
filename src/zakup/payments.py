@@ -9,13 +9,12 @@ payUrl. Оплату узнаём из вебхука payment.received (подп
 import hashlib
 import hmac
 import logging
-import os
 import secrets
 from typing import Any
 
 import psycopg
 
-from zakup import credits, kazpayment, notify
+from zakup import config, credits, kazpayment, notify
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +82,7 @@ def fulfill(conn: psycopg.Connection, ref: str, paid_amount: int, late: bool = F
 
 
 def verify_signature(body: bytes, header: str | None, secret: str | None = None) -> bool:
-    secret = secret if secret is not None else os.environ.get("KAZPAYMENT_WEBHOOK_SECRET", "").strip()
+    secret = secret if secret is not None else config.kazpayment_webhook_secret()
     if not secret or not header:
         return False
     expected = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()

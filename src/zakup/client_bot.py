@@ -9,13 +9,12 @@
 """
 
 import logging
-import os
 import time
 from datetime import UTC, datetime, timedelta
 
 import psycopg
 
-from zakup import SITE_URL, bot, db, telegram
+from zakup import SITE_URL, bot, config, db, telegram
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +84,7 @@ def _user_by_tg(conn: psycopg.Connection, tg_id: int) -> tuple | None:
 def _site_admin(conn: psycopg.Connection, tg_id: int | None) -> bool:
     if not tg_id:
         return False
-    if os.environ.get("ZAKUP_TELEGRAM_CHAT_ID", "").strip() == str(tg_id):
+    if config.owner_chat_id() == str(tg_id):
         return True
     return conn.execute(
         """SELECT 1 FROM users WHERE role = 'admin' AND deleted_at IS NULL AND NOT disabled

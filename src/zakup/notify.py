@@ -2,15 +2,14 @@
 
 import html
 import logging
-import os
 
-from zakup import telegram
+from zakup import config, telegram
 
 logger = logging.getLogger(__name__)
 
 
 def send(text: str) -> bool:
-    chat_id = os.environ.get("ZAKUP_TELEGRAM_CHAT_ID")
+    chat_id = config.owner_chat_id()
     if not telegram.token() or not chat_id:
         logger.warning("message not sent, Telegram is not configured: %s", text)
         return False

@@ -158,6 +158,8 @@ def logout(conn: psycopg.Connection, token: str | None) -> None:
 
 # Сотрудники: полный бесплатный доступ, управление обычными пользователями, журнал.
 STAFF_ROLES = ("admin", "moderator")
+# Клиент — не сотрудник и не удалён. Условие на таблицу users под псевдонимом u.
+CLIENT_SQL = "u.role = 'user' AND u.deleted_at IS NULL"
 # Кому положены уведомления (подписки, напоминания): сотрудникам и клиентам с тарифом.
 # Условие на таблицу users под псевдонимом u.
 ENTITLED_SQL = ("(u.role IN ('admin', 'moderator') OR u.paid_until > now()) "

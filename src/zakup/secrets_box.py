@@ -4,10 +4,11 @@
 сохранить ключ нельзя, а сохранённые не прочитать.
 """
 
-import os
 
 import psycopg
 from cryptography.fernet import Fernet, InvalidToken
+
+from zakup import config
 
 
 class NoSecretKey(Exception):
@@ -15,7 +16,7 @@ class NoSecretKey(Exception):
 
 
 def _box() -> Fernet:
-    key = os.environ.get("ZAKUP_SECRET_KEY", "").strip()
+    key = config.secret_key()
     if not key:
         raise NoSecretKey("ZAKUP_SECRET_KEY не задан")
     return Fernet(key.encode())

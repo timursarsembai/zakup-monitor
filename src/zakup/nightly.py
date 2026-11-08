@@ -16,7 +16,7 @@ import subprocess
 from collections import Counter
 from pathlib import Path
 
-from zakup import db, notify
+from zakup import config, db, notify
 from zakup.autofix import SECRET_PLACES
 from zakup.incidents import redact
 
@@ -60,7 +60,7 @@ _NOISE = re.compile(r"\d+")
 
 def _db_facts() -> list[str]:
     lines = []
-    with db.connect(os.environ["DATABASE_URL"]) as conn:
+    with db.connect(config.database_url()) as conn:
         for title, query in QUERIES.items():
             try:
                 rows = [str(r[0]) for r in conn.execute(query).fetchall() if r[0] is not None]
@@ -154,7 +154,7 @@ def _claude(prompt: str) -> dict:
                  "Bash(docker compose ps)", "Bash(git log:*)", "Bash(git show:*)", "Bash(git diff:*)"]
     settings = {"permissions": {"deny": SECRET_PLACES}}
     command = [
-        binary, "-p", prompt, "--model", os.environ.get("ZAKUP_NIGHTLY_MODEL", "opus"),
+        binary, "-p", prompt, "--model", config.nightly_model(),
         "--output-format", "json", "--json-schema", json.dumps(RESULT_SCHEMA),
         "--allowedTools", ",".join(read_only),
         "--disallowedTools", "Edit,Write,NotebookEdit,WebFetch,WebSearch,Task",

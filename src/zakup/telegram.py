@@ -5,10 +5,11 @@ urllib, а не httpx: httpx пишет URL запросов в лог, а в UR
 
 import json
 import logging
-import os
 import urllib.error
 import urllib.request
 from typing import Any
+
+from zakup import config
 
 logger = logging.getLogger(__name__)
 
@@ -36,17 +37,16 @@ class TelegramError(Exception):
 # клиентов (@tenderim_kz_bot). Чаты клиентского бота хранятся с префиксом «c:»
 # (users.telegram_chat_id = "c:123"): так любая рассылка сама уходит нужным ботом.
 CLIENT_PREFIX = "c:"
-_TOKENS = {"main": "ZAKUP_TELEGRAM_BOT_TOKEN", "client": "ZAKUP_CLIENT_BOT_TOKEN"}
 _usernames: dict[str, str] = {}
 
 
 def token(bot: str = "main") -> str | None:
-    return os.environ.get(_TOKENS[bot]) or None
+    return config.telegram_token(bot)
 
 
 def bot_username(bot: str = "main") -> str | None:
     if bot == "main":
-        return os.environ.get("ZAKUP_TELEGRAM_BOT_USERNAME") or None
+        return config.telegram_bot_username()
     if bot not in _usernames and token(bot):
         try:
             _usernames[bot] = call("getMe", bot=bot)["username"]

@@ -10,7 +10,7 @@ from typing import Any
 import psycopg
 from psycopg.types.json import Jsonb
 
-from zakup import research, secrets_box
+from zakup import research
 
 logger = logging.getLogger(__name__)
 
@@ -100,12 +100,7 @@ def _ask(conn: psycopg.Connection, lot_id: int, url: str, provider: str, model: 
         url=url, matches="; ".join(item.get("matches") or []) or "—",
         mismatches="; ".join(item.get("mismatches") or []) or "—", note=item.get("note") or "—",
     )
-    key = None
-    if provider != "claude_code":
-        admin = conn.execute("SELECT id FROM users WHERE role = 'admin' ORDER BY id LIMIT 1").fetchone()
-        key = secrets_box.user_key(conn, admin[0], provider) if admin else None
-        if not key:
-            raise research.ResearchError("в настройках не указан API-ключ")
+    key = research.api_key(conn, provider)
     conn.commit()
     if provider == "claude_code":
         raw = research._claude_code(prompt, model, SCHEMA, web=False)

@@ -26,7 +26,7 @@ import httpx
 import psycopg
 from psycopg.types.json import Jsonb
 
-from zakup import contacts, credits, details, kaspi, secrets_box, sources
+from zakup import ai_config, contacts, credits, details, kaspi, sources
 
 logger = logging.getLogger(__name__)
 
@@ -326,10 +326,7 @@ def enqueue(conn: psycopg.Connection, user_id: int, lot_id: int, region: str,
     """Ставит поиск в очередь. more=True — «найти ещё»: дополнить последний результат.
     charge=True — списать один поиск с баланса клиента (credits.NoCredits, если пусто)."""
     # Кто ищет — решает администратор в своих настройках, для всех пользователей.
-    provider, model = conn.execute(
-        "SELECT ai_provider, ai_model FROM users WHERE role = 'admin' ORDER BY id LIMIT 1"
-    ).fetchone() or ("claude_code", None)
-    provider = provider or "claude_code"
+    provider, model, _ = ai_config.models(conn)
     # Свои поиски у каждого клиента: ждём только свой незаконченный (сотрудник — любой).
     active = conn.execute(
         """SELECT id FROM lot_research WHERE lot_id = %s AND status IN ('queued', 'running')
@@ -654,10 +651,7 @@ QUERY_PROMPT = """Лот госзакупок: {name}. {extra}
 def _light_json(conn: psycopg.Connection, prompt: str, schema: dict) -> dict[str, Any]:
     """Короткий запрос к модели для коротких задач (без интернета)."""
     provider, model = light_model(conn)
-    key = None
-    if provider != "claude_code":
-        admin = conn.execute("SELECT id FROM users WHERE role = 'admin' ORDER BY id LIMIT 1").fetchone()
-        key = secrets_box.user_key(conn, admin[0], provider) if admin else None
+    key = ai_config.admin_key(conn, provider) if provider != "claude_code" else None
     # Ответа модели ждём без открытой транзакции: она держала бы блокировки (DeadlockDetected).
     conn.commit()
     if provider == "claude_code":
@@ -729,12 +723,7 @@ def run_job(conn: psycopg.Connection, job: dict[str, Any]) -> dict[str, Any]:
                           exclude=[i["url"] for i in (base or {}).get("items", [])],
                           known_sellers=contacts.known_for_prompt(conn),
                           kaspi_text=_kaspi_candidates(conn, context, base))
-    key = None
-    if job["provider"] != "claude_code":
-        admin = conn.execute("SELECT id FROM users WHERE role = 'admin' ORDER BY id LIMIT 1").fetchone()
-        key = secrets_box.user_key(conn, admin[0], job["provider"]) if admin else None
-        if not key:
-            raise ResearchError("в настройках не указан API-ключ")
+    key = api_key(conn, job["provider"])
     # Поиск идёт минутами: не держим транзакцию открытой.
     conn.commit()
     if job["provider"] == "claude_code":
@@ -754,13 +743,20 @@ def run_job(conn: psycopg.Connection, job: dict[str, Any]) -> dict[str, Any]:
     return found
 
 
+def api_key(conn: psycopg.Connection, provider: str) -> str | None:
+    """API-ключ администратора для провайдера; у Claude Code ключа нет (None)."""
+    if provider == "claude_code":
+        return None
+    key = ai_config.admin_key(conn, provider)
+    if not key:
+        raise ResearchError("в настройках не указан API-ключ")
+    return key
+
+
 def light_model(conn: psycopg.Connection) -> tuple[str, str]:
     """(провайдер, модель) для коротких задач без интернета: выжимка, вопросы поставщику.
     Модель выбирает администратор отдельно от модели поиска товаров."""
-    provider, model = conn.execute(
-        "SELECT ai_provider, ai_model_light FROM users WHERE role = 'admin' ORDER BY id LIMIT 1"
-    ).fetchone() or ("claude_code", None)
-    provider = provider or "claude_code"
+    provider, _, model = ai_config.models(conn)
     if provider == "claude_code" or not model:
         model = SUMMARY_MODELS[provider]
     return provider, model
@@ -795,12 +791,7 @@ def _summarize(conn: psycopg.Connection, lot_id: int, provider: str, model: str)
     if context is None or context["spec"].startswith("нет —"):
         raise ResearchError("нет текста техспецификации")
     prompt = SUMMARY_PROMPT.format(**{k: v or "—" for k, v in context.items() if k != "kato"})
-    key = None
-    if provider != "claude_code":
-        admin = conn.execute("SELECT id FROM users WHERE role = 'admin' ORDER BY id LIMIT 1").fetchone()
-        key = secrets_box.user_key(conn, admin[0], provider) if admin else None
-        if not key:
-            raise ResearchError("в настройках не указан API-ключ")
+    key = api_key(conn, provider)
     conn.commit()
     if provider == "claude_code":
         raw = _claude_code(prompt, model, SUMMARY_SCHEMA, web=False)

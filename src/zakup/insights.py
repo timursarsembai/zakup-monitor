@@ -13,11 +13,12 @@ import psycopg
 
 from zakup import stats, tariff
 from zakup.audit import ACTIONS
+from zakup.auth import CLIENT_SQL
 from zakup.filters import METHODS, REGIONS, SUBJECTS
 from zakup.payments import SEARCH_PRICE
 from zakup.stats import Period, Source
 
-CLIENT = "u.role = 'user' AND u.deleted_at IS NULL"
+CLIENT = CLIENT_SQL
 HUMAN = "NOT v.is_bot"
 USD_KZT = 520  # для себестоимости ИИ в тенге (с запасом)
 

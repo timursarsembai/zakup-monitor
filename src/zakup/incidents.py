@@ -9,7 +9,6 @@
 
 import json
 import logging
-import os
 import re
 import traceback
 from datetime import UTC, datetime, timedelta, timezone
@@ -17,7 +16,7 @@ from datetime import UTC, datetime, timedelta, timezone
 import httpx
 import psycopg
 
-from zakup import db, notify
+from zakup import config, db, notify
 from zakup.goszakup import GoszakupError, PortalUnavailable
 
 logger = logging.getLogger(__name__)
@@ -63,7 +62,7 @@ def fingerprint(error: BaseException) -> str:
 def _connect(conn):
     if conn is not None:
         return conn, False
-    return db.connect(os.environ["DATABASE_URL"]), True
+    return db.connect(config.database_url()), True
 
 
 def failed(stage: str, error: BaseException, conn: psycopg.Connection | None = None) -> None:
