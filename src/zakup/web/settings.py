@@ -58,80 +58,92 @@ def settings(request: Request, user: Viewer, sent: str = "", saved: str = ""):
 def _settings_page(request: Request, user: int, *, sent: str = "", saved: str = "",
                    notice: str | None = None, error: str | None = None, status_code: int = 200,
                    tab: str | None = None):
+    """Страница настроек: данные каждой группы вкладок собирают функции ниже."""
     is_admin = request.state.role == "admin"
     is_staff = request.state.role in auth.STAFF_ROLES
     with core.pool.connection() as conn:
         chat_id, company_bin = conn.execute(
             "SELECT telegram_chat_id, company_bin FROM users WHERE id = %s", (user,)
         ).fetchone()
-        groups = _user_groups(conn, user)
-        ai = conn.execute("SELECT ai_provider, ai_model, ai_model_light FROM users WHERE id = %s",
-                          (user,)).fetchone()
-        ai_keys = secrets_box.saved_providers(conn, user)
-        proxy_host = kaspi.proxy_host(kaspi.proxy_url(conn)) if is_admin else ""
-        # Модератор видит обычных пользователей, модераторов и себя; админов — нет.
-        users = conn.execute(
-            """SELECT u.id, u.email, u.role, u.telegram_chat_id IS NOT NULL,
-                      (SELECT max(created_at) FROM sessions s WHERE s.user_id = u.id),
-                      u.disabled, o.name, o.bin, u.paid_until,
-                      (SELECT coalesce(sum(g.delta), 0) FROM search_ledger g WHERE g.user_id = u.id)
-               FROM users u LEFT JOIN client_orgs o ON o.user_id = u.id WHERE u.deleted_at IS NULL AND (%s OR u.role <> 'admin' OR u.id = %s)
-               ORDER BY array_position(ARRAY['admin', 'moderator', 'user'], u.role), u.email""",
-            (is_admin, user),
-        ).fetchall() if is_staff else []
-        deleted = conn.execute(
-            """SELECT u.id, u.email, u.role, u.deleted_at, d.email, u.may_reregister
-               FROM users u LEFT JOIN users d ON d.id = u.deleted_by
-               WHERE u.deleted_at IS NOT NULL ORDER BY u.deleted_at DESC"""
-        ).fetchall() if is_admin else []
-        registration_open = signup.registration_open(conn)
-        tg_bot = "main" if is_staff else "client"
-        client_group = None if is_staff else {
-            "exists": bool(client_bot.group_id(conn)),
-            "member": bool(conn.execute("SELECT 1 FROM client_group_members WHERE user_id = %s",
-                                        (user,)).fetchone()),
-            "linked": bool(chat_id and str(chat_id).startswith(telegram.CLIENT_PREFIX)),
-            "paid": request.state.paid}
-    return templates.TemplateResponse(
-        request,
-        "settings.html",
-        {
-            "is_admin": is_admin,
-            "is_staff": is_staff,
-            "guest": False,
-            "roles": auth.ROLES,
-            "deleted": deleted,
-            "registration_open": registration_open,
-            "connected": bool(chat_id),
-            # Клиентам — свой бот (@tenderim_kz_bot), сотрудникам — прежний.
-            "bot_username": telegram.bot_username(tg_bot),
-            "configured": bool(telegram.token(tg_bot) and telegram.bot_username(tg_bot)),
-            "client_group": client_group,
-            "sent": sent,
-            "saved": saved,
-            "notice": notice,
-            "error": error,
-            "company_bin": company_bin,
-            "groups": groups,
-            "ai_provider": ai[0],
-            "ai_model": ai[1] or "",
-            "ai_model_light": ai[2] or research.SUMMARY_MODELS.get(ai[0] or "claude_code", ""),
-            "ai_keys": ai_keys,
-            "proxy_host": proxy_host,
-            "providers": research.PROVIDERS,
-            "default_models": research.DEFAULT_MODELS,
-            "models": research.MODELS,
-            "light_defaults": research.SUMMARY_MODELS,
-            "tab": tab or {"ai": "ai", "bin": "company", "tariff": "tariff",
-                           "requisites": "requisites"}.get(saved),
-            "requisite_fields": legal.FIELDS,
-            "users": users,
-            "me": user,
-            "now": datetime.now(UTC),
-            "min_password": auth.MIN_PASSWORD_LENGTH,
-        },
-        status_code=status_code,
-    )
+        context = {
+            **_telegram_tab(conn, request, user, chat_id, is_staff),
+            **_ai_tab(conn, user, is_admin),
+            **_users_tab(conn, user, is_admin, is_staff),
+            "groups": _user_groups(conn, user),
+        }
+    context.update({
+        "is_admin": is_admin,
+        "is_staff": is_staff,
+        "guest": False,
+        "sent": sent,
+        "saved": saved,
+        "notice": notice,
+        "error": error,
+        "company_bin": company_bin,
+        "tab": tab or {"ai": "ai", "bin": "company", "tariff": "tariff",
+                       "requisites": "requisites"}.get(saved),
+        "requisite_fields": legal.FIELDS,
+        "me": user,
+        "now": datetime.now(UTC),
+        "min_password": auth.MIN_PASSWORD_LENGTH,
+    })
+    return templates.TemplateResponse(request, "settings.html", context, status_code=status_code)
+
+
+def _telegram_tab(conn, request: Request, user: int, chat_id: str | None, is_staff: bool) -> dict:
+    """Уведомления: подключён ли Telegram, какой бот, группа клиентов."""
+    tg_bot = "main" if is_staff else "client"
+    client_group = None if is_staff else {
+        "exists": bool(client_bot.group_id(conn)),
+        "member": bool(conn.execute("SELECT 1 FROM client_group_members WHERE user_id = %s",
+                                    (user,)).fetchone()),
+        "linked": bool(chat_id and str(chat_id).startswith(telegram.CLIENT_PREFIX)),
+        "paid": request.state.paid}
+    return {
+        "connected": bool(chat_id),
+        # Клиентам — свой бот (@tenderim_kz_bot), сотрудникам — прежний.
+        "bot_username": telegram.bot_username(tg_bot),
+        "configured": bool(telegram.token(tg_bot) and telegram.bot_username(tg_bot)),
+        "client_group": client_group,
+    }
+
+
+def _ai_tab(conn, user: int, is_admin: bool) -> dict:
+    """ИИ: провайдер, модели, сохранённые ключи, прокси для Kaspi."""
+    ai = conn.execute("SELECT ai_provider, ai_model, ai_model_light FROM users WHERE id = %s",
+                      (user,)).fetchone()
+    return {
+        "ai_provider": ai[0],
+        "ai_model": ai[1] or "",
+        "ai_model_light": ai[2] or research.SUMMARY_MODELS.get(ai[0] or "claude_code", ""),
+        "ai_keys": secrets_box.saved_providers(conn, user),
+        "proxy_host": kaspi.proxy_host(kaspi.proxy_url(conn)) if is_admin else "",
+        "providers": research.PROVIDERS,
+        "default_models": research.DEFAULT_MODELS,
+        "models": research.MODELS,
+        "light_defaults": research.SUMMARY_MODELS,
+    }
+
+
+def _users_tab(conn, user: int, is_admin: bool, is_staff: bool) -> dict:
+    """Пользователи: список (модератор не видит администраторов), удалённые, регистрация."""
+    users = conn.execute(
+        """SELECT u.id, u.email, u.role, u.telegram_chat_id IS NOT NULL,
+                  (SELECT max(created_at) FROM sessions s WHERE s.user_id = u.id),
+                  u.disabled, o.name, o.bin, u.paid_until,
+                  (SELECT coalesce(sum(g.delta), 0) FROM search_ledger g WHERE g.user_id = u.id)
+           FROM users u LEFT JOIN client_orgs o ON o.user_id = u.id
+           WHERE u.deleted_at IS NULL AND (%s OR u.role <> 'admin' OR u.id = %s)
+           ORDER BY array_position(ARRAY['admin', 'moderator', 'user'], u.role), u.email""",
+        (is_admin, user),
+    ).fetchall() if is_staff else []
+    deleted = conn.execute(
+        """SELECT u.id, u.email, u.role, u.deleted_at, d.email, u.may_reregister
+           FROM users u LEFT JOIN users d ON d.id = u.deleted_by
+           WHERE u.deleted_at IS NOT NULL ORDER BY u.deleted_at DESC"""
+    ).fetchall() if is_admin else []
+    return {"users": users, "deleted": deleted, "roles": auth.ROLES,
+            "registration_open": signup.registration_open(conn)}
 
 
 @router.post("/settings/password", dependencies=[Depends(same_origin)])

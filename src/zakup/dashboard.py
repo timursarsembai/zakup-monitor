@@ -33,13 +33,34 @@ def _rows(conn, sql: str, params: dict | None = None) -> list:
 
 
 def market(conn: psycopg.Connection, now: datetime | None = None) -> dict[str, Any]:
-    """Общая аналитика по рынку (одинакова для всех) и кладёт её в кэш."""
+    """Общая аналитика по рынку (одинакова для всех) и кладёт её в кэш. Каждая вкладка
+    страницы «Анализ рынка» — своя функция ниже."""
     global _market_cache
     now = now or datetime.now(UTC)
     today = now.astimezone(PORTAL_TZ).date()
     data: dict[str, Any] = {"computed_at": now}
+    data.update(_now(conn, now, today))
+    # Динамика по дням, дням недели и часам — trends.py (страница грузит её отдельно).
+    data["since"] = _rows(conn, """
+        SELECT min(day) FROM (
+            SELECT (publish_date AT TIME ZONE 'Asia/Almaty')::date AS day FROM announcements
+            GROUP BY 1 HAVING count(*) >= 500) busy""")[0][0] or today
+    data.update(_regions(conn))
+    data.update(_largest(conn))
+    data.update(_competition(conn))
+    data.update(_demand(conn, now))
+    data["freshness"] = _rows(conn, "SELECT max(updated_at) FROM sync_state")[0]
+    _market_cache = (time.monotonic() + MARKET_TTL, data)
+    return data
 
-    # --- Сейчас ---
+
+# Способ закупки по id портала → название группы («Запрос ценовых предложений» и т.д.).
+METHOD_OF = {i: name for name, ids in METHODS.values() for i in ids}
+
+
+def _now(conn, now: datetime, today) -> dict[str, Any]:
+    """Вкладка «Сейчас»: открытые объявления и лоты, виды, способы, сроки."""
+    data: dict[str, Any] = {}
     data["open"] = _rows(conn, f"SELECT count(*), coalesce(sum(total_sum), 0) FROM announcements a WHERE {OPEN}")[0]
     data["open_lots"] = _rows(conn, f"""
         SELECT count(*), coalesce(sum(l.amount), 0),
@@ -51,13 +72,12 @@ def market(conn: psycopg.Connection, now: datetime | None = None) -> dict[str, A
     data["subjects"] = [(SUBJECTS.get(sid, "Прочие"), c, t) for sid, c, t in _rows(conn, f"""
         SELECT subject_type_id, count(*), coalesce(sum(total_sum), 0) FROM announcements a
         WHERE {OPEN} GROUP BY 1 ORDER BY 3 DESC""")]
-    method_of = {i: name for name, ids in METHODS.values() for i in ids}
     methods: dict[str, list] = {}
     for method_id, count, total, days in _rows(conn, f"""
             SELECT trade_method_id, count(*), coalesce(sum(total_sum), 0),
                    avg(extract(epoch FROM end_date - publish_date) / 86400)
             FROM announcements a WHERE {OPEN} GROUP BY 1"""):
-        entry = methods.setdefault(method_of.get(method_id, "Прочие"), [0, 0, 0.0])
+        entry = methods.setdefault(METHOD_OF.get(method_id, "Прочие"), [0, 0, 0.0])
         entry[2] = (entry[2] * entry[0] + float(days or 0) * count) / (entry[0] + count)
         entry[0] += count
         entry[1] += total
@@ -69,15 +89,12 @@ def market(conn: psycopg.Connection, now: datetime | None = None) -> dict[str, A
         {"horizon": now + timedelta(days=8)}))
     data["ending"] = [(today + timedelta(days=i), ending.get(today + timedelta(days=i), 0)) for i in range(8)]
     data["ending_max"] = max((c for _, c in data["ending"]), default=0) or 1
+    return data
 
-    # --- Динамика ---
-    # Динамика по дням, дням недели и часам — trends.py (страница грузит её отдельно).
-    data["since"] = _rows(conn, """
-        SELECT min(day) FROM (
-            SELECT (publish_date AT TIME ZONE 'Asia/Almaty')::date AS day FROM announcements
-            GROUP BY 1 HAVING count(*) >= 500) busy""")[0][0] or today
 
-    # --- Регионы ---
+def _regions(conn) -> dict[str, Any]:
+    """Вкладка «Регионы»: открытые лоты и итоги по месту поставки."""
+    data: dict[str, Any] = {}
     regions = _rows(conn, f"""
         SELECT left(k, 2), count(DISTINCT l.id), coalesce(sum(l.amount), 0),
                count(DISTINCT l.id) FILTER (WHERE l.prepayment > 0)
@@ -97,12 +114,16 @@ def market(conn: psycopg.Connection, now: datetime | None = None) -> dict[str, A
          for code, count, total, with_advance in regions if code in REGIONS),
         key=lambda r: -r[2])
     data["regions_max"] = max((r[2] for r in data["regions"]), default=0) or 1
+    return data
 
-    # --- Крупнейшие ---
+
+def _largest(conn) -> dict[str, Any]:
+    """Вкладка «Крупнейшие»: лоты, объявления, заказчики."""
+    data: dict[str, Any] = {}
     data["top_lots"] = _rows(conn, f"""
         SELECT l.id, l.name_ru, l.name_kz, l.amount, {CUSTOMER}, a.end_date, l.prepayment
         FROM lots l JOIN announcements a ON a.id = l.trd_buy_id
-        WHERE {OPEN} AND l.status_id = ANY(%(open)s) ORDER BY l.amount DESC NULLS LAST LIMIT 10""")
+        WHERE {OPEN} AND l.status_id = ANY(%(open)s) ORDER BY l.amount DESC NULLS LAST, l.id LIMIT 10""")
     data["top_announcements"] = _rows(conn, f"""
         SELECT a.id, a.name_ru, a.name_kz, a.total_sum, a.count_lots,
                coalesce(nullif(a.customer_name_ru, ''), nullif(a.org_name_ru, ''),
@@ -114,8 +135,12 @@ def market(conn: psycopg.Connection, now: datetime | None = None) -> dict[str, A
         FROM lots l JOIN announcements a ON a.id = l.trd_buy_id
         WHERE {OPEN} AND l.status_id = ANY(%(open)s)
         GROUP BY 1 HAVING {CUSTOMER} IS NOT NULL ORDER BY 4 DESC NULLS LAST LIMIT 10""")
+    return data
 
-    # --- Конкуренция (итоги из протоколов) ---
+
+def _competition(conn) -> dict[str, Any]:
+    """Вкладка «Конкуренция»: итоги из протоколов."""
+    data: dict[str, Any] = {}
     data["results"] = _rows(conn, """
         SELECT count(*) FILTER (WHERE r.outcome = 'winner'), count(*) FILTER (WHERE r.outcome = 'failed'),
                percentile_cont(0.5) WITHIN GROUP (ORDER BY 1 - r.winner_total / l.amount)
@@ -133,7 +158,7 @@ def market(conn: psycopg.Connection, now: datetime | None = None) -> dict[str, A
         SELECT coalesce(reason, 'причина не указана'), count(*) FROM lot_results
         WHERE outcome = 'failed' GROUP BY 1 ORDER BY 2 DESC LIMIT 5""")
     data["discount_by_method"] = sorted(
-        ((method_of.get(m, "Прочие"), n, float(d or 0)) for m, n, d in _rows(conn, """
+        ((METHOD_OF.get(m, "Прочие"), n, float(d or 0)) for m, n, d in _rows(conn, """
             SELECT a.trade_method_id, count(*),
                    percentile_cont(0.5) WITHIN GROUP (ORDER BY 1 - r.winner_total / l.amount)
             FROM lot_results r JOIN lots l ON l.id = r.lot_id JOIN announcements a ON a.id = l.trd_buy_id
@@ -143,8 +168,12 @@ def market(conn: psycopg.Connection, now: datetime | None = None) -> dict[str, A
         SELECT winner_name, count(*), sum(winner_total) FROM lot_results
         WHERE outcome = 'winner' AND winner_name IS NOT NULL
         GROUP BY winner_bin, winner_name ORDER BY 2 DESC, 3 DESC LIMIT 10""")
+    return data
 
-    # --- Что покупают ---
+
+def _demand(conn, now: datetime) -> dict[str, Any]:
+    """Вкладка «Что покупают»: частые и дорогие закупки за 14 дней."""
+    data: dict[str, Any] = {}
     data["top_names"] = _rows(conn, """
         SELECT min(l.name_ru), min(l.name_kz), count(*), sum(l.amount), count(DISTINCT l.customer_bin)
         FROM lots l JOIN announcements a ON a.id = l.trd_buy_id
@@ -157,7 +186,4 @@ def market(conn: psycopg.Connection, now: datetime | None = None) -> dict[str, A
         WHERE a.publish_date >= %(since)s AND l.name_ru IS NOT NULL
         GROUP BY lower(trim(l.name_ru)) ORDER BY 4 DESC NULLS LAST LIMIT 15""",
         {"since": now - timedelta(days=14)})
-
-    data["freshness"] = _rows(conn, "SELECT max(updated_at) FROM sync_state")[0]
-    _market_cache = (time.monotonic() + MARKET_TTL, data)
     return data

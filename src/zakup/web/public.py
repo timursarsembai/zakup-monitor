@@ -369,52 +369,103 @@ def _subjects_in_background(bins: list[str]) -> None:
 
 def _announcement_context(request: Request, user: int | None, announcement_id: int,
                           background: BackgroundTasks) -> dict:
-    """user=None — гость или поисковый робот: только данные из базы, портал не трогаем."""
+    """Всё для страницы объявления и лота. user=None — гость или поисковый робот:
+    только данные из базы, портал не трогаем."""
+    now = datetime.now(UTC)
     with core.pool.connection() as conn:
-        row = conn.execute(
-            """SELECT detail, details_fetched_at, end_date, results, results_fetched_at
+        detail, fetched_at, outcome, results_at = _load_announcement(
+            conn, user, announcement_id, background, now)
+        subscribed = _subscribed(conn, user, announcement_id)
+    documents, protocols = _files(detail)
+    lots = [lot for lot in detail.get("Lots") or [] if not lot.get("isDeleted")]
+    info = {lot["id"]: details.parse_lot(lot) for lot in lots}
+    extras = _lot_extras(request, user, detail, lots, info, background)
+    text_phones = {lot["id"]: subjects.phones_in_text(lot.get("descriptionRu"),
+                                                      info[lot["id"]].get("extra_desc"))
+                   for lot in lots}
+    # Сначала лоты с авансом побольше, дальше по номеру.
+    lots.sort(key=lambda lot: (-(info[lot["id"]]["prepayment"] or 0), lot.get("lotNumber") or ""))
+    return {
+        "a": detail,
+        "lots": lots,
+        "info": info,
+        "subscribed": subscribed,
+        **extras,
+        "contracts": (outcome or {}).get("contracts") or [],
+        "contracts_by_lot": results.contracts_by_lot(outcome),
+        "appeals": (outcome or {}).get("appeals") or [],
+        "results_at": results_at,
+        "now": now,
+        "text_phones": text_phones,
+        "lot_numbers": {lot["id"]: lot.get("lotNumber") for lot in lots},
+        "here": request.url.path,
+        "documents": documents,
+        "protocols": protocols,
+        "end": parse_date(detail.get("endDate")),
+        "dt": parse_date,
+        "fetched_at": fetched_at,
+        "refresh_error": None,
+        "spec_file": spec.spec_file,
+        "portal_url": PORTAL_ANNOUNCEMENT_URL.format(announcement_id),
+        "status_names": STATUS_NAMES,
+    }
+
+
+def _load_announcement(conn, user: int | None, announcement_id: int, background: BackgroundTasks,
+                       now: datetime) -> tuple:
+    """(подробности, когда загружены, итоги, когда проверены итоги). Если подробностей нет —
+    загружаем с портала сразу (для вошедших); если устарели — обновим после ответа."""
+    row = conn.execute(
+        """SELECT detail, details_fetched_at, end_date, results, results_fetched_at
+           FROM announcements WHERE id = %s""",
+        (announcement_id,),
+    ).fetchone()
+    if row is None:
+        raise HTTPException(404, "Такого объявления нет в базе")
+    detail, fetched_at, end_date, outcome, results_at = row
+    stale = fetched_at is None or now - fetched_at > (
+        DETAIL_TTL if end_date and end_date > now else timedelta(days=1)
+    )
+    ended = bool(end_date and end_date < now)
+    if detail is None and user is None:
+        raise HTTPException(404, "Подробности объявления ещё загружаются")
+    if detail is None:
+        # Подробностей ещё нет совсем (сборщик не дошёл) — тут без портала никак.
+        try:
+            details.fetch_one(conn, core._goszakup(), announcement_id)
+            if ended:
+                results.refresh(conn, core._goszakup(), announcement_id)
+        except GoszakupError:
+            conn.rollback()
+        detail, fetched_at, outcome, results_at = conn.execute(
+            """SELECT detail, details_fetched_at, results, results_fetched_at
                FROM announcements WHERE id = %s""",
             (announcement_id,),
         ).fetchone()
-        if row is None:
-            raise HTTPException(404, "Такого объявления нет в базе")
-        detail, fetched_at, end_date, outcome, results_at = row
-        now = datetime.now(UTC)
-        stale = fetched_at is None or now - fetched_at > (
-            DETAIL_TTL if end_date and end_date > now else timedelta(days=1)
-        )
-        ended = bool(end_date and end_date < now)
-        refresh_error = None
-        if detail is None and user is None:
-            raise HTTPException(404, "Подробности объявления ещё загружаются")
         if detail is None:
-            # Подробностей ещё нет совсем (сборщик не дошёл) — тут без портала никак.
-            try:
-                details.fetch_one(conn, core._goszakup(), announcement_id)
-                if ended:
-                    results.refresh(conn, core._goszakup(), announcement_id)
-            except GoszakupError:
-                conn.rollback()
-            detail, fetched_at, outcome, results_at = conn.execute(
-                """SELECT detail, details_fetched_at, results, results_fetched_at
-                   FROM announcements WHERE id = %s""",
-                (announcement_id,),
-            ).fetchone()
-            if detail is None:
-                raise HTTPException(502, "Портал сейчас не отвечает, попробуйте через минуту")
-        elif user is not None and (stale or (ended and results.stale(results_at, now))):
-            background.add_task(_refresh_in_background, announcement_id, stale,
-                                ended and results.stale(results_at, now))
-        subscribed = {
-            r[0]: r[1]
-            for r in conn.execute(
-                """SELECT m.lot_id, string_agg(s.name, ', ') FROM matches m
-                   JOIN subscriptions s ON s.id = m.subscription_id
-                   JOIN lots l ON l.id = m.lot_id
-                   WHERE s.user_id = %s AND l.trd_buy_id = %s GROUP BY m.lot_id""",
-                (user, announcement_id),
-            )
-        }
+            raise HTTPException(502, "Портал сейчас не отвечает, попробуйте через минуту")
+    elif user is not None and (stale or (ended and results.stale(results_at, now))):
+        background.add_task(_refresh_in_background, announcement_id, stale,
+                            ended and results.stale(results_at, now))
+    return detail, fetched_at, outcome, results_at
+
+
+def _subscribed(conn, user: int | None, announcement_id: int) -> dict[int, str]:
+    """Лоты объявления, пришедшие по подпискам пользователя: {лот: названия подписок}."""
+    return {
+        r[0]: r[1]
+        for r in conn.execute(
+            """SELECT m.lot_id, string_agg(s.name, ', ') FROM matches m
+               JOIN subscriptions s ON s.id = m.subscription_id
+               JOIN lots l ON l.id = m.lot_id
+               WHERE s.user_id = %s AND l.trd_buy_id = %s GROUP BY m.lot_id""",
+            (user, announcement_id),
+        )
+    }
+
+
+def _files(detail: dict) -> tuple[list, list]:
+    """(документы, протоколы) объявления и его лотов, без повторов."""
     files, seen = [], set()
     for file in (detail.get("Files") or []) + [
         f for lot in detail.get("Lots") or [] for f in lot.get("Files") or []
@@ -427,9 +478,13 @@ def _announcement_context(request: Request, user: int | None, announcement_id: i
             files.append({"nameRu": file.get("nameRu"), "filePath": file["filePathRu"],
                           "originalName": None})
     protocols = [f for f in files if "протокол" in (f.get("nameRu") or "").lower()]
-    documents = [f for f in files if f not in protocols]
-    lots = [lot for lot in detail.get("Lots") or [] if not lot.get("isDeleted")]
-    info = {lot["id"]: details.parse_lot(lot) for lot in lots}
+    return [f for f in files if f not in protocols], protocols
+
+
+def _lot_extras(request: Request, user: int | None, detail: dict, lots: list, info: dict,
+                background: BackgroundTasks) -> dict:
+    """Из базы по лотам: техспецификации, выжимки (платно), отметки, итоги, карточки
+    организаций (недостающие догружаются после ответа — только для вошедших)."""
     with core.pool.connection() as conn:
         specs = {r[0]: (r[1], r[2], r[3]) for r in conn.execute(
             "SELECT lot_id, text, error, text_kk FROM lot_specs WHERE lot_id = ANY(%s)",
@@ -451,40 +506,8 @@ def _announcement_context(request: Request, user: int | None, announcement_id: i
         # Карточки организации ещё нет — догрузим после ответа, следующий заход увидит.
         # Гостям и поисковым роботам — только база: обход сайта не должен бить по порталу.
         background.add_task(_subjects_in_background, missing)
-    text_phones = {lot["id"]: subjects.phones_in_text(lot.get("descriptionRu"),
-                                                      info[lot["id"]].get("extra_desc"))
-                   for lot in lots}
-    # Сначала лоты с авансом побольше, дальше по номеру.
-    lots.sort(key=lambda lot: (-(info[lot["id"]]["prepayment"] or 0), lot.get("lotNumber") or ""))
-    return {
-        "a": detail,
-        "lots": lots,
-        "info": info,
-        "subscribed": subscribed,
-        "marks": lot_marks,
-        "specs": specs,
-        "summaries": summaries,
-        "results": lot_results,
-        "contracts": (outcome or {}).get("contracts") or [],
-        "contracts_by_lot": results.contracts_by_lot(outcome),
-        "appeals": (outcome or {}).get("appeals") or [],
-        "results_at": results_at,
-        "now": now,
-        "company_bin": company_bin,
-        "org_cards": org_cards,
-        "text_phones": text_phones,
-        "lot_numbers": {lot["id"]: lot.get("lotNumber") for lot in lots},
-        "here": request.url.path,
-        "documents": documents,
-        "protocols": protocols,
-        "end": parse_date(detail.get("endDate")),
-        "dt": parse_date,
-        "fetched_at": fetched_at,
-        "refresh_error": refresh_error,
-        "spec_file": spec.spec_file,
-        "portal_url": PORTAL_ANNOUNCEMENT_URL.format(announcement_id),
-        "status_names": STATUS_NAMES,
-    }
+    return {"specs": specs, "summaries": summaries, "marks": lot_marks, "results": lot_results,
+            "company_bin": company_bin, "org_cards": org_cards}
 
 
 @router.get("/a/{announcement_id}/lots/{lot_id}/spec")

@@ -311,9 +311,16 @@ class Filters:
         lots = scope == "lots"
         clauses = ["l.trd_buy_id = a.id"] if lots else []
         params: dict[str, Any] = {"now": now}
+        for part in (self._where_kind, self._where_ids, self._where_place_and_sum,
+                     self._where_dates, self._where_advance, self._where_words):
+            part(clauses, params, lots, now)
+        return " AND ".join(clauses) or "true", params
+
+    def _where_kind(self, clauses: list[str], params: dict[str, Any], lots: bool, now: datetime) -> None:
+        """Открытые, статус, организации инвалидов, способ, вид, год."""
         if self.only_open():
             clauses.append("a.end_date > %(now)s")
-        if status := self._status_clause(scope, params):
+        if status := self._status_clause("lots" if lots else "announcements", params):
             clauses.append(status)
         if self.disable_person == "only":
             clauses.append("a.disable_person")
@@ -328,6 +335,9 @@ class Filters:
         if self.years:
             clauses.append("a.fin_years && %(years)s::integer[]")
             params["years"] = self.years
+
+    def _where_ids(self, clauses: list[str], params: dict[str, Any], lots: bool, now: datetime) -> None:
+        """Номер объявления и лота, код ЕНС ТРУ, заказчик."""
         if self.number:
             # «17914810-1» или просто «17914810».
             clauses.append("(a.number_anno = %(number)s OR a.id::text = %(number_id)s)")
@@ -350,6 +360,9 @@ class Filters:
                                " OR a.org_name_ru ILIKE %(customer)s"
                                + lot_part.format("name_ru", "ILIKE") + ")")
                 params["customer"] = "%" + _like(self.customer) + "%"
+
+    def _where_place_and_sum(self, clauses: list[str], params: dict[str, Any], lots: bool, now: datetime) -> None:
+        """Регион поставки и сумма."""
         if self.regions:
             # Место поставки лота; если у лота его нет — объявления.
             kato = "coalesce(nullif(l.kato, '{}'), a.kato)" if lots else "a.kato"
@@ -363,6 +376,9 @@ class Filters:
         if self.max_sum is not None:
             clauses.append(f"{amount} <= %(max_sum)s")
             params["max_sum"] = self.max_sum
+
+    def _where_dates(self, clauses: list[str], params: dict[str, Any], lots: bool, now: datetime) -> None:
+        """Срок по правилу и даты (окончание, начало, публикация, итоги)."""
         if (deadline := self.deadline_date(now.astimezone(PORTAL_TZ).date())) is not None:
             # «По» включительно: до конца этого дня по времени Астаны. По правилу —
             # «в течение 2 рабочих дней»: от сегодня до этого дня включительно.
@@ -383,6 +399,9 @@ class Filters:
             if end:
                 clauses.append(f"a.{column} < %({column}_to)s")
                 params[f"{column}_to"] = _day_start(end, 1)
+
+    def _where_advance(self, clauses: list[str], params: dict[str, Any], lots: bool, now: datetime) -> None:
+        """Аванс."""
         prepayment = "l.prepayment" if lots else "a.prepayment_max"
         if self.advance_only:
             clauses.append(f"{prepayment} > 0")
@@ -393,6 +412,9 @@ class Filters:
         if high < 100:
             clauses.append(f"coalesce({prepayment}, 0) <= %(advance_max)s")
             params["advance_max"] = high
+
+    def _where_words(self, clauses: list[str], params: dict[str, Any], lots: bool, now: datetime) -> None:
+        """Слова (рус. с морфологией и каз.) и слова-исключения."""
         # Слова ищем и в русских названиях (с морфологией), и в казахских.
         tsv, tsv_kk = ("l.tsv", "l.tsv_kk") if lots else ("a.tsv", "a.tsv_kk")
         if self.q:
@@ -404,7 +426,6 @@ class Filters:
             clauses.append(f"""NOT ({tsv} @@ websearch_to_tsquery('russian', %(exclude)s)
                                     OR {tsv_kk} @@ websearch_to_tsquery('simple', %(exclude)s))""")
             params["exclude"] = " or ".join(words)
-        return " AND ".join(clauses) or "true", params
 
     def relative(self) -> bool:
         """Нет зафиксированных дат: фильтр сам сдвигается со временем — на него

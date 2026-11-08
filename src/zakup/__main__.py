@@ -14,7 +14,7 @@ from zakup.goszakup import ENTITIES, PORTAL_TZ, Client
 DEFAULT_HISTORY_DAYS = 7
 
 
-def main() -> int:
+def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="zakup")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("migrate", help="создать или обновить таблицы")
@@ -52,74 +52,107 @@ def main() -> int:
     user = sub.add_parser("add-user", help="завести пользователя")
     user.add_argument("email")
     user.add_argument("--telegram-chat-id")
-    args = parser.parse_args()
+    return parser
+
+
+def main() -> int:
+    args = _parser().parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     # httpx пишет каждую строку запроса в INFO; при поиске старта их сотни.
     logging.getLogger("httpx").setLevel(logging.WARNING)
+    if args.command in LOCAL:
+        return LOCAL[args.command](args) or 0
+    return _with_portal(args)
 
-    if args.command == "migrate":
-        with db.connect(config.database_url()) as conn:
-            db.migrate(conn)
-        return 0
-    if args.command == "payments":
-        from zakup import payments
 
-        with db.connect(config.database_url()) as conn:
-            if config.kazpayment_key():
-                print(f"payments: {payments.poll(conn)}")
-        return 0
-    if args.command == "autofix":
-        from zakup import autofix
+# --- Команды без портала -------------------------------------------------------------
 
-        autofix.run()
-        return 0
-    if args.command == "tidy":
-        from zakup import geo, visits
 
-        with db.connect(config.database_url()) as conn:
-            print(f"geo: {geo.update(conn)}, purged visits/events: {visits.purge(conn)}")
-        return 0
-    if args.command == "nightly":
-        from zakup import nightly
+def _migrate(args) -> int:
+    with db.connect(config.database_url()) as conn:
+        db.migrate(conn)
+    return 0
 
-        return nightly.run()
-    if args.command == "client-bot":
-        from zakup import client_bot
 
-        client_bot.run(config.database_url())
-        return 0
-    if args.command == "bot":
-        bot.run(config.database_url())
-        return 0
-    if args.command == "specs":
-        return _specs(args.limit, args.loop)
-    if args.command == "research":
-        from zakup import research
+def _payments(args) -> int:
+    from zakup import payments
 
-        research.work(config.database_url(), args.providers.split(","), once=args.once)
-        return 0
-    if args.command == "set-password":
-        return _set_password(args.email)
-    if args.command == "add-user":
-        with db.connect(config.database_url()) as conn:
-            row = conn.execute(
-                """INSERT INTO users (email, telegram_chat_id) VALUES (%s, %s)
-                   ON CONFLICT (email) DO UPDATE SET telegram_chat_id = excluded.telegram_chat_id
-                   RETURNING id""",
-                (args.email, args.telegram_chat_id),
-            ).fetchone()
-            conn.commit()
-        print(row[0])
-        return 0
+    with db.connect(config.database_url()) as conn:
+        if config.kazpayment_key():
+            print(f"payments: {payments.poll(conn)}")
+    return 0
 
+
+def _autofix(args) -> int:
+    from zakup import autofix
+
+    autofix.run()
+    return 0
+
+
+def _tidy(args) -> int:
+    from zakup import geo, visits
+
+    with db.connect(config.database_url()) as conn:
+        print(f"geo: {geo.update(conn)}, purged visits/events: {visits.purge(conn)}")
+    return 0
+
+
+def _nightly(args) -> int:
+    from zakup import nightly
+
+    return nightly.run()
+
+
+def _client_bot(args) -> int:
+    from zakup import client_bot
+
+    client_bot.run(config.database_url())
+    return 0
+
+
+def _bot(args) -> int:
+    bot.run(config.database_url())
+    return 0
+
+
+def _research(args) -> int:
+    from zakup import research
+
+    research.work(config.database_url(), args.providers.split(","), once=args.once)
+    return 0
+
+
+def _add_user(args) -> int:
+    with db.connect(config.database_url()) as conn:
+        row = conn.execute(
+            """INSERT INTO users (email, telegram_chat_id) VALUES (%s, %s)
+               ON CONFLICT (email) DO UPDATE SET telegram_chat_id = excluded.telegram_chat_id
+               RETURNING id""",
+            (args.email, args.telegram_chat_id),
+        ).fetchone()
+        conn.commit()
+    print(row[0])
+    return 0
+
+
+LOCAL = {
+    "migrate": _migrate, "payments": _payments, "autofix": _autofix, "tidy": _tidy, "nightly": _nightly,
+    "client-bot": _client_bot, "bot": _bot, "research": _research, "add-user": _add_user,
+    "specs": lambda args: _specs(args.limit, args.loop),
+    "set-password": lambda args: _set_password(args.email),
+}
+
+
+# --- Команды с порталом goszakup ------------------------------------------------------
+
+
+def _with_portal(args) -> int:
     token = config.goszakup_token()
     if not token:
         print("GOSZAKUP_TOKEN не задан.", file=sys.stderr)
         return 2
-    client = Client(
-        token,
-        delay=config.goszakup_delay(),
-    )
+    client = Client(token, delay=config.goszakup_delay())
     try:
         if args.command == "probe":
             return _probe(client)
