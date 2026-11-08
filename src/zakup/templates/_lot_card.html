@@ -102,7 +102,7 @@
       <summary>{{ _("Техническая спецификация") }}</summary>
       <div class="spec-body">{% if cached and cached[0] %}{% set s = summaries.get(lot.id) %}
         <div class="summary-box" data-summary data-src="/lots/{{ lot.id }}/spec-summary">
-          {% if s %}{% include "summary_fragment.html" %}{% else %}<button type="button" class="summary-btn" data-summary-start data-paid>📋 {{ _("Кратко: главное в таблице (ИИ)") }}</button>{% endif %}
+          {% if s %}{% include "summary_fragment.html" %}{% else %}<button type="button" class="summary-btn" data-summary-start data-paid data-feature="spec_summary">📋 {{ _("Кратко: главное в таблице (ИИ)") }}</button>{% endif %}
         </div>
         <details class="spec-full" {% if not (s and s.status == "done") %}open{% endif %}><summary>{{ _("Полный текст") }}</summary>{{ spec_text(pick(cached[0], cached[2])) }}</details><p><a href="{{ spec_file(lot) | safe_url }}" target="_blank" rel="noopener">{{ _("Скачать файл спецификации") }}</a></p>{% else %}<p class="muted">{{ _("Загружаю…") }}</p>{% endif %}</div>
     </details>

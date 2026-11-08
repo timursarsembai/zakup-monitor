@@ -4,6 +4,7 @@
 заводит `zakup set-password`.
 """
 
+import functools
 import io
 import json
 import logging
@@ -38,12 +39,12 @@ from zakup import (
     dashboard,
     details,
     i18n,
+    insights,
     kaspi,
     kazpayment,
     legal,
     marks,
     matcher,
-    overview,
     payments,
     questions,
     research,
@@ -55,6 +56,8 @@ from zakup import (
     subjects,
     tariff,
     telegram,
+    trends,
+    visits,
 )
 from zakup.filters import (
     DEADLINE_RULE,
@@ -231,10 +234,40 @@ VIEWED_PAGES = {"/", "/lots", "/announcements", "/my", "/research", "/subscripti
                 "/settings", "/log"}
 
 
+def _spawn(job) -> None:
+    """Фоновая запись статистики: ответ не ждёт её, ошибки не мешают сайту."""
+    threading.Thread(target=job, daemon=True).start()
+
+
+def _record_visit(**fields) -> None:
+    try:
+        with pool.connection() as conn:
+            visits.record(conn, **fields)
+    except Exception as error:  # статистика не должна мешать сайту
+        logger.warning("visit not recorded: %s", type(error).__name__)
+
+
 @app.middleware("http")
 async def page_views(request: Request, call_next):
+    started = time.monotonic()
     response = await call_next(request)
     user = getattr(request.state, "user_id", None)
+    path = request.url.path
+    if visits.wanted(request.method, path, response.status_code,
+                     response.headers.get("content-type", ""), request.headers.get("sec-fetch-dest")):
+        visitor = request.cookies.get(visits.COOKIE)
+        agent = request.headers.get("user-agent")
+        if not visitor and not visits.is_bot(agent):
+            visitor = visits.new_visitor_id()
+            response.set_cookie(visits.COOKIE, visitor, max_age=visits.COOKIE_AGE, httponly=True,
+                                samesite="lax", secure=request.url.scheme == "https")
+        # После ответа и в фоне: посетитель не ждёт записи.
+        _spawn(functools.partial(
+            _record_visit, visitor=visitor, user_id=user, path=path, query=request.url.query,
+            referrer=request.headers.get("referer"), user_agent=agent,
+            ip=request.client.host if request.client else None,
+            own_host=(request.headers.get("host") or "").split(":")[0].removeprefix("www."),
+            status=response.status_code, ms=int((time.monotonic() - started) * 1000)))
     if (user and request.method == "GET" and response.status_code == 200
             and request.url.path in VIEWED_PAGES):
         target = request.url.path + (f"?{request.url.query}" if request.url.query else "")
@@ -426,9 +459,12 @@ def _login_attempt(request: Request, email: str, password: str, next: str, staff
             status_code=429 if locked else 401,
         )
     with pool.connection() as conn:
-        user_id = conn.execute("SELECT id FROM users WHERE email = %s", (email_norm,)).fetchone()[0]
+        user_id, role = conn.execute("SELECT id, role FROM users WHERE email = %s", (email_norm,)).fetchone()
     _audit(request, user_id, "login")
-    return _with_session(RedirectResponse(_safe_next(next), status_code=303), token)
+    target = _safe_next(next)
+    if target == "/" and role in auth.STAFF_ROLES:
+        target = "/dashboard"  # главная сотрудника — дашборд платформы
+    return _with_session(RedirectResponse(target, status_code=303), token)
 
 
 def _with_session(response: Response, token: str) -> Response:
@@ -870,6 +906,26 @@ def sitemap_part(kind: str) -> Response:
                     media_type="application/xml")
 
 
+@app.get("/analytics/trends")
+def analytics_trends(days: int = 30):
+    """Динамика рынка за период (вкладка «Динамика» в «Анализе рынка»): открыто всем, с кэшем."""
+    return trends.cached(pool.connection, days)
+
+
+@app.get("/dashboard")
+def dashboard_page(request: Request, staff: Staff):
+    """Дашборд платформы — главная страница администратора и модераторов."""
+    return templates.TemplateResponse(request, "platform.html", {"sections": insights.SECTIONS})
+
+
+@app.get("/dashboard/data")
+def dashboard_data(staff: Staff, section: str = "overview", days: int = 30):
+    if section not in insights.SECTIONS:
+        raise HTTPException(404)
+    with pool.connection() as conn:
+        return insights.section(conn, section, days)
+
+
 @app.get("/analytics")
 def analytics(request: Request, user: Viewer, background: BackgroundTasks):
     market, stale = dashboard.market_cached()
@@ -942,6 +998,47 @@ def _search_context(request: Request, current: Filters, scope: str, total: int, 
     }
 
 
+def _track(request: Request, name: str, props: dict | None = None) -> None:
+    """Событие для статистики (в фоне, ошибки не мешают ответу)."""
+    visitor = request.cookies.get(visits.COOKIE)
+    user = getattr(request.state, "user_id", None)
+
+    def write() -> None:
+        try:
+            with pool.connection() as conn:
+                visits.event(conn, name, visitor, user, props)
+        except Exception as error:
+            logger.warning("event not recorded: %s", type(error).__name__)
+    _spawn(write)
+
+
+def _track_search(request: Request, scope: str, current: Filters, form: dict, page: int, total: int) -> None:
+    # Только применённый поиск и первая страница: листание и сортировка — не новый поиск.
+    if page != 1 or not form or visits.is_bot(request.headers.get("user-agent")):
+        return
+    _track(request, "search", {
+        "scope": scope, "q": current.q[:120], "regions": current.regions, "methods": current.methods,
+        "subjects": current.subjects, "min_sum": float(current.min_sum) if current.min_sum else None,
+        "max_sum": float(current.max_sum) if current.max_sum else None,
+        "customer": bool(current.customer), "total": total})
+
+
+@app.post("/t/event", dependencies=[Depends(same_origin)])
+async def track_event(request: Request):
+    """События из браузера: окно «платная функция» (какая функция), смена вида и т.п."""
+    body = await request.body()
+    if len(body) > 2000:
+        raise HTTPException(413)
+    try:
+        data = json.loads(body)
+        name, props = str(data.get("name", "")), data.get("props") or {}
+    except (ValueError, AttributeError):
+        raise HTTPException(400) from None
+    if name in visits.EVENT_NAMES and name != "search" and isinstance(props, dict):
+        _track(request, name, {str(k)[:40]: str(v)[:200] for k, v in list(props.items())[:10]})
+    return Response(status_code=204)
+
+
 @app.get("/lots")
 def lots_search(request: Request, user: Viewer, page: int = 1, per_page: int = PAGE_SIZE):
     form = parse_qs(request.url.query)
@@ -979,6 +1076,7 @@ def lots_search(request: Request, user: Viewer, page: int = 1, per_page: int = P
         ).fetchone()
         groups = _user_groups(conn, user)
         editing = _editing(conn, user, form)
+    _track_search(request, "lots", current, form, page, total)
     context = _search_context(request, current, "lots", total, page, form, now, per_page)
     context.update(rows=rows, marks=lot_marks, stats=stats, groups=groups, editing=editing)
     return templates.TemplateResponse(request, "lots.html", context)
@@ -1015,6 +1113,7 @@ def announcements_search(request: Request, user: Viewer, page: int = 1, per_page
         ).fetchone()[0]
         groups = _user_groups(conn, user)
         editing = _editing(conn, user, form)
+    _track_search(request, "announcements", current, form, page, total)
     context = _search_context(request, current, "announcements", total, page, form, now,
                               per_page)
     context.update(rows=rows, groups=groups, editing=editing)
@@ -2105,13 +2204,6 @@ def toggle_reregister(request: Request, admin: Admin, user_id: int):
     _audit(request, admin, "user_reregister", login, allowed=allowed)
     return _settings_page(request, admin, tab="users", notice=f"{login}: повторная регистрация "
                           f"{'разрешена' if allowed else 'запрещена'}.")
-
-
-@app.get("/settings/overview")
-def settings_overview(admin: Admin, days: int = 30):
-    """Данные дашборда администратора (вкладка «Обзор» в настройках)."""
-    with pool.connection() as conn:
-        return overview.stats(conn, days)
 
 
 @app.post("/settings/users/{user_id}/reset", dependencies=[Depends(same_origin)])

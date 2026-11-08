@@ -107,39 +107,39 @@
 
 {# ---------- Динамика ---------- #}
 <div data-tab-panel="dynamics" hidden>
-  <div class="grid">
-    <section class="card wide">
-      <h2>{{ _("Новые объявления по дням") }}</h2>
-      <p class="muted">{{ _("Опубликовано за последние 14 дней; выходные — бледнее.") }}</p>
-      <div class="bars" role="img" aria-label="{{ _("Число опубликованных объявлений за 14 дней") }}">
-        {% for d, count, total in m.days %}
-        <div title="{{ d.strftime('%d.%m') }}: {{ count }} {{ _("объявлений") }}, {{ big(total) }}"><em>{{ count }}</em>
-          <i class="{{ 'dim' if d.weekday() >= 5 }}" style="height: {{ (count / m.days_max * 100) | round(1) }}%"></i>
-          <small>{{ d.strftime("%d.%m") }}</small></div>
-        {% endfor %}
+  <div data-trends style="margin-top:14px">
+    <div class="chart-head">
+      <div class="chart-periods" role="group" aria-label="{{ _("Период") }}">
+        {% for d, label in ((7, _("7 дней")), (30, _("30 дней")), (90, _("90 дней")), (365, _("Год"))) %}
+        <button type="button" data-days="{{ d }}" aria-pressed="false">{{ label }}</button>{% endfor %}
       </div>
-    </section>
-    <section class="card">
-      <h2>{{ _("По дням недели") }}</h2>
-      <p class="muted">{{ _("Сколько объявлений в среднем публикуют в такой день.") }}</p>
-      <div class="bars">
-        {% for d, count, total in m.weekdays %}
-        <div title="{{ big(total) }}"><em>{{ count | round | int }}</em>
-          <i class="{{ 'dim' if d >= 6 }}" style="height: {{ (count / m.weekdays_max * 100) | round(1) }}%"></i>
-          <small>{{ _(["пн", "вт", "ср", "чт", "пт", "сб", "вс"][d - 1]) }}</small></div>
-        {% endfor %}
+      <span class="muted" data-t-range></span>
+    </div>
+    <p class="muted" data-t-loading>{{ _("Считаю…") }}</p>
+    <div data-t-body hidden>
+      <div class="chart-kpis" data-t-kpis></div>
+      <div class="grid">
+        <section class="card wide">
+          <div class="chart-head"><h2>{{ _("Новые закупки") }}</h2><div class="chart-metrics" data-t-metrics></div></div>
+          <div data-t-chart></div>
+        </section>
+        <section class="card">
+          <h2>{{ _("По дням недели") }}</h2>
+          <p class="muted">{{ _("В среднем за такой день: лоты и объявления.") }}</p>
+          <div data-t-week></div>
+        </section>
+        <section class="card">
+          <h2>{{ _("По часам публикации") }}</h2>
+          <p class="muted">{{ _("Объявления за период, время Казахстана.") }}</p>
+          <div data-t-hours></div>
+        </section>
+        <section class="card wide">
+          <h2>{{ _("Крупнейшие заказчики за период") }}</h2>
+          <div data-t-customers></div>
+        </section>
       </div>
-    </section>
-    <section class="card">
-      <h2>{{ _("По часам публикации") }}</h2>
-      <p class="muted">{{ _("Время Алматы, последние 4 недели. Больше всего — к концу рабочего дня.") }}</p>
-      <div class="bars">
-        {% for h, count in m.hours %}
-        <div title="{{ h }}:00 — {{ count }}"><i class="{{ 'dim' if h < 8 or h > 19 }}" style="height: {{ (count / m.hours_max * 100) | round(1) }}%"></i>
-          <small>{{ h if h % 3 == 0 else "&nbsp;" | safe }}</small></div>
-        {% endfor %}
-      </div>
-    </section>
+      <p class="muted" data-t-note></p>
+    </div>
   </div>
 </div>
 
@@ -269,6 +269,58 @@
   </div>
 </div>
 
+{% include "_charts.html" %}
+<script>
+  // Динамика рынка: период и показатель выбираются кнопками, данные — /analytics/trends.
+  (() => {
+    const root = document.querySelector("[data-trends]");
+    const C = window.Charts, $ = (s) => root.querySelector(s);
+    const T = {{ {"announcements": _("Объявления"), "lots": _("Лоты"), "amount": _("Сумма, млн ₸"),
+                  "vs": _("к прошлому периоду"), "week": _("по неделям"), "day": _("по дням"),
+                  "since": _("Данные в базе — с"), "mln": _("млн ₸"),
+                  "wd": [_("пн"), _("вт"), _("ср"), _("чт"), _("пт"), _("сб"), _("вс")]} | tojson }};
+    const KEYS = ["lots", "announcements", "amount"];
+    let data = null, metric = "lots", days = 30, started = false;
+    try { days = Number(localStorage.getItem("zakup-trend-days")) || 30; } catch (e) {}
+    const chart = () => {
+      const labels = data.labels.map(C.short);
+      $("[data-t-chart]").innerHTML = C.bars([{values: data.series[metric]}], labels, Math.ceil(labels.length / 8),
+        (v) => C.num(v, metric === "amount" ? 1 : 0)) + `<p class="muted">${C.esc(T[data.unit])}</p>`;
+      for (const b of $("[data-t-metrics]").children) b.setAttribute("aria-pressed", String(b.dataset.metric === metric));
+    };
+    const render = () => {
+      $("[data-t-range]").textContent = `${C.short(data.start)} — ${C.short(data.end)}`;
+      $("[data-t-kpis]").innerHTML = C.kpis(KEYS.map((k) => ({label: T[k], value: C.num(data.totals[k]), change: data.change[k]})), T.vs);
+      $("[data-t-metrics]").innerHTML = KEYS.map((k) => `<button type="button" data-metric="${k}">${C.esc(T[k])}</button>`).join("");
+      chart();
+      $("[data-t-week]").innerHTML = C.bars([{values: data.weekdays.lots, name: T.lots}, {values: data.weekdays.announcements, cls: "b", name: T.announcements}], T.wd)
+        + C.legend(T.lots, T.announcements);
+      $("[data-t-hours]").innerHTML = C.bars([{values: data.hours}], data.hours.map((_, h) => String(h)), 3);
+      const top = Math.max(1, ...data.customers.map((c) => c[2]));
+      $("[data-t-customers]").innerHTML = C.rows(data.customers.map(([n, c, t]) => [`${n} · ${C.num(c)}`, `${C.num(t / 1e6, 1)} ${T.mln}`, t / top]));
+      $("[data-t-note]").textContent = `${T.since} ${C.short(data.since)}.${data.since.slice(0, 4)}`;
+    };
+    const load = () => {
+      for (const b of root.querySelectorAll("[data-days]")) b.setAttribute("aria-pressed", String(Number(b.dataset.days) === days));
+      $("[data-t-loading]").hidden = false;
+      fetch(`/analytics/trends?days=${days}`).then((r) => r.ok ? r.json() : null).then((json) => {
+        $("[data-t-loading]").hidden = true;
+        if (!json) return;
+        data = json; $("[data-t-body]").hidden = false; render();
+      });
+    };
+    root.addEventListener("click", (event) => {
+      const p = event.target.closest("[data-days]"), m = event.target.closest("[data-metric]");
+      if (p) { days = Number(p.dataset.days); try { localStorage.setItem("zakup-trend-days", days); } catch (e) {} load(); }
+      if (m && data) { metric = m.dataset.metric; chart(); }
+    });
+    // Грузим, когда вкладку «Динамика» открыли.
+    const panel = root.closest("[data-tab-panel]");
+    new MutationObserver(() => { if (!panel.hidden && !started) { started = true; load(); } })
+      .observe(panel, {attributes: true, attributeFilter: ["hidden"]});
+    window.addEventListener("load", () => { if (!panel.hidden && !started) { started = true; load(); } });
+  })();
+</script>
 <script>
   const tabs = [...document.querySelectorAll("[data-tab]")];
   const showTab = (name) => {

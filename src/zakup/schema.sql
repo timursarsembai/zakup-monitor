@@ -511,3 +511,42 @@ CREATE TABLE IF NOT EXISTS incidents (
     finished_at timestamptz
 );
 CREATE INDEX IF NOT EXISTS incidents_status ON incidents (status, id);
+-- Посещения страниц — всех, включая гостей (zakup.visits). visitor — случайная метка
+-- из cookie; IP не храним, только страну/область/город (geo_kz). Подробности — 90 дней.
+CREATE TABLE IF NOT EXISTS visits (
+    id        bigserial PRIMARY KEY,
+    at        timestamptz NOT NULL DEFAULT now(),
+    visitor   text,
+    user_id   bigint,
+    path      text NOT NULL,
+    query     text,
+    source    text,            -- google, yandex, telegram, direct, internal, other:<домен>
+    utm       text,            -- utm_source/utm_campaign
+    device    text,            -- mobile, tablet, desktop
+    browser   text,
+    country   text,            -- KZ, other
+    region    text,
+    city      text,
+    is_bot    boolean NOT NULL DEFAULT false,
+    status    integer,
+    ms        integer
+);
+CREATE INDEX IF NOT EXISTS visits_at ON visits (at);
+CREATE INDEX IF NOT EXISTS visits_visitor ON visits (visitor, at);
+-- События из браузера и с сервера: окно «платная функция», поиск с параметрами и т.п.
+CREATE TABLE IF NOT EXISTS events (
+    id      bigserial PRIMARY KEY,
+    at      timestamptz NOT NULL DEFAULT now(),
+    visitor text,
+    user_id bigint,
+    name    text NOT NULL,
+    props   jsonb
+);
+CREATE INDEX IF NOT EXISTS events_name_at ON events (name, at);
+-- Диапазоны IP Казахстана → область и город (DB-IP Lite, обновляется раз в месяц).
+CREATE TABLE IF NOT EXISTS geo_kz (
+    ip_from inet PRIMARY KEY,
+    ip_to   inet NOT NULL,
+    region  text,
+    city    text
+);

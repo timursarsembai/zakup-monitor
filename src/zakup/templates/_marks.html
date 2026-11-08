@@ -1,7 +1,7 @@
 {# Избранное: сердечко на лоте. Нажатие добавляет в «Мои лоты» или убирает оттуда. #}
 {% macro mark_control(lot_id, mark, next) %}
 {% set on = mark and mark[0] %}
-<form class="fav-form" data-paid method="post" action="/lots/{{ lot_id }}/mark">
+<form class="fav-form" data-paid data-feature="favorite" method="post" action="/lots/{{ lot_id }}/mark">
   <input type="hidden" name="next" value="{{ next }}">
   <input type="hidden" name="status" value="{{ '' if on else 'interested' }}">
   <button class="fav {{ 'on' if on }}" aria-pressed="{{ 'true' if on else 'false' }}" aria-label="{{ _('В избранном') if on else _('В избранное') }}"

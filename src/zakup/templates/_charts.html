@@ -1,0 +1,29 @@
+{# Графики: подключать на страницах с диаграммами ({% include "_charts.html" %}). #}
+<style>
+  svg.chart { width: 100%; height: auto; display: block; overflow: visible; }
+  svg.chart text { fill: var(--muted); font-size: 10px; }
+  svg.chart rect.a { fill: var(--accent); } svg.chart rect.b { fill: var(--muted); opacity: .45; }
+  svg.chart rect:hover { opacity: .75; }
+  .chart-legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 13px; color: var(--muted); margin-top: 6px; }
+  .chart-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; background: var(--accent); }
+  .chart-legend i.b { background: var(--muted); opacity: .45; }
+  .chart-rows { display: grid; gap: 7px; }
+  .chart-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; font-size: 14px; }
+  .chart-row > span { overflow: hidden; text-overflow: ellipsis; }
+  .chart-bar { grid-column: 1 / -1; height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--accent) 18%, transparent); }
+  .chart-bar i { display: block; height: 100%; border-radius: 3px; background: var(--accent); }
+  .chart-heat { display: grid; grid-template-columns: 26px repeat(24, minmax(0, 1fr)); gap: 2px; font-size: 10px; color: var(--muted); }
+  .chart-heat i { aspect-ratio: 1; border-radius: 2px; background: var(--accent); min-height: 8px; }
+  .chart-heat .h { text-align: center; } .chart-heat .d { align-self: center; }
+  .chart-kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(165px, 1fr)); gap: 10px; margin: 0 0 14px; }
+  .chart-kpi { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+  .chart-kpi b { display: block; font-size: 22px; margin: 2px 0; font-variant-numeric: tabular-nums; }
+  .chart-kpi span { font-size: 13px; color: var(--muted); }
+  .chart-kpi .up { color: var(--ok, #1e9e5a); } .chart-kpi .down { color: var(--bad, #c0392b); }
+  .chart-periods, .chart-metrics { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+  .chart-periods button, .chart-metrics button { border-radius: 999px; padding: 5px 12px; font-size: 14px; }
+  .chart-periods button[aria-pressed=true], .chart-metrics button[aria-pressed=true] { background: var(--accent); color: var(--on-accent); border-color: transparent; }
+  .chart-head { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  @media (max-width: 700px) { .chart-kpis { grid-template-columns: 1fr 1fr; gap: 8px; } .chart-kpi b { font-size: 19px; } }
+</style>
+<script src="/static/charts.js?v=1"></script>

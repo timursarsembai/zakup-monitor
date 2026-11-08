@@ -38,6 +38,7 @@ def main() -> int:
     orgs.add_argument("--limit", type=int, default=600)
     sub.add_parser("client-bot", help="клиентский Telegram-бот и группа клиентов (постоянно)")
     sub.add_parser("autofix", help="дежурный: разбирает и исправляет сбои (на хосте, постоянно)")
+    sub.add_parser("tidy", help="база регионов по IP (раз в месяц) и чистка старой статистики посещений")
     sub.add_parser("nightly", help="ночной ревьюер: отчёт владельцу за сутки (на хосте)")
     sub.add_parser("bot", help="Telegram-бот: привязка чатов (работает постоянно)")
     specs_cmd = sub.add_parser("specs", help="заранее разобрать техспецификации открытых лотов")
@@ -72,6 +73,12 @@ def main() -> int:
         from zakup import autofix
 
         autofix.run()
+        return 0
+    if args.command == "tidy":
+        from zakup import geo, visits
+
+        with db.connect(os.environ["DATABASE_URL"]) as conn:
+            print(f"geo: {geo.update(conn)}, purged visits/events: {visits.purge(conn)}")
         return 0
     if args.command == "nightly":
         from zakup import nightly

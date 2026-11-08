@@ -1,0 +1,241 @@
+{% extends "base.html" %}
+{% block title %}{{ _("Дашборд") }}{% endblock %}
+{% block style %}
+  h1 { font-size: 22px; margin: 6px 0 10px; }
+  .dash-head { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; justify-content: space-between; }
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin: 12px 0 14px; overflow-x: auto; scrollbar-width: thin; }
+  .tabs a { padding: 9px 14px; border-bottom: 2px solid transparent; color: var(--muted); white-space: nowrap; }
+  .tabs a[aria-selected=true] { color: var(--fg); border-bottom-color: var(--accent); font-weight: 600; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 14px; }
+  .card { border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; min-width: 0; }
+  .card.wide { grid-column: 1 / -1; }
+  .card h2 { font-size: 16px; margin: 0 0 6px; }
+  .card .hint { font-size: 13px; color: var(--muted); margin: 0 0 10px; }
+  .scroll { overflow-x: auto; }
+  table.t { width: 100%; border-collapse: collapse; font-size: 14px; }
+  table.t th, table.t td { padding: 7px 8px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; }
+  table.t th:first-child, table.t td:first-child, table.t td.text { text-align: left; white-space: normal; }
+  table.t th { color: var(--muted); font-weight: 500; font-size: 13px; }
+  table.t tr.risk td { color: var(--bad, #c0392b); }
+  .client-search { padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); font: inherit; min-width: 240px; margin-bottom: 10px; }
+  .loading { color: var(--muted); }
+  .note { font-size: 13px; color: var(--muted); margin-top: 14px; }
+{% endblock %}
+{% block main %}
+{% include "_charts.html" %}
+<div class="dash-head">
+  <h1>{{ _("Дашборд платформы") }}</h1>
+  <div class="chart-periods" role="group" aria-label="{{ _("Период") }}" data-periods>
+    {% for d, label in ((7, _("7 дней")), (30, _("30 дней")), (90, _("90 дней")), (365, _("Год"))) %}
+    <button type="button" data-days="{{ d }}" aria-pressed="false">{{ label }}</button>{% endfor %}
+  </div>
+</div>
+<nav class="tabs" role="tablist">
+  {% for key, label in (("overview", _("Обзор")), ("visitors", _("Посетители")), ("funnel", _("Воронка")),
+                         ("features", _("Функции")), ("search", _("Что ищут")), ("retention", _("Удержание")),
+                         ("money", _("Деньги")), ("clients", _("Клиенты")), ("health", _("Сервис"))) %}
+  <a href="#{{ key }}" role="tab" data-tab="{{ key }}">{{ label }}</a>{% endfor %}
+</nav>
+<div data-panel class="loading">{{ _("Считаю…") }}</div>
+<p class="note">{{ _("Посетители — по метке в браузере (без входа тоже); роботы не считаются. Регион — по IP:") }} <a href="https://db-ip.com">IP Geolocation by DB-IP</a>.</p>
+
+<script>
+(() => {
+  const C = window.Charts, panel = document.querySelector("[data-panel]");
+  const esc = C.esc, num = C.num, short = C.short;
+  const WD = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"];
+  const card = (title, body, {wide = false, hint = ""} = {}) =>
+    `<section class="card${wide ? " wide" : ""}"><h2>${esc(title)}</h2>${hint ? `<p class="hint">${esc(hint)}</p>` : ""}${body}</section>`;
+  const share = (rows) => { const max = Math.max(1, ...rows.map((r) => r[1])); return rows.map(([n, c]) => [n, num(c), c / max]); };
+  const table = (head, rows, cls = () => "") => `<div class="scroll"><table class="t"><tr>${head.map((h) => `<th>${esc(h)}</th>`).join("")}</tr>${
+    rows.map((r) => `<tr class="${cls(r)}">${r.map((c, i) => `<td${i === 0 ? ' class="text"' : ""}>${c}</td>`).join("")}</tr>`).join("")}</table></div>`;
+  const date = (iso) => iso ? new Date(iso).toLocaleDateString("ru-RU") : "—";
+  const money = (v) => v == null ? "—" : `${num(v)} ₸`;
+  const pct = (v) => v == null ? "—" : `${v}%`;
+  const VS = "к прошлому периоду";
+
+  const R = {
+    overview(d) {
+      const keys = [["visitors", "Посетители"], ["views", "Просмотры страниц"], ["users", "Регистрации"],
+                    ["paying", "Оплатили тариф"], ["revenue", "Выручка, ₸"], ["searches", "Поиски ИИ"], ["active", "Активные клиенты"]];
+      let metric = sessionStorage.getItem("dash-metric") || "visitors";
+      const chart = () => {
+        const labels = d.labels.map(short);
+        document.querySelector("[data-o-chart]").innerHTML = C.bars([{values: d.series[metric]}], labels, Math.ceil(labels.length / 8))
+          + `<p class="hint">${d.unit === "week" ? "по неделям" : "по дням"}</p>`;
+        for (const b of document.querySelectorAll("[data-metric]")) b.setAttribute("aria-pressed", String(b.dataset.metric === metric));
+      };
+      panel.innerHTML = `<div class="chart-kpis">${C.kpis(keys.map(([k, l]) => ({label: l, value: num(d.totals[k]), change: d.change[k]})), VS)}
+          <div class="chart-kpi"><span>Новые / вернувшиеся посетители</span><b>${num(d.new_visitors[0])} / ${num(d.new_visitors[1])}</b></div></div>
+        <div class="grid">
+          ${card("Динамика", `<div class="chart-head"><span></span><div class="chart-metrics">${keys.map(([k, l]) =>
+            `<button type="button" data-metric="${k}">${esc(l)}</button>`).join("")}</div></div><div data-o-chart></div>`, {wide: true})}
+          ${card("Когда заходят на сайт", C.heat(d.heat, WD), {wide: true, hint: "Просмотры страниц по дням недели и часам (время Казахстана): ярче — больше."})}
+          ${card("Активность клиентов по часам", C.bars([{values: d.client_hours}], d.client_hours.map((_, h) => String(h)), 3), {hint: "Действия вошедших клиентов за период."})}
+        </div>`;
+      panel.querySelector(".chart-metrics").addEventListener("click", (e) => {
+        const b = e.target.closest("[data-metric]"); if (!b) return;
+        metric = b.dataset.metric; sessionStorage.setItem("dash-metric", metric); chart();
+      });
+      chart();
+    },
+    visitors(d) {
+      panel.innerHTML = `<div class="chart-kpis">
+          <div class="chart-kpi"><span>Новые посетители</span><b>${num(d.new_returning[0])}</b></div>
+          <div class="chart-kpi"><span>Вернувшиеся</span><b>${num(d.new_returning[1])}</b></div>
+          <div class="chart-kpi"><span>Заходы роботов (не в статистике)</span><b>${num(d.bots)}</b></div></div>
+        <div class="grid">
+          ${card("Откуда пришли", C.rows(share(d.sources), "Пока нет данных"), {hint: "Уникальные посетители по источнику перехода."})}
+          ${card("Регионы Казахстана", C.rows(share(d.regions), "Пока нет данных"), {hint: "По IP-адресу. Мобильный интернет иногда показывает Алматы или Астану."})}
+          ${card("Города", C.rows(share(d.cities), "Пока нет данных"))}
+          ${card("Страна", C.rows(share(d.countries), "Пока нет данных"))}
+          ${card("С какой страницы начали", C.rows(share(d.landing), "Пока нет данных"))}
+          ${card("Устройство", C.rows(share(d.devices), "Пока нет данных"))}
+          ${card("Браузер", C.rows(share(d.browsers), "Пока нет данных"))}
+          ${card("Рекламные метки (utm)", C.rows(share(d.utm.filter((r) => r[0] !== "—")), "Ссылок с utm-метками пока не было"))}
+        </div>`;
+    },
+    funnel(d) {
+      const first = Math.max(1, d.steps[0][1]);
+      const steps = d.steps.map(([name, n], i) => {
+        const prev = i ? d.steps[i - 1][1] : null;
+        const conv = prev ? ` · ${Math.round(n / prev * 100)}% от предыдущего` : "";
+        return [name, `${num(n)}${prev != null && prev ? conv : ""}`, n / first];
+      });
+      panel.innerHTML = `<div class="grid">
+          ${card("От посетителя до платящего клиента", C.rows(steps), {wide: true,
+            hint: "Посетители, регистрация и SMS — за период; дальше — что сделали клиенты, зарегистрированные в этом периоде."})}
+          ${card("Окно «Это платная функция»", d.paywall.length ? table(["Функция", "Показов", "Людей", "Потом вошли или зарегистрировались"],
+            d.paywall.map(([n, c, v, conv]) => [esc(n), num(c), num(v), `${num(conv)} (${v ? Math.round(conv / v * 100) : 0}%)`]))
+            : '<p class="hint">Пока никто не упирался в платные функции.</p>', {hint: "Какая функция чаще всего ведёт к оплате."})}
+          ${card("Оплаты", C.rows([["Начато оплат", num(d.payments.total), null], ["Оплачено", num(d.payments.paid), null],
+            ["Брошено (не оплатили за час)", num(d.payments.abandoned), null],
+            ["От регистрации до оплаты (медиана)", d.days_to_pay == null ? "—" : `${d.days_to_pay} дн.`, null]]))}
+        </div>`;
+    },
+    features(d) {
+      const s = d.searches, ai = d.ai;
+      panel.innerHTML = `<div class="grid">
+          ${card("Чем пользуются клиенты", table(["Функция", "Клиентов", "Раз", "Доля от платящих"],
+            d.features.map(([n, u, c, p]) => [esc(n), num(u), num(c), pct(p)])), {wide: true,
+            hint: `Сейчас платящих клиентов: ${num(d.paying)}.`})}
+          ${card("Поиски на балансах", C.rows([["Куплено", num(s.purchased), null], ["Начислено вручную", num(s.granted), null],
+            ["Потрачено", num(s.spent), null], ["Возвращено после ошибки", num(s.refunded), null],
+            ["Не потрачено у клиентов сейчас", `${num(s.outstanding)} (${money(s.outstanding_kzt)})`, null]]),
+            {hint: "Неиспользованные поиски — обязательство перед клиентами."})}
+          ${card("ИИ: себестоимость и выручка", C.rows([["Поисков товаров", num(ai.searches), null],
+            ["Себестоимость поисков", money(ai.cost_kzt), null], ["В среднем за поиск", money(ai.avg_cost_kzt), null],
+            ["Выручка с пакетов поисков", money(ai.revenue_searches), null],
+            ["Поиск длится в среднем", ai.avg_minutes == null ? "—" : `${ai.avg_minutes} мин`, null],
+            ["Поисков с ошибкой", num(ai.errors), null],
+            ["Выжимок техспецификаций", num(ai.summaries), null], ["Чек-листов поставщику", num(ai.questions), null]]),
+            {hint: "Выжимки и чек-листы входят в тариф; их себестоимость — доли тенге."})}
+        </div>`;
+    },
+    search(d) {
+      panel.innerHTML = `<div class="chart-kpis"><div class="chart-kpi"><span>Поисков с фильтрами</span><b>${num(d.total)}</b></div></div>
+        <div class="grid">
+          ${card("Регионы в поиске закупок", C.rows(share(d.regions), "Пока нет данных"))}
+          ${card("Регионы в ИИ-подборе", C.rows(share(d.ai_regions), "Пока нет данных"), {hint: "Регион поставки, где искали товары."})}
+          ${card("Что ищут (слова)", C.rows(share(d.words), "Пока нет данных"))}
+          ${card("Ничего не нашлось", C.rows(share(d.zero), "Таких поисков не было"), {hint: "Спрос, который сейчас не закрываем."})}
+          ${card("Способы закупки", C.rows(share(d.methods), "Не выбирали"))}
+          ${card("Товары / работы / услуги", C.rows(share(d.subjects), "Не выбирали"))}
+          ${card("Диапазон суммы", C.rows(share(d.sums), "Пока нет данных"))}
+          ${card("Лоты или объявления", C.rows(share(d.scopes), "Пока нет данных"))}
+        </div>`;
+    },
+    retention(d) {
+      const cohort = table(["Неделя регистрации", "Клиентов", "1-я неделя", "2-я", "3-я", "4-я"],
+        d.cohorts.map(([w, n, s]) => [short(w), num(n), ...s.map(pct)]));
+      panel.innerHTML = `<div class="chart-kpis">
+          <div class="chart-kpi"><span>Активны за сутки</span><b>${num(d.dau)}</b></div>
+          <div class="chart-kpi"><span>За неделю</span><b>${num(d.wau)}</b></div>
+          <div class="chart-kpi"><span>За месяц</span><b>${num(d.mau)}</b></div>
+          <div class="chart-kpi"><span>Продлевали тариф</span><b>${num(d.renewed)}</b></div>
+          <div class="chart-kpi"><span>Оплатили один раз</span><b>${num(d.once)}</b></div>
+          <div class="chart-kpi"><span>Тариф кончился за период</span><b>${num(d.churned)}</b></div></div>
+        <div class="grid">
+          ${card("Возвращаемость по неделе регистрации", cohort, {wide: true, hint: "Доля клиентов, которые заходили через 1, 2, 3, 4 недели после регистрации."})}
+          ${card("Под угрозой ухода", d.at_risk.length ? table(["Клиент", "Организация", "Тариф до", "Последний раз"],
+            d.at_risk.map(([login, org, until, last, id]) => [`<a href="/log?user=${id}">${esc(login)}</a>`, esc(org || "—"), date(until), date(last)]))
+            : '<p class="hint">Таких нет.</p>', {wide: true, hint: "Оплатили, но не заходят 7 дней, или тариф кончается в ближайшие 7 дней. Кому стоит написать или позвонить."})}
+        </div>`;
+    },
+    money(d) {
+      const labels = d.labels.map(short);
+      panel.innerHTML = `<div class="chart-kpis">
+          <div class="chart-kpi"><span>Выручка за период</span><b>${money(d.total)}</b></div>
+          <div class="chart-kpi"><span>Оплат</span><b>${num(d.count)}</b></div>
+          <div class="chart-kpi"><span>Средний чек</span><b>${money(d.avg_check)}</b></div>
+          <div class="chart-kpi" title="Выручка за период / число заплативших"><span>С клиента за период</span><b>${money(d.arpu)}</b></div>
+          <div class="chart-kpi" title="Все оплаты / все когда-либо платившие"><span>С клиента за всё время</span><b>${money(d.ltv)}</b></div>
+          <div class="chart-kpi" title="Платящих сейчас × цена тарифа"><span>Месячная выручка тарифов</span><b>${money(d.mrr)}</b></div>
+          <div class="chart-kpi"><span>Возвраты</span><b>${num(d.refunds)}</b></div>
+          <div class="chart-kpi"><span>Счетов в Kaspi на номер</span><b>${num(d.kaspi_invoices)}</b></div></div>
+        <div class="grid">${card("Выручка", C.bars([{values: d.revenue.tariff, name: "Тариф"}, {values: d.revenue.searches, cls: "b", name: "Поиски"}],
+          labels, Math.ceil(labels.length / 8), (v) => money(v)) + C.legend("Тариф", "Поиски"), {wide: true})}</div>`;
+    },
+    clients(d) {
+      const rows = d.clients;
+      const now = Date.now();
+      const render = (q) => {
+        const f = q.trim().toLowerCase();
+        const list = rows.filter((c) => !f || [c.login, c.org, c.bin, c.region].some((v) => (v || "").toLowerCase().includes(f)));
+        panel.querySelector("[data-c-table]").innerHTML = table(
+          ["Клиент", "Организация", "Регистрация", "Тариф до", "Последний раз", "Поисков", "Баланс", "Оплатил", "Telegram", "Регион", "Пользуется"],
+          list.map((c) => [`<a href="/log?user=${c.id}">${esc(c.login)}</a>`, esc(c.org || "—"), date(c.created),
+            c.until && new Date(c.until) > now ? date(c.until) : "—", date(c.last), num(c.searches), num(c.balance), money(c.paid),
+            c.telegram ? "✓" : "", esc(c.region || "—"), esc(c.features.join(", "))]),
+          (r) => "");
+        panel.querySelector("[data-c-count]").textContent = `${list.length} из ${rows.length}`;
+      };
+      panel.innerHTML = `<input class="client-search" type="search" placeholder="Поиск: телефон, организация, БИН, регион" data-c-q>
+        <span class="hint" data-c-count></span><div data-c-table></div>`;
+      panel.querySelector("[data-c-q]").addEventListener("input", (e) => render(e.target.value));
+      render("");
+    },
+    health(d) {
+      const labels = d.labels.map(short);
+      panel.innerHTML = `<div class="chart-kpis">
+          <div class="chart-kpi"><span>Последняя загрузка с портала</span><b>${d.last_sync ? new Date(d.last_sync).toLocaleString("ru-RU") : "—"}</b></div>
+          <div class="chart-kpi"><span>Поисков ИИ / с ошибкой</span><b>${num(d.ai.total)} / ${num(d.ai.errors)}</b></div>
+          <div class="chart-kpi"><span>Поиск ИИ: в среднем / дольше всего</span><b>${d.ai.avg_minutes ?? "—"} / ${d.ai.max_minutes ?? "—"} мин</b></div></div>
+        <div class="grid">
+          ${card("Скорость страниц, мс", C.bars([{values: d.p50, name: "медиана"}, {values: d.p95, cls: "b", name: "95% запросов быстрее"}],
+            labels, Math.ceil(labels.length / 8)) + C.legend("Медиана", "95% быстрее"), {wide: true})}
+          ${card("Ошибки сайта (5xx)", C.bars([{values: d.errors}], labels, Math.ceil(labels.length / 8)))}
+          ${card("Самые медленные страницы", d.slow.length ? table(["Страница", "мс в среднем", "Открытий"], d.slow.map(([p, ms, n]) => [esc(p), num(ms), num(n)])) : '<p class="hint">Пока нет данных.</p>')}
+          ${card("Сбои сборщиков", d.incidents.length ? table(["№", "Где", "Ошибка", "Раз", "Статус", "Последний"],
+            d.incidents.map(([id, stage, err, n, st, at]) => [String(id), esc(stage), esc(err), num(n), esc(st), new Date(at).toLocaleString("ru-RU")])) : '<p class="hint">Сбоев не было.</p>', {wide: true})}
+        </div>`;
+    },
+  };
+
+  const tabs = [...document.querySelectorAll("[data-tab]")];
+  let current = tabs[0].dataset.tab, days = 30;
+  try { days = Number(localStorage.getItem("zakup-dash-days")) || 30; } catch (e) {}
+  let request = 0;
+  const load = () => {
+    for (const t of tabs) t.setAttribute("aria-selected", String(t.dataset.tab === current));
+    for (const b of document.querySelectorAll("[data-days]")) b.setAttribute("aria-pressed", String(Number(b.dataset.days) === days));
+    // У «Клиентов» период не важен — переключатель приглушаем.
+    document.querySelector("[data-periods]").style.opacity = current === "clients" ? .4 : 1;
+    panel.className = "loading"; panel.textContent = "Считаю…";
+    const mine = ++request;
+    fetch(`/dashboard/data?section=${current}&days=${days}`).then((r) => r.ok ? r.json() : Promise.reject(r.status))
+      .then((d) => { if (mine === request) { panel.className = ""; R[current](d); } })
+      .catch((e) => { if (mine === request) panel.textContent = `Не удалось загрузить (${e}).`; });
+  };
+  for (const t of tabs) t.addEventListener("click", (e) => {
+    e.preventDefault(); current = t.dataset.tab; history.replaceState(null, "", "#" + current); load();
+  });
+  document.querySelector("[data-periods]").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-days]"); if (!b) return;
+    days = Number(b.dataset.days); try { localStorage.setItem("zakup-dash-days", days); } catch (err) {} load();
+  });
+  if (tabs.some((t) => t.dataset.tab === location.hash.slice(1))) current = location.hash.slice(1);
+  load();
+})();
+</script>
+{% endblock %}

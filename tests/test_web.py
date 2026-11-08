@@ -69,7 +69,8 @@ def test_login_sets_secure_cookie_and_opens_pages(client):
 
 @pytest.mark.parametrize("target", ["https://evil.example", "//evil.example", "/\\\\evil.example"])
 def test_next_never_leaves_the_site(client, target):
-    assert _login(client, next=target).headers["location"] == "/"
+    # Чужой адрес отбрасывается: администратор попадает на свою главную — дашборд.
+    assert _login(client, next=target).headers["location"] == "/dashboard"
 
 
 def test_login_from_another_site_is_rejected(client):
@@ -456,11 +457,11 @@ def test_pagination_and_per_page(client, conn):
     assert 'value="100"' in page and "Показывать по" in page
 
 
-def test_dashboard_is_home(client, conn):
+def test_market_analytics_page(client, conn):
     _announcement_with_lots(conn)
     page = client.get("/analytics")  # без входа: аналитика открыта
     assert page.status_code == 200
-    for text in ("Обзор рынка", "Новые объявления по дням", "По дням недели", "Регионы", "Способы закупки",
+    for text in ("Обзор рынка", "Новые закупки", "По дням недели", "Регионы", "Способы закупки",
                  "Самые дорогие открытые лоты", "Чаще всех побеждают", "Самые частые закупки"):
         assert text in page.text, text
     # Только общая аналитика, без личных блоков.
@@ -1097,22 +1098,30 @@ def test_moderator_cannot_reset_client_password(client, conn):
     assert client.post(f"/settings/users/{uid}/reset", headers=ORIGIN).status_code == 403
 
 
-def test_admin_overview_tab_and_data(client, conn):
+def test_staff_dashboard_and_market_trends(client, conn):
     auth.set_password(conn, "amir", "amir-password-1")
+    auth.set_password(conn, "client", "client-password-1")
     conn.execute("UPDATE users SET role = 'moderator' WHERE email = 'amir'")
+    conn.execute("UPDATE users SET role = 'user', paid_until = now() + interval '30 days' WHERE email = 'client'")
     conn.commit()
-    _login(client)
-    page = client.get("/settings").text
-    assert 'data-tab="overview"' in page and page.index('data-tab="overview"') < page.index('data-tab="interface"')
-    for days in (7, 30, 90, 365):
-        data = client.get(f"/settings/overview?days={days}").json()
-        assert data["days"] == days and len(data["labels"]) == len(data["series"]["lots"])
-        assert len(data["weekdays"]["lots"]) == 7 and len(data["hours"]) == 24
-    assert len(client.get("/settings/overview?days=365").json()["labels"]) <= 54  # по неделям
+    # Сотрудник после входа попадает на дашборд; логотип ведёт туда же.
+    login = client.post("/login", data={"email": "amir", "password": "amir-password-1"}, headers=ORIGIN,
+                        follow_redirects=False)
+    assert login.headers["location"] == "/dashboard"
+    page = client.get("/dashboard").text
+    assert "Дашборд платформы" in page and 'href="/dashboard" class="brand"' in page
+    for section in web.insights.SECTIONS:
+        for days in (7, 365):
+            assert client.get(f"/dashboard/data?section={section}&days={days}").status_code == 200
+    assert client.get("/dashboard/data?section=nope").status_code == 404
+    assert 'data-tab="overview"' not in client.get("/settings").text  # «Обзор» из настроек переехал
     client.post("/logout", headers=ORIGIN)
-    client.post("/login", data={"email": "amir", "password": "amir-password-1"}, headers=ORIGIN)
-    assert 'data-tab="overview"' not in client.get("/settings").text
-    assert client.get("/settings/overview").status_code == 403
+    # Клиенту дашборд не положен; динамика рынка открыта всем.
+    client.post("/login", data={"email": "client", "password": "client-password-1"}, headers=ORIGIN)
+    assert client.get("/dashboard", follow_redirects=False).status_code in (303, 403)
+    assert client.get("/dashboard/data").status_code == 403
+    data = client.get("/analytics/trends?days=90").json()
+    assert data["days"] == 90 and len(data["labels"]) == len(data["series"]["lots"]) and len(data["hours"]) == 24
 
 
 def test_each_client_sees_own_research_staff_sees_all_merged(client, conn, monkeypatch):
@@ -1150,3 +1159,34 @@ def test_searches_cannot_be_bought_without_tariff(client, conn):
     client.post("/login", data={"email": "87011112233", "password": "client-password-1"}, headers=ORIGIN)
     response = client.post("/pay/searches", data={"count": "20"}, headers=ORIGIN)
     assert response.status_code == 402
+
+
+
+def test_visits_and_events_are_recorded(client, conn, monkeypatch):
+    import time as _time
+
+    from zakup import visits
+
+    conn.execute("INSERT INTO geo_kz VALUES ('2.27.130.0', '2.27.131.255', 'г. Астана', 'Астана')")
+    conn.commit()
+    # Записи идут в фоне — в тесте пишем сразу.
+    monkeypatch.setattr(web, "_spawn", lambda job: job())
+    browser = {"user-agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0) Mobile/15E148 Safari/604.1",
+               "referer": "https://www.google.com/", "sec-fetch-dest": "document", "x-forwarded-for": "2.27.130.7"}
+    first = client.get("/analytics?utm_source=tg&utm_campaign=launch", headers=browser)
+    assert visits.COOKIE in first.cookies
+    client.get("/lots/1/research", headers={**browser, "sec-fetch-dest": "empty"})  # фрагмент — не посещение
+    client.get("/robots.txt", headers={"user-agent": "Googlebot/2.1"})
+    row = conn.execute("SELECT path, source, utm, device, browser, is_bot, visitor FROM visits").fetchall()
+    assert len(row) == 1 and row[0][:6] == ("/analytics", "google", "tg / launch", "mobile", "Safari", False)
+    assert visits.first_seen(row[0][6]) and abs(visits.first_seen(row[0][6]) - _time.time()) < 60
+    assert visits.source("https://t.me/x", "zakup.sarsembai.com") == "telegram"
+    assert visits.source("https://zakup.sarsembai.com/lots", "zakup.sarsembai.com") == "internal"
+    assert visits.is_bot("Mozilla/5.0 (compatible; YandexBot/3.0)") and visits.is_bot(None)
+    assert client.post("/t/event", json={"name": "paywall", "props": {"feature": "export"}},
+                       headers=ORIGIN).status_code == 204
+    assert client.post("/t/event", json={"name": "hack"}, headers=ORIGIN).status_code == 204
+    assert client.post("/t/event", json={"name": "paywall"}).status_code == 403  # чужой сайт
+    client.get("/lots?q=стол&applied=1", headers=browser)
+    names = [r[0] for r in conn.execute("SELECT name FROM events ORDER BY id").fetchall()]
+    assert names == ["paywall", "search"]

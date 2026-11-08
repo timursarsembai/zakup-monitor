@@ -25,32 +25,6 @@
   .provider:has(input:checked) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
   .provider b { display: block; }
   [data-tab-panel][hidden], [data-provider-fields][hidden] { display: none; }
-  .ov-head { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; margin-bottom: 14px; }
-  .ov-periods, .ov-metrics { display: inline-flex; flex-wrap: wrap; gap: 6px; }
-  .ov-periods button, .ov-metrics button { border-radius: 999px; padding: 5px 12px; font-size: 14px; }
-  .ov-periods button[aria-pressed=true], .ov-metrics button[aria-pressed=true] { background: var(--accent); color: var(--on-accent); border-color: transparent; }
-  .ov-kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; margin-bottom: 14px; }
-  .ov-kpi { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
-  .ov-kpi b { display: block; font-size: 22px; margin: 2px 0; }
-  .ov-kpi span { font-size: 13px; color: var(--muted); }
-  .ov-kpi .up { color: var(--ok, #1e9e5a); } .ov-kpi .down { color: var(--bad, #c0392b); }
-  .ov-card { border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin-bottom: 14px; min-width: 0; }
-  .ov-card h2 { font-size: 16px; margin: 0 0 6px; }
-  .ov-card-head { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; margin-bottom: 8px; }
-  .ov-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 0 14px; }
-  .ov svg { width: 100%; height: auto; display: block; overflow: visible; }
-  .ov svg text { fill: var(--muted); font-size: 10px; }
-  .ov svg rect.a { fill: var(--accent); } .ov svg rect.b { fill: var(--muted); opacity: .45; }
-  .ov svg rect:hover { opacity: .8; }
-  .ov-legend { display: flex; gap: 14px; font-size: 13px; color: var(--muted); margin-top: 6px; }
-  .ov-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; background: var(--accent); }
-  .ov-legend i.b { background: var(--muted); opacity: .45; }
-  .ov-rows { display: grid; gap: 6px; }
-  .ov-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; font-size: 14px; }
-  .ov-row .bar { grid-column: 1 / -1; height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--accent) 20%, transparent); }
-  .ov-row .bar i { display: block; height: 100%; border-radius: 3px; background: var(--accent); }
-  .ov .small { font-size: 13px; margin: 0 0 8px; }
-  [data-tab-panel=overview] { max-width: 1100px; }
   .themes { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 12px; }
   .theme-card { display: grid; gap: 8px; justify-items: center; padding: 10px; border: 2px solid var(--line); border-radius: 12px; cursor: pointer; }
   .theme-card:has(input:checked) { border-color: var(--accent); }
@@ -82,7 +56,6 @@
 {% if error %}<p class="flash bad">{{ error }}</p>{% endif %}
 
 <nav class="tabs" role="tablist">
-  {% if is_admin %}<a href="#overview" role="tab" data-tab="overview">{{ _("Обзор") }}</a>{% endif %}
   <a href="#interface" role="tab" data-tab="interface">{{ _("Интерфейс") }}</a>
   {% if not guest %}
   <a href="#notify" role="tab" data-tab="notify">{{ _("Уведомления") }}</a>
@@ -99,50 +72,6 @@
   <a href="/log" class="tab-link">{{ _("Журнал действий") }} →</a>
   {% endif %}
 </nav>
-
-{% if is_admin %}
-<div data-tab-panel="overview" hidden>
-<div class="ov" data-overview>
-  <div class="ov-head">
-    <div class="ov-periods" role="group" aria-label="{{ _("Период") }}">
-      {% for d, label in ((7, _("7 дней")), (30, _("30 дней")), (90, _("90 дней")), (365, _("Год"))) %}
-      <button type="button" data-days="{{ d }}" aria-pressed="{{ 'true' if d == 30 else 'false' }}">{{ label }}</button>
-      {% endfor %}
-    </div>
-    <span class="muted" data-ov-range></span>
-  </div>
-  <p class="muted" data-ov-loading><span class="spinner"></span> {{ _("Считаю…") }}</p>
-  <div data-ov-body hidden>
-    <div class="ov-kpis" data-ov-kpis></div>
-    <section class="ov-card">
-      <div class="ov-card-head"><h2>{{ _("Динамика") }}</h2>
-        <div class="ov-metrics" data-ov-metrics></div></div>
-      <div class="ov-chart" data-ov-chart></div>
-    </section>
-    <div class="ov-grid">
-      <section class="ov-card"><h2>{{ _("Закупки по дням недели") }}</h2>
-        <p class="muted small">{{ _("В среднем за день: объявления и лоты") }}</p>
-        <div data-ov-week="procurement"></div></section>
-      <section class="ov-card"><h2>{{ _("Клиенты по дням недели") }}</h2>
-        <p class="muted small">{{ _("В среднем за день: регистрации и активные клиенты") }}</p>
-        <div data-ov-week="people"></div></section>
-      <section class="ov-card"><h2>{{ _("Публикации по часам") }}</h2>
-        <p class="muted small">{{ _("Объявления за период, время Казахстана") }}</p>
-        <div data-ov-hours></div></section>
-      <section class="ov-card"><h2>{{ _("Воронка клиентов") }}</h2>
-        <div data-ov-funnel></div></section>
-      <section class="ov-card"><h2>{{ _("Деньги и ИИ") }}</h2>
-        <div data-ov-money></div></section>
-      <section class="ov-card"><h2>{{ _("Что делают клиенты") }}</h2>
-        <div data-ov-actions></div></section>
-    </div>
-    <section class="ov-card"><h2>{{ _("Крупнейшие заказчики за период") }}</h2>
-      <div data-ov-customers></div></section>
-    <p class="muted small" data-ov-note></p>
-  </div>
-</div>
-</div>
-{% endif %}
 
 <div data-tab-panel="interface">
 <section class="panel wide">
@@ -481,118 +410,4 @@
   }
 
 </script>
-{% if is_admin %}
-<script>
-  // Дашборд администратора: данные с /settings/overview, графики — простые SVG.
-  (() => {
-    const root = document.querySelector("[data-overview]");
-    if (!root) return;
-    const T = {{ {
-      "announcements": _("Объявления"), "lots": _("Лоты"), "amount": _("Сумма, млн ₸"),
-      "users": _("Регистрации"), "revenue": _("Выручка, ₸"), "searches": _("Поиски ИИ"),
-      "active": _("Активные клиенты"), "views": _("Просмотры клиентов"),
-      "vs": _("к прошлому периоду"), "week": _("по неделям"), "day": _("по дням"),
-      "clients": _("Клиентов всего"), "with_org": _("Указали организацию"), "telegram": _("Подключили Telegram"),
-      "ever_paid": _("Платили хоть раз"), "paying": _("С тарифом сейчас"), "expiring": _("Тариф кончится за 7 дней"),
-      "rev_tariff": _("Выручка: тарифы"), "rev_searches": _("Выручка: поиски"), "search_count": _("Поисков ИИ"),
-      "search_errors": _("из них с ошибкой"), "search_cost": _("Себестоимость поиска"), "search_margin": _("Маржа с поиска (250 ₸)"),
-      "subs": _("Активных подписок"), "notified": _("Отправлено уведомлений"),
-      "history": _("История в базе — с"), "none": _("Пока пусто"),
-      "wd": [_("Пн"), _("Вт"), _("Ср"), _("Чт"), _("Пт"), _("Сб"), _("Вс")],
-    } | tojson }};
-    const KPI = ["announcements", "lots", "amount", "users", "revenue", "searches", "active", "views"];
-    const num = (v, d = 0) => Number(v || 0).toLocaleString("ru-RU", {maximumFractionDigits: d});
-    const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
-    const $ = (sel) => root.querySelector(sel);
-    let data = null, metric = "lots", days = 30;
-    try { days = Number(localStorage.getItem("zakup-ov-days")) || 30; metric = localStorage.getItem("zakup-ov-metric") || "lots"; } catch (e) {}
-
-    // Столбики: серии [{values, cls}] рядом друг с другом; подписи снизу.
-    const bars = (series, labels, every = 1, fmt = num) => {
-      const n = labels.length, groups = series.length, W = 600, H = 160, top = 14, bottom = 18;
-      const max = Math.max(1, ...series.flatMap((s) => s.values));
-      const slot = W / n, bw = Math.max(1, (slot * 0.78) / groups);
-      let out = `<svg viewBox="0 0 ${W} ${H + bottom}" role="img">`;
-      out += `<text x="0" y="9">${esc(fmt(max))}</text>`;
-      series.forEach((s, g) => s.values.forEach((v, i) => {
-        const h = Math.max(v ? 2 : 0, (v / max) * (H - top));
-        const x = i * slot + slot * 0.11 + g * bw;
-        out += `<rect class="${s.cls}" x="${x.toFixed(1)}" y="${(H - h).toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" rx="1.5"><title>${esc(labels[i])}: ${esc(fmt(v))}${s.name ? " — " + esc(s.name) : ""}</title></rect>`;
-      }));
-      labels.forEach((l, i) => {
-        if (i % every === 0 || i === n - 1) out += `<text x="${(i * slot + slot / 2).toFixed(1)}" y="${H + 13}" text-anchor="middle">${esc(l)}</text>`;
-      });
-      return out + "</svg>";
-    };
-    const legend = (a, b) => `<div class="ov-legend"><span><i></i>${esc(a)}</span>${b ? `<span><i class="b"></i>${esc(b)}</span>` : ""}</div>`;
-    const short = (iso) => { const [y, m, d] = iso.split("-"); return `${d}.${m}`; };
-    const rows = (items) => items.length ? `<div class="ov-rows">${items.map(([name, value, share]) =>
-      `<div class="ov-row"><span>${esc(name)}</span><b>${esc(value)}</b>${share != null ? `<div class="bar"><i style="width:${Math.max(1, Math.min(100, share * 100)).toFixed(0)}%"></i></div>` : ""}</div>`).join("")}</div>` : `<p class="muted">${esc(T.none)}</p>`;
-
-    const chart = () => {
-      const values = data.series[metric], labels = data.labels.map(short);
-      $("[data-ov-chart]").innerHTML = bars([{values, cls: "a"}], labels, Math.ceil(labels.length / 8),
-        (v) => num(v, metric === "amount" ? 1 : 0)) + `<p class="muted small">${esc(T[data.unit])}</p>`;
-      for (const b of $("[data-ov-metrics]").children) b.setAttribute("aria-pressed", String(b.dataset.metric === metric));
-    };
-
-    const render = () => {
-      const k = data.kpi, tot = data.totals, was = data.before;
-      $("[data-ov-range]").textContent = `${short(data.from)} — ${short(data.to)}`;
-      $("[data-ov-kpis]").innerHTML = KPI.map((key) => {
-        const now = tot[key], prev = was[key];
-        const delta = prev ? Math.round((now - prev) / prev * 100) : null;
-        const tag = delta == null ? "" : `<span class="${delta >= 0 ? "up" : "down"}">${delta >= 0 ? "+" : ""}${delta}% ${esc(T.vs)}</span>`;
-        return `<div class="ov-kpi"><span>${esc(T[key])}</span><b>${num(now, key === "amount" ? 0 : 0)}</b>${tag}</div>`;
-      }).join("");
-      $("[data-ov-metrics]").innerHTML = KPI.map((key) => `<button type="button" data-metric="${key}">${esc(T[key])}</button>`).join("");
-      chart();
-      const wd = T.wd, w = data.weekdays;
-      root.querySelector('[data-ov-week="procurement"]').innerHTML = bars(
-        [{values: w.lots, cls: "a", name: T.lots}, {values: w.announcements, cls: "b", name: T.announcements}], wd) + legend(T.lots, T.announcements);
-      root.querySelector('[data-ov-week="people"]').innerHTML = bars(
-        [{values: w.active, cls: "a", name: T.active}, {values: w.users, cls: "b", name: T.users}], wd, 1, (v) => num(v, 1)) + legend(T.active, T.users);
-      $("[data-ov-hours]").innerHTML = bars([{values: data.hours, cls: "a"}], data.hours.map((_, h) => String(h)), 3);
-      const base = Math.max(1, k.clients);
-      $("[data-ov-funnel]").innerHTML = rows([
-        [T.clients, num(k.clients), 1], [T.with_org, num(k.with_org), k.with_org / base],
-        [T.telegram, num(k.telegram), k.telegram / base], [T.ever_paid, num(k.ever_paid), k.ever_paid / base],
-        [T.paying, num(k.paying), k.paying / base], [T.expiring, num(k.expiring), null]]);
-      const cost = k.search_cost_kzt;
-      $("[data-ov-money]").innerHTML = rows([
-        [T.rev_tariff, num(k.revenue_tariff) + " ₸", null], [T.rev_searches, num(k.revenue_searches) + " ₸", null],
-        [T.search_count, `${num(k.searches)} (${esc(T.search_errors)}: ${num(k.search_errors)})`, null],
-        [T.search_cost, cost == null ? "—" : `≈ ${num(cost)} ₸`, null],
-        [T.search_margin, cost == null ? "—" : `≈ ${num(250 - cost)} ₸`, null],
-        [T.subs, num(k.subscriptions), null], [T.notified, num(k.notified), null]]);
-      const top = Math.max(1, ...data.actions.map((a) => a[1]));
-      $("[data-ov-actions]").innerHTML = rows(data.actions.map(([a, c]) => [a, num(c), c / top]));
-      const big = Math.max(1, ...data.customers.map((c) => c[2]));
-      $("[data-ov-customers]").innerHTML = rows(data.customers.map(([n, c, t]) => [`${n} · ${num(c)}`, `${num(t / 1e6, 1)} млн ₸`, t / big]));
-      $("[data-ov-note]").textContent = `${T.history} ${short(data.history_from)}.${data.history_from.slice(0, 4)}`;
-    };
-
-    const load = () => {
-      for (const b of root.querySelectorAll("[data-days]")) b.setAttribute("aria-pressed", String(Number(b.dataset.days) === days));
-      $("[data-ov-loading]").hidden = false;
-      fetch(`/settings/overview?days=${days}`).then((r) => r.ok ? r.json() : null).then((json) => {
-        $("[data-ov-loading]").hidden = true;
-        if (!json) return;
-        data = json; if (!data.series[metric]) metric = "lots";
-        $("[data-ov-body]").hidden = false; render();
-      });
-    };
-    root.addEventListener("click", (event) => {
-      const period = event.target.closest("[data-days]"), m = event.target.closest("[data-metric]");
-      if (period) { days = Number(period.dataset.days); try { localStorage.setItem("zakup-ov-days", days); } catch (e) {} load(); }
-      if (m && data) { metric = m.dataset.metric; try { localStorage.setItem("zakup-ov-metric", metric); } catch (e) {} chart(); }
-    });
-    const panel = root.closest("[data-tab-panel]");
-    let started = false;
-    const start = () => { if (!started && !panel.hidden) { started = true; load(); } };
-    document.querySelector('[data-tab="overview"]').addEventListener("click", () => setTimeout(start));
-    start();
-  })();
-</script>
-{% endif %}
 {% endblock %}

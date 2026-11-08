@@ -153,7 +153,7 @@
 </nav>
 <div class="filter-bar">
   <button type="button" class="filter-open" data-filter-open title="{{ f.describe() }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>{{ _("Фильтры") }}{% set n = f.active_count() %}{% if n %}<span class="count">{{ n }}</span>{% endif %}</button>
-  <button type="button" class="filter-open" data-filter-open data-filter-subscribe {% if not request.state.paid %}data-paid{% endif %}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg>{{ _("Подписаться") }}</button>
+  <button type="button" class="filter-open" data-filter-open data-filter-subscribe {% if not request.state.paid %}data-paid data-feature="subscription"{% endif %}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg>{{ _("Подписаться") }}</button>
 </div>
 <form method="get" action="/{{ scope }}" class="filters-panel" id="filters" aria-label="{{ _("Фильтр") }}">
   <div class="sheet-head"><b>{{ _("Фильтр") }}</b><button type="button" data-filter-close aria-label="{{ _("Закрыть") }}">✕</button></div>
@@ -241,7 +241,7 @@
   <div class="panel-actions">
     <button class="primary">{{ _("Найти") }}</button>
     <a href="/{{ scope }}">{{ _("Сбросить") }}</a>
-    {% if lots %}<button data-paid formaction="/export.xlsx" title="{{ _("Все найденные лоты в Excel") }}">Excel</button>{% endif %}
+    {% if lots %}<button data-paid data-feature="export" formaction="/export.xlsx" title="{{ _("Все найденные лоты в Excel") }}">Excel</button>{% endif %}
   </div>
   </div>
   <aside class="subscribe">
@@ -255,7 +255,7 @@
       {% for chat_id, title in groups %}<option value="{{ chat_id }}" {% if editing.chat_id == chat_id %}selected{% endif %}>{{ _("в группу «") }}{{ title }}»</option>{% endfor %}
     </select>
     {% if f.relative() %}
-    <button data-paid formmethod="post" formaction="/subscriptions/{{ editing.id }}/update" class="primary">{{ _("Сохранить изменения") }}</button>
+    <button data-paid data-feature="subscription" formmethod="post" formaction="/subscriptions/{{ editing.id }}/update" class="primary">{{ _("Сохранить изменения") }}</button>
     {% else %}
     <span class="muted">{{ _("Подписаться можно, когда в фильтре нет конкретных дат: окончание «в течение 2 рабочих дней» или без ограничения — тогда условия сами сдвигаются каждый день.") }}</span>
     {% endif %}
@@ -269,7 +269,7 @@
       <option value="">{{ _("в мой Telegram") }}</option>
       {% for chat_id, title in groups %}<option value="{{ chat_id }}">{{ _("в группу «") }}{{ title }}»</option>{% endfor %}
     </select>
-    <button data-paid formmethod="post" formaction="/subscriptions/filter" class="primary">{{ _("Подписаться на этот поиск") }}</button>
+    <button data-paid data-feature="subscription" formmethod="post" formaction="/subscriptions/filter" class="primary">{{ _("Подписаться на этот поиск") }}</button>
     <span class="muted">{{ _("Новые") }} {{ _("лоты") if lots else _("объявления") }} {{ _("по этим условиям придут в Telegram. Подписок может быть несколько —") }} <a href="/subscriptions">{{ _("мои подписки") }}</a>.</span>
     {% else %}
     <span class="muted">{{ _("Подписаться можно, когда в фильтре нет конкретных дат: окончание «в течение 2 рабочих дней» или без ограничения — тогда условия сами сдвигаются каждый день.") }}</span>

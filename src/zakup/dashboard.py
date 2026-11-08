@@ -71,38 +71,11 @@ def market(conn: psycopg.Connection, now: datetime | None = None) -> dict[str, A
     data["ending_max"] = max((c for _, c in data["ending"]), default=0) or 1
 
     # --- Динамика ---
-    since = datetime.combine(today - timedelta(days=13), datetime.min.time(), PORTAL_TZ)
-    by_day = {d: (c, s) for d, c, s in _rows(conn, """
-        SELECT (publish_date AT TIME ZONE 'Asia/Almaty')::date, count(*), coalesce(sum(total_sum), 0)
-        FROM announcements WHERE publish_date >= %(since)s GROUP BY 1""", {"since": since})}
-    data["days"] = [(today - timedelta(days=i), *by_day.get(today - timedelta(days=i), (0, 0)))
-                    for i in range(13, -1, -1)]
-    start_of_today = datetime.combine(today, datetime.min.time(), PORTAL_TZ)
-    # Первый полноценный день сбора: раньше в базе лишь единичные объявления,
-    # и они занизили бы средние по дням недели.
-    full_since = _rows(conn, """
+    # Динамика по дням, дням недели и часам — trends.py (страница грузит её отдельно).
+    data["since"] = _rows(conn, """
         SELECT min(day) FROM (
             SELECT (publish_date AT TIME ZONE 'Asia/Almaty')::date AS day FROM announcements
             GROUP BY 1 HAVING count(*) >= 500) busy""")[0][0] or today
-    data["since"] = full_since
-    data["days"] = [day for day in data["days"] if day[0] >= full_since] or data["days"]
-    data["days_max"] = max((c for _, c, _ in data["days"]), default=0) or 1
-    weekdays = {int(d): (float(c), float(t)) for d, c, t in _rows(conn, """
-        SELECT extract(isodow FROM day), avg(n), avg(total) FROM (
-            SELECT (publish_date AT TIME ZONE 'Asia/Almaty')::date AS day, count(*) AS n,
-                   coalesce(sum(total_sum), 0) AS total
-            FROM announcements WHERE publish_date < %(today)s
-              AND publish_date >= greatest(%(today)s - interval '56 days', %(full)s)
-            GROUP BY 1) per_day GROUP BY 1""",
-        {"today": start_of_today, "full": datetime.combine(full_since, datetime.min.time(), PORTAL_TZ)})}
-    data["weekdays"] = [(i, *weekdays.get(i, (0.0, 0.0))) for i in range(1, 8)]
-    data["weekdays_max"] = max((c for _, c, _ in data["weekdays"]), default=0) or 1
-    hours = dict(_rows(conn, """
-        SELECT extract(hour FROM publish_date AT TIME ZONE 'Asia/Almaty')::int, count(*)
-        FROM announcements WHERE publish_date >= %(today)s - interval '28 days' GROUP BY 1""",
-        {"today": start_of_today}))
-    data["hours"] = [(h, hours.get(h, 0)) for h in range(24)]
-    data["hours_max"] = max(hours.values(), default=0) or 1
 
     # --- Регионы ---
     regions = _rows(conn, f"""
