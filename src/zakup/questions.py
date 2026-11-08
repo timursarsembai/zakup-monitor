@@ -103,11 +103,11 @@ def _ask(conn: psycopg.Connection, lot_id: int, url: str, provider: str, model: 
     key = research.api_key(conn, provider)
     conn.commit()
     if provider == "claude_code":
-        raw = research._claude_code(prompt, model, SCHEMA, web=False)
+        raw = research.providers._claude_code(prompt, model, SCHEMA, web=False)
     elif provider == "anthropic":
-        raw = research._anthropic(prompt, model, key, schema=SCHEMA, web=False)
+        raw = research.providers._anthropic(prompt, model, key, schema=SCHEMA, web=False)
     else:
-        raw = research._openai(prompt, model, key, schema=SCHEMA, web=False)
+        raw = research.providers._openai(prompt, model, key, schema=SCHEMA, web=False)
     return {part: [str(q).strip()[:300] for q in raw.get(part) or [] if str(q).strip()][:12]
             for part in ("confirm", "clarify", "terms")}
 

@@ -44,7 +44,7 @@ def test_queue_runs_once_and_stores_result(conn, monkeypatch):
     user = _lot(conn)
     job = research.enqueue(conn, user, 90, "г.Актобе", True)
     assert research.enqueue(conn, user, 90, "г.Актобе", True) == job  # одна активная на лот
-    monkeypatch.setattr(research, "_claude_code", lambda prompt, model: {
+    monkeypatch.setattr(research.providers, "_claude_code", lambda prompt, model: {
         "summary": "ok", "region_searched": "Актобе",
         "items": [{"name": "Стол", "url": "https://m.kz/1", "in_region": True, "unit_price": 80000}]})
     research.work(os.environ["TEST_DATABASE_URL"], ["claude_code"], once=True)
@@ -114,7 +114,7 @@ def test_find_more_extends_saved_result(conn, monkeypatch):
             {"items": [{"name": "Стол 1", "url": "https://a.kz/1", "unit_price": 90000},
                        {"name": "Стол 2", "url": "https://b.kz/2", "unit_price": 80000}]}
             if len(calls) == 2 else {"items": []})
-    monkeypatch.setattr(research, "_claude_code", fake)
+    monkeypatch.setattr(research.providers, "_claude_code", fake)
     url = os.environ["TEST_DATABASE_URL"]
     research.enqueue(conn, user, 90, "Актобе", True, target=15)
     research.work(url, ["claude_code"], once=True)
@@ -141,7 +141,7 @@ def test_spec_summary_queue_and_cache(conn, monkeypatch):
         calls.append((model, web, "Стол дубовый 120х60" in prompt))
         return {"item": "Стол дубовый", "params": [{"name": "Размер", "value": "120×60"}],
                 "requirements": ["Гарантия 12 мес."]}
-    monkeypatch.setattr(research, "_claude_code", fake)
+    monkeypatch.setattr(research.providers, "_claude_code", fake)
     assert research.request_summary(conn, 90) == "queued"
     research.work(os.environ["TEST_DATABASE_URL"], ["claude_code"], once=True)
     assert calls == [("haiku", False, True)]
@@ -201,7 +201,7 @@ def test_kaspi_candidates_use_buyer_query(monkeypatch):
 
     asked, searched = [], []
     monkeypatch.setattr(kaspi, "proxy_url", lambda conn: "http://u:p@h:1")
-    monkeypatch.setattr(research, "_light_json", lambda conn, prompt, schema: (
+    monkeypatch.setattr(research.providers, "_light_json", lambda conn, prompt, schema: (
         asked.append(prompt) or {"queries": ["утюг паровой", "утюг"]}))
     monkeypatch.setattr(kaspi, "search", lambda query, proxy, city: searched.append(query) or [
         {"name": f"Утюг {query}", "price": 9990, "url": f"https://kaspi.kz/shop/p/{len(query)}/", "image": None}])

@@ -127,7 +127,7 @@ def test_supplier_questions_on_demand_and_shared(client, conn, monkeypatch):
                        headers=ORIGIN).json() == {"status": "queued"}
     assert 'data-q-status="queued"' in client.get("/lots/5001/questions?url=https://m.kz/p1").text
     prompts = []
-    monkeypatch.setattr(research, "_claude_code", lambda prompt, model, schema=None, web=True: (
+    monkeypatch.setattr(research.providers, "_claude_code", lambda prompt, model, schema=None, web=True: (
         prompts.append(prompt) or {"confirm": ["Формат точно А4?"], "clarify": ["Плотность 80 г/м²?"],
                                    "terms": ["Цена на сайте актуальна?"]}))
     assert questions.work_one(conn, ["claude_code"]) is True
