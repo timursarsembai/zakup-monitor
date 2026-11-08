@@ -36,6 +36,8 @@
 cp .env.example .env              # пароль Postgres
 ./scripts/fetch-secrets.sh        # GOSZAKUP_TOKEN и прочее из Infisical
 docker compose build
+docker compose up -d postgres
+./scripts/db-app-role.sh          # пользователь базы zakup_app (без прав суперпользователя)
 docker compose run --rm --entrypoint zakup worker probe          # токен работает? какие поля?
 docker compose run --rm --entrypoint zakup worker migrate
 docker compose run --rm --entrypoint zakup worker start-from 2026-10-01   # необязательно
