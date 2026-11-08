@@ -747,8 +747,9 @@ def lots_search(request: Request, user: Viewer, page: int = 1, per_page: int = P
                       (SELECT max(updated_at) FROM sync_state)"""
         ).fetchone()
         groups = _user_groups(conn, user)
+        editing = _editing(conn, user, form)
     context = _search_context(request, current, "lots", total, page, form, now, per_page)
-    context.update(rows=rows, marks=lot_marks, stats=stats, groups=groups)
+    context.update(rows=rows, marks=lot_marks, stats=stats, groups=groups, editing=editing)
     return templates.TemplateResponse(request, "lots.html", context)
 
 
@@ -782,9 +783,10 @@ def announcements_search(request: Request, user: Viewer, page: int = 1, per_page
             f"SELECT count(*) FROM announcements a WHERE {where}", params
         ).fetchone()[0]
         groups = _user_groups(conn, user)
+        editing = _editing(conn, user, form)
     context = _search_context(request, current, "announcements", total, page, form, now,
                               per_page)
-    context.update(rows=rows, groups=groups)
+    context.update(rows=rows, groups=groups, editing=editing)
     return templates.TemplateResponse(request, "announcements.html", context)
 
 
@@ -1396,6 +1398,59 @@ async def create_filter_subscription(request: Request, user: Paid):
         matcher.seed(conn, sub_id, current, scope)
     _audit(request, user, "subscription_create", name[:100], scope=scope,
            to="group" if chat_id else "personal", conditions=current.describe()[:300])
+    return RedirectResponse("/subscriptions", status_code=303)
+
+
+def _editing(conn, user: int | None, form: dict) -> dict | None:
+    """Поиск открыт кнопкой «Редактировать» подписки: её название и получатель."""
+    raw = (form.get("edit") or [""])[0]
+    if not user or not raw.isdigit():
+        return None
+    row = conn.execute(
+        "SELECT id, name, chat_id FROM subscriptions WHERE id = %s AND user_id = %s AND kind = 'announcements'",
+        (int(raw), user),
+    ).fetchone()
+    return {"id": row[0], "name": row[1], "chat_id": row[2]} if row else None
+
+
+@app.get("/subscriptions/{sub_id}/edit")
+def edit_subscription(user: Paid, sub_id: int):
+    with pool.connection() as conn:
+        row = conn.execute(
+            "SELECT filters, scope FROM subscriptions WHERE id = %s AND user_id = %s AND kind = 'announcements'",
+            (sub_id, user),
+        ).fetchone()
+    if row is None:
+        raise HTTPException(404, "Нет такой подписки")
+    return RedirectResponse(f"{Filters.from_json(row[0]).to_query(row[1])}&edit={sub_id}", status_code=303)
+
+
+@app.post("/subscriptions/{sub_id}/update", dependencies=[Depends(same_origin)])
+async def update_subscription(request: Request, user: Paid, sub_id: int):
+    """Сохраняет изменённые условия, название и получателя подписки."""
+    form = await request.form()
+    data = {key: form.getlist(key) for key in form.keys()}
+    current = Filters.from_form(data)
+    if not current.relative():
+        raise HTTPException(
+            422, "Подписка работает только без конкретных дат: срок — «в течение 2 рабочих дней» "
+                 "или без ограничения."
+        )
+    scope = "announcements" if form.get("scope") == "announcements" else "lots"
+    name = (form.get("name") or "").strip() or current.describe()[:100] or "Мой фильтр"
+    with pool.connection() as conn:
+        chat_id = _own_chat(conn, user, form.get("chat_id") or "")
+        updated = conn.execute(
+            """UPDATE subscriptions SET name = %s, filters = %s, scope = %s, chat_id = %s
+               WHERE id = %s AND user_id = %s AND kind = 'announcements' RETURNING id""",
+            (name[:100], Jsonb(current.to_json()), scope, chat_id, sub_id, user),
+        ).fetchone()
+        if updated is None:
+            raise HTTPException(404, "Нет такой подписки")
+        # Под новые условия может подойти много старого — шлём только новое.
+        matcher.seed(conn, sub_id, current, scope)
+    _audit(request, user, "subscription_update", name[:100], scope=scope,
+           conditions=current.describe()[:300])
     return RedirectResponse("/subscriptions", status_code=303)
 
 

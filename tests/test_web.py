@@ -834,3 +834,26 @@ def test_unpaid_client_gets_paywall_until_access_granted(client, conn):
     client.post("/login", data={"email": "87011112233", "password": "client-password-1"}, headers=ORIGIN)
     assert client.post("/lots/5001/mark", data={"status": "interested"}, headers=ORIGIN,
                        follow_redirects=False).status_code == 303
+
+
+def test_edit_subscription_conditions_and_name(client, conn):
+    _login(client)
+    data = {"applied": "1", "deadline_mode": "rule", "scope": "lots", "region": "75", "name": "Алматы"}
+    client.post("/subscriptions/filter", data=data, headers=ORIGIN)
+    sub = conn.execute("SELECT id FROM subscriptions").fetchone()[0]
+    assert f"/subscriptions/{sub}/edit" in client.get("/subscriptions").text
+    edit = client.get(f"/subscriptions/{sub}/edit", follow_redirects=False).headers["location"]
+    assert edit.startswith("/lots?") and f"edit={sub}" in edit and "region=75" in edit
+    page = client.get(edit).text
+    assert "Редактирование подписки" in page and 'value="Алматы"' in page and f"/subscriptions/{sub}/update" in page
+    data.update(region="71", name="Астана")
+    assert client.post(f"/subscriptions/{sub}/update", data=data, headers=ORIGIN,
+                       follow_redirects=False).status_code == 303
+    name, filters = conn.execute("SELECT name, filters FROM subscriptions WHERE id = %s", (sub,)).fetchone()
+    assert name == "Астана" and filters["regions"] == ["71"]
+    auth.set_password(conn, "other", "other-password-1")
+    conn.execute("UPDATE users SET role = 'moderator' WHERE email = 'other'")
+    conn.commit()
+    client.post("/logout", headers=ORIGIN)
+    client.post("/login", data={"email": "other", "password": "other-password-1"}, headers=ORIGIN)
+    assert client.post(f"/subscriptions/{sub}/update", data=data, headers=ORIGIN).status_code == 404

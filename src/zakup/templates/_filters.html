@@ -205,6 +205,22 @@
   </div>
   </div>
   <aside class="subscribe">
+    {% if editing %}
+    <b>{{ _("✏️ Редактирование подписки") }}</b>
+    <input type="hidden" name="scope" value="{{ scope }}">
+    <input type="hidden" name="edit" value="{{ editing.id }}">
+    <input name="name" value="{{ editing.name }}" placeholder="{{ _("Название подписки") }}" aria-label="{{ _("Название подписки") }}">
+    <select name="chat_id" aria-label="{{ _("Куда присылать") }}">
+      <option value="">{{ _("в мой Telegram") }}</option>
+      {% for chat_id, title in groups %}<option value="{{ chat_id }}" {% if editing.chat_id == chat_id %}selected{% endif %}>{{ _("в группу «") }}{{ title }}»</option>{% endfor %}
+    </select>
+    {% if f.relative() %}
+    <button data-paid formmethod="post" formaction="/subscriptions/{{ editing.id }}/update" class="primary">{{ _("Сохранить изменения") }}</button>
+    {% else %}
+    <span class="muted">{{ _("Подписаться можно, когда в фильтре нет конкретных дат: окончание «в течение 2 рабочих дней» или без ограничения — тогда условия сами сдвигаются каждый день.") }}</span>
+    {% endif %}
+    <span class="muted">{{ _("Поменяйте условия слева и название — и сохраните.") }} <a href="/subscriptions">{{ _("Отменить") }}</a></span>
+    {% else %}
     <b>{{ _("🔔 Подписка на этот поиск") }}</b>
     {% if f.relative() %}
     <input type="hidden" name="scope" value="{{ scope }}">
@@ -217,6 +233,7 @@
     <span class="muted">{{ _("Новые") }} {{ _("лоты") if lots else _("объявления") }} {{ _("по этим условиям придут в Telegram. Подписок может быть несколько —") }} <a href="/subscriptions">{{ _("мои подписки") }}</a>.</span>
     {% else %}
     <span class="muted">{{ _("Подписаться можно, когда в фильтре нет конкретных дат: окончание «в течение 2 рабочих дней» или без ограничения — тогда условия сами сдвигаются каждый день.") }}</span>
+    {% endif %}
     {% endif %}
   </aside>
   </div>
@@ -232,10 +249,11 @@
   });
   // Поля подписки живут в той же форме, что и поиск: в обычный поиск их не отправляем,
   // а Enter в названии подписки — подписывает, а не ищет.
-  const subscribeButton = sheet.querySelector('[formaction="/subscriptions/filter"]');
+  // При редактировании подписки обычный поиск сохраняет режим правки (поле edit).
+  const subscribeButton = sheet.querySelector(".subscribe button.primary");
   sheet.addEventListener("submit", (event) => {
     if (event.submitter !== subscribeButton) {
-      for (const field of sheet.querySelectorAll(".subscribe [name]")) field.disabled = true;
+      for (const field of sheet.querySelectorAll(".subscribe [name]")) field.disabled = field.name !== "edit";
     }
   });
   sheet.querySelector('.subscribe [name="name"]')?.addEventListener("keydown", (event) => {

@@ -31,6 +31,7 @@ ACTIONS = {
     "export": "Выгрузка в Excel",
     "subscription_create": "Создал подписку",
     "subscription_delete": "Удалил подписку",
+    "subscription_update": "Изменил подписку",
     "subscription_toggle": "Вкл./выкл. подписку",
     "subscription_chat": "Сменил получателя подписки",
     "password_change": "Сменил свой пароль",

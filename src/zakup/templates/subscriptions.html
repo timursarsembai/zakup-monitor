@@ -29,6 +29,7 @@
       </select>
     </form>
     <a href="/matches?sub={{ r[0] }}">{{ _("Совпадения") }}</a>
+    <a class="button" href="/subscriptions/{{ r[0] }}/edit">✏️ {{ _("Редактировать") }}</a>
     <form method="post" action="/subscriptions/{{ r[0] }}/toggle"><button>{{ _("Выключить") if r[5] else _("Включить") }}</button></form>
     <form method="post" action="/subscriptions/{{ r[0] }}/delete" data-confirm="{{ _("Удалить подписку?") }}"><button>{{ _("Удалить") }}</button></form>
   </div>
