@@ -209,3 +209,12 @@ def test_search_finds_kazakh_names(conn):
     assert _lot_ids(conn, Filters(q="үстелі")) == [10]
     assert _lot_ids(conn, Filters(q="кітап немесе үстелі")) == [10]
     assert _lot_ids(conn, Filters(exclude="үстелі")) == []
+
+
+def test_migrate_runs_only_when_schema_changes(conn):
+    from zakup import db
+
+    assert db.migrate(conn) is False  # фикстура уже применила схему — повторно не трогаем
+    conn.execute("UPDATE schema_state SET digest = 'old'")
+    conn.commit()
+    assert db.migrate(conn) is True and db.migrate(conn) is False

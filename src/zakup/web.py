@@ -125,12 +125,15 @@ templates.env.filters["safe_url"] = (
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     pool.open()
-    # Схема до первого запроса: иначе новый код какое-то время работал бы со старыми
-    # таблицами. Миграция уступает блокировкам сборщиков (db.migrate), так что безопасна.
+    # Схема до первого запроса, если таблицы свободны. Заняты сборщиком — не ждём:
+    # сайт важнее, миграцию сделает сборщик при своём запуске.
     from zakup import db
 
-    with pool.connection() as conn:
-        db.migrate(conn)
+    try:
+        with pool.connection() as conn:
+            db.migrate(conn, attempts=1)
+    except (psycopg.errors.LockNotAvailable, psycopg.errors.DeadlockDetected):
+        logger.warning("migration skipped at startup: tables are busy")
     yield
     pool.close()
 

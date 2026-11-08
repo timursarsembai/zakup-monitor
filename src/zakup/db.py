@@ -1,3 +1,4 @@
+import hashlib
 import time
 from decimal import Decimal, InvalidOperation
 from importlib.resources import files
@@ -13,22 +14,42 @@ def connect(url: str) -> psycopg.Connection:
     return psycopg.connect(url)
 
 
-def migrate(conn: psycopg.Connection, attempts: int = 10) -> None:
-    """Схема целиком. Сборщики в это время пишут в те же таблицы: ALTER TABLE ждёт
-    блокировку недолго и уступает (повтор), а не устраивает взаимную блокировку."""
+def migrate(conn: psycopg.Connection, attempts: int = 10) -> bool:
+    """Применяет schema.sql, только если файл изменился с прошлого раза.
+
+    Команды ALTER/CREATE берут на таблицу исключительную блокировку. Сборщики в это
+    время пишут в те же таблицы, и при каждом перезапуске это давало взаимные
+    блокировки (DeadlockDetected). Поэтому: отпечаток схемы хранится в базе и без
+    изменений ничего не выполняется; а при изменениях lock_timeout меньше
+    deadlock_timeout базы (1 с) — миграция уступает первой и повторяет, сборщик не падает.
+    Возвращает True, если схема применялась.
+    """
     schema = files("zakup").joinpath("schema.sql").read_text(encoding="utf-8")
+    digest = hashlib.sha256(schema.encode()).hexdigest()
+    conn.execute("CREATE TABLE IF NOT EXISTS schema_state (id int PRIMARY KEY, digest text NOT NULL)")
+    conn.commit()
+    row = conn.execute("SELECT digest FROM schema_state WHERE id = 1").fetchone()
+    conn.commit()
+    if row and row[0] == digest:
+        return False
     for attempt in range(attempts):
         try:
-            conn.execute("SET lock_timeout = '3s'")
+            conn.execute("SET lock_timeout = '500ms'")
             conn.execute(schema)
+            conn.execute(
+                """INSERT INTO schema_state (id, digest) VALUES (1, %s)
+                   ON CONFLICT (id) DO UPDATE SET digest = excluded.digest""",
+                (digest,),
+            )
             conn.execute("RESET lock_timeout")
             conn.commit()
-            return
+            return True
         except (psycopg.errors.LockNotAvailable, psycopg.errors.DeadlockDetected):
             conn.rollback()
             if attempt == attempts - 1:
                 raise
             time.sleep(1 + attempt)
+    return False
 
 
 class SyncState(NamedTuple):
