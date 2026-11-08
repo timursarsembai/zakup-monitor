@@ -1,4 +1,4 @@
 {% from "_spec_text.html" import spec_text with context %}
-{% if text %}<div class="summary-box" data-summary data-src="/lots/{{ lot_id }}/spec-summary"><button type="button" class="summary-btn" data-summary-start data-paid data-feature="spec_summary">📋 {{ _("Кратко: главное в таблице (ИИ)") }}</button></div>
-<details class="spec-full" open><summary>{{ _("Полный текст") }}</summary>{{ spec_text(text) }}</details>{% else %}<p class="muted">{{ error }} <button type="button" data-spec-retry>{{ _("Обновить") }}</button></p>{% endif %}
+{% if text %}<div class="summary-box" data-summary data-src="/lots/{{ lot_id }}/spec-summary">{% if s %}{% include "summary_fragment.html" %}{% else %}<button type="button" class="summary-btn" data-summary-start data-paid data-feature="spec_summary">📋 {{ _("Кратко: главное в таблице (ИИ)") }}</button>{% endif %}</div>
+<details class="spec-full" {% if not (s and s.status == "done") %}open{% endif %}><summary>{{ _("Полный текст") }}</summary>{{ spec_text(text) }}</details>{% else %}<p class="muted">{{ error }} <button type="button" data-spec-retry>{{ _("Обновить") }}</button></p>{% endif %}
 {% if url %}<p><a href="{{ url | safe_url }}" target="_blank" rel="noopener">{{ _("Скачать файл спецификации") }}</a></p>{% endif %}

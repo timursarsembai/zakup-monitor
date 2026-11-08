@@ -108,6 +108,8 @@ def client(conn, monkeypatch):
     monkeypatch.setattr(web.core, "_spawn", lambda job: job())
     # Тариф кэшируется в памяти процесса — между тестами сбрасываем.
     monkeypatch.setattr(tariff, "_cache", None)
+    # Список лотов для sitemap кэшируется на час — в каждом тесте свой.
+    monkeypatch.setattr(web.public, "_sitemap_lots", {"at": 0.0, "rows": []})
     auth.set_password(conn, "owner@mail.kz", "long-enough-password")
     conn.execute("UPDATE users SET role = 'admin' WHERE email = 'owner@mail.kz'")
     conn.commit()

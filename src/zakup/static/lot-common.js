@@ -30,6 +30,10 @@
       const response = await fetch(spec.dataset.src + (refresh ? "?refresh=1" : ""));
       body.innerHTML = response.ok ? await response.text()
         : '<p class="muted">' + CONFIG.t.load_failed + ' <button type="button" data-spec-retry>' + CONFIG.t.refresh + '</button></p>';
+      // Выжимка, которая ещё готовится, — опрашиваем, как и в разметке страницы.
+      const box = body.querySelector("[data-summary]");
+      const status = box?.querySelector("[data-summary-status]")?.dataset.summaryStatus;
+      if (status === "queued" || status === "running") setTimeout(() => pollSummary(box), 3000);
     } catch {
       body.innerHTML = '<p class="muted">' + CONFIG.t.offline + ' <button type="button" data-spec-retry>' + CONFIG.t.refresh + '</button></p>';
     }

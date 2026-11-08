@@ -7,6 +7,7 @@ import threading
 import time
 from datetime import UTC, datetime, timedelta
 from importlib.resources import files
+from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 import httpx
@@ -127,15 +128,37 @@ def robots() -> Response:
 SITEMAP_CHUNK = 20_000
 
 
+# Лоты для sitemap: только те, что есть в объявлении на портале и не удалены — иначе
+# страница отдаёт 404, а поисковик тратит на неё обход (так же отбирает лоты страница
+# объявления). Подробности объявлений тяжёлые (секунды на запрос): список — раз в час.
+SITEMAP_TTL = 3600
+_sitemap_lots: dict[str, Any] = {"at": 0.0, "rows": []}
+_sitemap_lock = threading.Lock()
+
+
+def _live_lots() -> list[tuple[int, Any]]:
+    with _sitemap_lock:
+        if time.monotonic() - _sitemap_lots["at"] > SITEMAP_TTL:
+            with core.pool.connection() as conn:
+                _sitemap_lots["rows"] = conn.execute(
+                    """SELECT l.id, l.last_update_date FROM announcements a
+                       CROSS JOIN LATERAL jsonb_array_elements(
+                           CASE WHEN jsonb_typeof(a.detail->'Lots') = 'array' THEN a.detail->'Lots' ELSE '[]' END) x
+                       JOIN lots l ON l.id = (x->>'id')::bigint AND l.trd_buy_id = a.id
+                       WHERE a.end_date > now() AND a.detail IS NOT NULL
+                         AND NOT coalesce((x->>'isDeleted')::boolean, false)
+                       ORDER BY l.id""").fetchall()
+            _sitemap_lots["at"] = time.monotonic()
+        return _sitemap_lots["rows"]
+
+
 @router.get("/sitemap.xml")
 def sitemap_index() -> Response:
     """Открытые объявления и лоты — для поисковиков. Индекс ведёт на части по 20 000."""
     with core.pool.connection() as conn:
-        anns, lots_n = conn.execute(
-            """SELECT (SELECT count(*) FROM announcements WHERE end_date > now() AND detail IS NOT NULL),
-                      (SELECT count(*) FROM lots l JOIN announcements a ON a.id = l.trd_buy_id
-                       WHERE a.end_date > now() AND a.detail IS NOT NULL)"""
-        ).fetchone()
+        anns = conn.execute(
+            "SELECT count(*) FROM announcements WHERE end_date > now() AND detail IS NOT NULL").fetchone()[0]
+    lots_n = len(_live_lots())
     parts = [f"{SITE_URL}/sitemap-static.xml"]
     parts += [f"{SITE_URL}/sitemap-a-{i}.xml" for i in range((anns + SITEMAP_CHUNK - 1) // SITEMAP_CHUNK)]
     parts += [f"{SITE_URL}/sitemap-l-{i}.xml" for i in range((lots_n + SITEMAP_CHUNK - 1) // SITEMAP_CHUNK)]
@@ -162,10 +185,7 @@ def sitemap_part(kind: str) -> Response:
                        LIMIT %s OFFSET %s""", (SITEMAP_CHUNK, offset)).fetchall()
                 urls = [(f"{SITE_URL}/a/{i}", d) for i, d in rows]
             else:
-                rows = conn.execute(
-                    """SELECT l.id, l.last_update_date FROM lots l JOIN announcements a ON a.id = l.trd_buy_id
-                       WHERE a.end_date > now() AND a.detail IS NOT NULL ORDER BY l.id
-                       LIMIT %s OFFSET %s""", (SITEMAP_CHUNK, offset)).fetchall()
+                rows = _live_lots()[offset:offset + SITEMAP_CHUNK]
                 urls = [(f"{SITE_URL}/lots/{i}", d) for i, d in rows]
     body = "".join(f"<url><loc>{url}</loc>{f'<lastmod>{d.date().isoformat()}</lastmod>' if d else ''}</url>"
                    for url, d in urls)
@@ -565,6 +585,8 @@ def lot_spec(request: Request, viewer: Viewer, announcement_id: int, lot_id: int
                     "SELECT text_kk FROM lot_specs WHERE lot_id = %s", (lot_id,)
                 ).fetchone()
                 text = (kazakh and kazakh[0]) or text
+        # Готовая выжимка — сразу в ответе (платная часть), иначе кнопка «Кратко».
+        summary = research.summary_of(conn, lot_id) if text and request.state.paid else None
     return templates.TemplateResponse(
-        request, "spec_fragment.html", {"text": text, "error": error, "url": url, "lot_id": lot_id}
+        request, "spec_fragment.html", {"text": text, "error": error, "url": url, "lot_id": lot_id, "s": summary}
     )

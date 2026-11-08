@@ -262,3 +262,29 @@ def test_spec_tables_rendered_as_table():
     blocks = web.core._spec_blocks("Заголовок\nНаименование | Кол-во\nСтол | 5\nИтого")
     assert blocks == [("text", "Заголовок"), ("table", [["Наименование", "Кол-во"], ["Стол", "5"]]),
                       ("text", "Итого")]
+
+
+def test_sitemap_skips_lots_removed_on_portal(client, conn):
+    _announcement_with_lots(conn)
+    conn.execute("""UPDATE announcements SET detail = jsonb_set(detail, '{Lots,1,isDeleted}', '1')
+                    WHERE id = 500""")
+    conn.commit()
+    lots = client.get("/sitemap-l-0.xml").text
+    assert "/lots/5001" in lots and "/lots/5002" not in lots
+    assert client.get("/lots/5002").status_code == 404
+
+
+def test_spec_loaded_later_shows_ready_summary(client, conn, monkeypatch):
+    from zakup import results
+
+    _announcement_with_lots(conn)
+    conn.execute("""UPDATE announcements SET detail = jsonb_set(detail, '{Lots,0,Files}',
+                    '[{"nameRu": "Техническая спецификация", "filePath": "https://ows.goszakup.gov.kz/x"}]')""")
+    conn.execute("INSERT INTO lot_specs (lot_id, file_url, text) VALUES (5001, 'https://ows.goszakup.gov.kz/x', 'Бумага А4')")
+    conn.execute("""INSERT INTO spec_summaries (lot_id, provider, model, status, result)
+                    VALUES (5001, 'claude_code', 'm', 'done', '{"item": "Бумага офисная"}')""")
+    conn.commit()
+    monkeypatch.setattr(results.spec, "download", lambda url: 1 / 0)
+    _login(client)
+    page = client.get("/a/500/lots/5001/spec").text
+    assert "Бумага офисная" in page and "data-summary-start" not in page
