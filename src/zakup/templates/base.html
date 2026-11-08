@@ -94,7 +94,18 @@
   .pw-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 14px; }
   .pw-buy { padding: 10px 16px; border-radius: 8px; background: var(--accent); color: var(--on-accent); font-weight: 600; }
   .primary-link { background: var(--accent); color: var(--on-accent) !important; border-color: transparent !important; }
-  @media (max-width: 560px) { .primary-link { display: none !important; } }
+  .burger { display: none; font-size: 20px; line-height: 1; padding: 4px 10px; }
+  .tools { display: flex; gap: 10px; align-items: center; }
+  .tool-label { display: none; }
+  @media (max-width: 760px) {
+    .burger { display: inline-flex; }
+    .tools { display: none; position: fixed; top: 52px; right: 8px; z-index: 70; flex-direction: column; align-items: stretch; gap: 6px; min-width: 230px; padding: 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 10px 30px rgb(0 0 0 / 30%); }
+    .tools.open { display: flex; }
+    .tools .tool-row { display: flex; align-items: center; gap: 10px; justify-content: flex-start; padding: 6px 8px; border: 0; border-radius: 8px; color: var(--fg); }
+    .tools .tool-label { display: inline; font-size: 15px; font-weight: 400; }
+    .tools form.tool-row { padding: 0; } .tools form.tool-row button { width: 100%; text-align: left; padding: 8px; }
+    .tools .primary-link { justify-content: center; }
+  }
   {% block style %}{% endblock %}
 </style>
 </head>
@@ -113,8 +124,12 @@
   <div class="logout">
     {% if request.state.user_id %}<span class="muted who">{{ request.state.email }}</span>{% endif %}
     {% if request.state.user_id and not request.state.staff %}<a href="/balance" class="icon-button searches {{ 'on' if path == '/balance' }}" title="{{ _("Осталось поисков товаров с ИИ — история") }}">🔍 {{ request.state.searches }}</a>{% endif %}
-    <span class="a11y">
-      <button type="button" class="a11y-toggle" data-a11y-toggle title="{{ _("Режим для слабовидящих") }}" aria-label="{{ _("Режим для слабовидящих") }}" aria-expanded="false">Aa</button>
+    {% if not request.state.user_id %}<a class="icon-button" href="/login?next={{ request.url.path | urlencode }}">{{ _("Войти") }}</a>{% endif %}
+    {# На телефоне всё ниже — в меню ☰, на компьютере — в строку. #}
+    <button type="button" class="burger" data-burger aria-label="{{ _("Меню") }}" aria-expanded="false" aria-controls="tools">☰</button>
+    <div class="tools" id="tools" data-tools>
+      <span class="a11y tool-row">
+      <button type="button" class="a11y-toggle" data-a11y-toggle title="{{ _("Режим для слабовидящих") }}" aria-label="{{ _("Режим для слабовидящих") }}" aria-expanded="false">Aa</button><span class="tool-label" data-a11y-label>{{ _("Для слабовидящих") }}</span>
       <div class="a11y-panel" data-a11y-panel hidden>
         <b>{{ _("Для слабовидящих") }}</b>
         <div class="a11y-row">{{ _("Размер") }}
@@ -126,17 +141,17 @@
         <button type="button" data-a11y-reset>{{ _("Как было") }}</button>
       </div>
     </span>
-    {% set other = "ru" if lang() == "kk" else "kk" %}
-    <a class="icon-button lang-switch" href="/lang/{{ other }}" hreflang="{{ other }}" title="{{ 'Русский' if other == 'ru' else 'Қазақша' }}">{{ languages[other] }}</a>
-    <button type="button" class="theme-toggle" data-theme-toggle title="{{ _("Сменить тему") }}" aria-label="{{ _("Сменить тему") }}"></button>
-    <a href="/analytics" class="icon-button {{ 'on' if path == '/analytics' }}" title="{{ _("Аналитика рынка") }}" aria-label="{{ _("Аналитика рынка") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg></a>
-    {% if request.state.user_id %}
-    <a href="/settings" class="icon-button {{ 'on' if path == '/settings' }}" title="{{ _("Настройки") }}" aria-label="{{ _("Настройки") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></a>
-    <form method="post" action="/logout" data-confirm="{{ _("Выйти из аккаунта?") }}"><button>{{ _("Выйти") }}</button></form>
-    {% else %}
-    <a class="icon-button" href="/login?next={{ request.url.path | urlencode }}">{{ _("Войти") }}</a>
-    <a class="icon-button primary-link" href="/register">{{ _("Регистрация") }}</a>
-    {% endif %}
+      {% set other = "ru" if lang() == "kk" else "kk" %}
+      <a class="icon-button lang-switch tool-row" href="/lang/{{ other }}" hreflang="{{ other }}" title="{{ 'Русский' if other == 'ru' else 'Қазақша' }}">{{ languages[other] }}<span class="tool-label">{{ 'Русский язык' if other == 'ru' else 'Қазақ тілі' }}</span></a>
+      <span class="tool-row"><button type="button" class="theme-toggle" data-theme-toggle title="{{ _("Сменить тему") }}" aria-label="{{ _("Сменить тему") }}"></button><span class="tool-label" data-theme-label>{{ _("Сменить тему") }}</span></span>
+      <a href="/analytics" class="icon-button tool-row {{ 'on' if path == '/analytics' }}" title="{{ _("Аналитика рынка") }}" aria-label="{{ _("Аналитика рынка") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><span class="tool-label">{{ _("Аналитика рынка") }}</span></a>
+      {% if request.state.user_id %}
+      <a href="/settings" class="icon-button tool-row {{ 'on' if path == '/settings' }}" title="{{ _("Настройки") }}" aria-label="{{ _("Настройки") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg><span class="tool-label">{{ _("Настройки") }}</span></a>
+      <form method="post" action="/logout" class="tool-row" data-confirm="{{ _("Выйти из аккаунта?") }}"><button>{{ _("Выйти") }}</button></form>
+      {% else %}
+      <a class="icon-button primary-link tool-row" href="/register">{{ _("Регистрация") }}</a>
+      {% endif %}
+    </div>
   </div>
 </header>
 {% endblock %}
@@ -211,6 +226,16 @@
       delete root.dataset.contrast; store("zakup-contrast", "");
       setZoom(1);
     });
+  })();
+  // Меню ☰ на телефоне: открыть/закрыть, закрыть по нажатию вне его.
+  (() => {
+    const burger = document.querySelector("[data-burger]");
+    const tools = document.querySelector("[data-tools]");
+    if (!burger || !tools) return;
+    const set = (open) => { tools.classList.toggle("open", open); burger.setAttribute("aria-expanded", String(open)); };
+    burger.addEventListener("click", (e) => { e.stopPropagation(); set(!tools.classList.contains("open")); });
+    document.addEventListener("click", (e) => { if (!tools.contains(e.target) && e.target !== burger) set(false); });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") set(false); });
   })();
   // Подтверждение для форм с data-confirm (выход, удаление и т.п.): защита от
   // случайного нажатия. Текст — из атрибута, не из кода.
