@@ -353,13 +353,13 @@ def test_organization_pages_for_customer_and_supplier(client, conn):
     assert '"taxID": "990740001111"' in page and "/a/900" in page
     seller = client.get(f"/org/{supplier}").text
     assert "Побед в закупках" in seller and "/lots/9001" in seller and f'href="/org/{customer}"' in seller
-    # ИП (ИИН с датой рождения) — без страницы и без ссылки; неизвестный БИН — 404.
-    assert client.get(f"/org/{person}").status_code == 404
+    # У ИП (по ИИН) — тоже страница: участие в закупках; неизвестный БИН — 404.
+    assert "ИП Иванов" in client.get(f"/org/{person}").text
     assert client.get("/org/990740009999").status_code == 404
     assert client.get("/org/abc").status_code == 404
     lot = client.get("/lots/9001").text
-    assert f'href="/org/{customer}"' in lot and f'href="/org/{person}"' not in lot and "ИП Иванов" in lot
+    assert f'href="/org/{customer}"' in lot and f'href="/org/{person}">ИП Иванов</a>' in lot
     index = client.get("/sitemap.xml").text
     assert "sitemap-o-0.xml" in index
     part = client.get("/sitemap-o-0.xml").text
-    assert f"/org/{customer}" in part and f"/org/{supplier}" in part and person not in part
+    assert f"/org/{customer}" in part and f"/org/{supplier}" in part

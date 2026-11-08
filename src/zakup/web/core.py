@@ -143,9 +143,9 @@ templates.env.globals["structured_demand"] = _structured_demand
 
 
 def _org_link(bin_: str | None, name: str | None) -> Markup:
-    """Название организации — ссылкой на её страницу (только юрлица, у ИП страниц нет)."""
+    """Название организации — ссылкой на её страницу (БИН или ИИН)."""
     text = escape(name or bin_ or "")
-    return Markup(f'<a href="/org/{bin_}">{text}</a>') if orgs.is_company(bin_) else text
+    return Markup(f'<a href="/org/{bin_}">{text}</a>') if orgs.has_page(bin_) else text
 
 
 templates.env.globals["org_link"] = _org_link

@@ -2,8 +2,8 @@
 поставщик — где участвовал и побеждал. Всё из своей базы (объявления, лоты, итоги,
 карточки subjects), портал не трогаем.
 
-Страницы — только у юрлиц (БИН). У ИП вместо БИН — ИИН, а в нём дата рождения человека:
-таких страниц не делаем и в поисковики не отдаём, в списках ИП — просто по имени.
+Страницы — у всех участников с БИН или ИИН (12 цифр), и у ИП тоже: это открытые данные
+портала (решение владельца 2026-11-09).
 """
 
 import re
@@ -14,14 +14,13 @@ import psycopg
 
 from zakup import subjects
 
-# БИН: ГГММ, затем тип — 4 (юрлицо-резидент), 5 (нерезидент), 6 (ИП совместное и пр.).
-# В ИИН на этом месте первая цифра дня рождения: 0–3.
-_COMPANY = re.compile(r"^\d{4}[4-6]\d{7}$")
+_BIN = re.compile(r"^\d{12}$")
 LIST_LIMIT = 30
 
 
-def is_company(bin_: str | None) -> bool:
-    return bool(bin_ and _COMPANY.match(bin_))
+def has_page(bin_: str | None) -> bool:
+    """БИН или ИИН — 12 цифр."""
+    return bool(bin_ and _BIN.match(bin_))
 
 
 def _rows(conn: psycopg.Connection, sql: str, params: tuple) -> list[dict[str, Any]]:
@@ -39,13 +38,17 @@ def _name(conn: psycopg.Connection, bin_: str) -> tuple[str | None, str | None]:
         """SELECT CASE WHEN customer_bin = %(b)s THEN customer_name_ru ELSE org_name_ru END
            FROM announcements WHERE customer_bin = %(b)s OR org_bin = %(b)s LIMIT 1""",
         {"b": bin_}).fetchone() or conn.execute(
-        "SELECT winner_name FROM lot_results WHERE winner_bin = %s LIMIT 1", (bin_,)).fetchone()
+        "SELECT winner_name FROM lot_results WHERE winner_bin = %s LIMIT 1", (bin_,)).fetchone() or conn.execute(
+        # Только подавал заявки — имя из списка заявок.
+        """SELECT o->>'name' FROM lot_results r, jsonb_array_elements(r.offers) o
+           WHERE r.offers @> jsonb_build_array(jsonb_build_object('bin', %(b)s::text)) AND o->>'bin' = %(b)s
+           LIMIT 1""", {"b": bin_}).fetchone()
     return (row[0], None) if row else (None, None)
 
 
 def profile(conn: psycopg.Connection, bin_: str, now: datetime | None = None) -> dict[str, Any] | None:
-    """Всё для страницы организации; None — такой организации у нас нет (или это ИП)."""
-    if not is_company(bin_):
+    """Всё для страницы организации; None — такой организации у нас нет."""
+    if not has_page(bin_):
         return None
     now = now or datetime.now(UTC)
     name_ru, name_kz = _name(conn, bin_)
@@ -103,9 +106,9 @@ def profile(conn: psycopg.Connection, bin_: str, now: datetime | None = None) ->
 
 
 def sitemap_bins(conn: psycopg.Connection) -> list[str]:
-    """Организации для sitemap: заказчики, организаторы и победители (только юрлица)."""
+    """Организации для sitemap: заказчики, организаторы и победители (БИН и ИИН)."""
     return [row[0] for row in conn.execute(
         r"""SELECT b FROM (SELECT customer_bin AS b FROM announcements
                            UNION SELECT org_bin FROM announcements
                            UNION SELECT winner_bin FROM lot_results WHERE outcome = 'winner') x
-            WHERE b ~ '^\d{4}[4-6]\d{7}$' ORDER BY b""")]
+            WHERE b ~ '^\d{12}$' ORDER BY b""")]
