@@ -37,6 +37,9 @@
   table.stats th, table.stats td { padding: 7px 8px; border-bottom: 1px solid var(--line); text-align: right; vertical-align: top; }
   table.stats th:first-child, table.stats td:first-child, table.stats td.text { text-align: left; }
   table.stats td.text { min-width: 220px; }
+  table.stats td.region { min-width: 150px; }
+  table.stats td.region .track { height: 6px; margin-top: 4px; background: color-mix(in srgb, var(--fg) 8%, transparent); border-radius: 3px; overflow: hidden; }
+  table.stats td.region .track i { display: block; height: 100%; background: var(--accent); }
   table.stats td.rank { color: var(--muted); width: 1%; }
   @media (max-width: 700px) {
     .bars small, .bars em { font-size: 9px; } .bars { gap: 2px; }
@@ -147,7 +150,7 @@
     <div class="scroll"><table class="stats">
       <tr><th>{{ _("Регион") }}</th><th>{{ _("Сумма лотов") }}</th><th>{{ _("Лотов") }}</th><th>{{ _("Средний лот") }}</th><th>{{ _("С авансом") }}</th><th>{{ _("Заявок на лот") }}</th><th>{{ _("Не состоялись") }}</th></tr>
       {% for name, count, total, avg, advance, won, failed, offers in m.regions %}
-      <tr><td><div class="hbar" style="margin:0;grid-template-columns:minmax(0,170px) 80px"><span class="name">{{ _(name) }}</span><span class="track"><i style="width: {{ ((total | float) / (m.regions_max | float) * 100) | round(1) }}%"></i></span></div></td>
+      <tr><td class="region">{{ _(name) }}<div class="track"><i style="width: {{ ((total | float) / (m.regions_max | float) * 100) | round(1) }}%"></i></div></td>
         <td class="num">{{ big(total) }}</td><td class="num">{{ num(count) }}</td><td class="num">{{ big(avg) }}</td>
         <td class="num">{{ pct(advance) }}</td><td class="num">{{ (offers | float) | round(1) if offers is not none else "—" }}</td>
         <td class="num">{{ pct(failed / (won + failed)) if won + failed else "—" }}</td></tr>

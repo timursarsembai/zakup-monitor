@@ -179,6 +179,9 @@ def run(database_url: str, poll_timeout: int = 50) -> None:
         try:
             with db.connect(database_url) as conn:
                 state = db.get_state(conn, OFFSET_KEY)
+                # Ожидание Telegram длится до минуты: транзакцию не держим, иначе
+                # изменения схемы базы ждут бота и всё встаёт в очередь блокировок.
+                conn.commit()
                 updates = telegram.call(
                     "getUpdates",
                     http_timeout=poll_timeout + 10,
