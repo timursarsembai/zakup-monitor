@@ -39,3 +39,25 @@ def test_extract_takes_russian_characteristics(monkeypatch):
 def test_extract_reports_broken_pdf():
     with pytest.raises(spec.SpecError):
         spec.extract(b"not a pdf")
+
+
+def test_isolated_parse_reports_errors_instead_of_dying():
+    # Разбор — в отдельном процессе: битый или тяжёлый файл — ошибка лота, служба жива.
+    with pytest.raises(spec.SpecError, match="не удалось прочитать файл"):
+        spec.extract_isolated(b"%PDF-1.4 broken")
+
+
+def test_attempt_is_counted_before_parsing(conn, monkeypatch):
+    monkeypatch.setattr(spec, "download", lambda url: b"pdf")
+
+    def dies(data):
+        # Как если бы процесс разбора убили посреди работы: попытка уже записана.
+        assert conn.execute("SELECT error FROM lot_specs WHERE lot_id = 1").fetchone() == ("разбирается",)
+        raise spec.SpecError("файл слишком тяжёлый для разбора — откройте файл")
+    monkeypatch.setattr(spec, "extract_isolated", dies)
+    spec.fetch(conn, 1, "https://ows.goszakup.gov.kz/x")
+    spec.fetch(conn, 1, "https://ows.goszakup.gov.kz/x")
+    assert conn.execute("SELECT attempts, text FROM lot_specs WHERE lot_id = 1").fetchone() == (2, None)
+    monkeypatch.setattr(spec, "extract_isolated", lambda data: ("Стол", None))
+    spec.fetch(conn, 1, "https://ows.goszakup.gov.kz/x")
+    assert conn.execute("SELECT attempts, text FROM lot_specs WHERE lot_id = 1").fetchone() == (0, "Стол")

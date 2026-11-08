@@ -68,7 +68,7 @@ def test_prefetch_stores_both_languages(conn, monkeypatch):
     conn.execute("DELETE FROM lot_specs")
     conn.execute("UPDATE lots SET spec_url = 'https://ows.goszakup.gov.kz/download/1'")
     monkeypatch.setattr(spec, "download", lambda url: b"pdf")
-    monkeypatch.setattr(spec, "extract_both", lambda pdf: ("Стол дубовый", "Емен үстел"))
+    monkeypatch.setattr(spec, "extract_isolated", lambda pdf: ("Стол дубовый", "Емен үстел"))
     assert spec.prefetch(conn, 10) == 1
     assert conn.execute("SELECT text, text_kk FROM lot_specs").fetchone() == ("Стол дубовый", "Емен үстел")
     assert spec.prefetch(conn, 10) == 0

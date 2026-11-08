@@ -87,7 +87,7 @@ services:
         condition: service_started
     entrypoint: ["zakup", "specs", "--loop"]
     environment: *app-env
-    mem_limit: 256m
+    mem_limit: 512m  # разбор PDF — в отдельном процессе, до ~200 МБ (zakup.spec)
     logging: *logging
 
   # Поиск товаров под лоты через API OpenAI/Anthropic (ключи пользователей).
@@ -160,7 +160,7 @@ services:
       timeout: 4s
       retries: 3
       start_period: 5s
-    mem_limit: 256m
+    mem_limit: 384m  # плюс разбор PDF по запросу (zakup.spec, отдельный процесс)
     logging: *logging
 
   web-2:

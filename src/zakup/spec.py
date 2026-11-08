@@ -141,10 +141,64 @@ def extract(pdf: bytes) -> str:
     return extract_both(pdf)[0]
 
 
+# Разбор — в отдельном процессе с потолком памяти и времени: на некоторых PDF портала
+# pypdf берёт 150–200 МБ и секунды. Тяжёлый или зловредный файл должен давать ошибку
+# этого лота, а не убивать службу (после перезапуска она бралась за тот же файл снова).
+PARSE_MEMORY = 600 * 1024 * 1024   # адресное пространство процесса разбора
+PARSE_SECONDS = 90
+
+
+def _parse_child() -> None:
+    """Точка входа процесса разбора: файл — в stdin, ответ — JSON в stdout."""
+    import json
+    import resource
+    import sys
+
+    resource.setrlimit(resource.RLIMIT_AS, (PARSE_MEMORY, PARSE_MEMORY))
+    try:
+        text, text_kk = extract_both(sys.stdin.buffer.read())
+        answer = {"text": text, "text_kk": text_kk}
+    except SpecError as error:
+        answer = {"error": str(error)}
+    except MemoryError:
+        answer = {"error": "файл слишком тяжёлый для разбора — откройте файл"}
+    sys.stdout.write(json.dumps(answer, ensure_ascii=False))
+
+
+def extract_isolated(data: bytes) -> tuple[str, str | None]:
+    import json
+    import subprocess
+    import sys
+
+    try:
+        done = subprocess.run([sys.executable, "-c", "from zakup.spec import _parse_child; _parse_child()"],
+                              input=data, capture_output=True, timeout=PARSE_SECONDS)
+    except subprocess.TimeoutExpired:
+        raise SpecError("файл разбирается слишком долго — откройте файл") from None
+    try:
+        answer = json.loads(done.stdout)
+    except ValueError:
+        raise SpecError("файл слишком тяжёлый для разбора — откройте файл") from None
+    if "error" in answer:
+        raise SpecError(answer["error"])
+    return answer["text"], answer["text_kk"]
+
+
 def fetch(conn: psycopg.Connection, lot_id: int, url: str) -> tuple[str | None, str | None]:
     """Скачивает и разбирает PDF, сохраняет текст (сам файл не храним)."""
+    # Попытка записана до разбора: если процесс всё же погибнет, лот не станет первым
+    # в очереди навсегда — после MAX_ATTEMPTS его больше не берут.
+    conn.execute(
+        """INSERT INTO lot_specs (lot_id, file_url, error, attempts) VALUES (%s, %s, 'разбирается', 1)
+           ON CONFLICT (lot_id) DO UPDATE SET fetched_at = now(),
+               attempts = CASE WHEN lot_specs.file_url = excluded.file_url THEN lot_specs.attempts + 1 ELSE 1 END,
+               file_url = excluded.file_url, text = NULL, text_kk = NULL, error = excluded.error
+           WHERE lot_specs.text IS NULL OR lot_specs.file_url <> excluded.file_url""",
+        (lot_id, url),
+    )
+    conn.commit()
     try:
-        (text, text_kk), error = extract_both(download(url)), None
+        (text, text_kk), error = extract_isolated(download(url)), None
     except (SpecError, httpx.HTTPError) as exc:
         text, text_kk = None, None
         error = str(exc) if isinstance(exc, SpecError) else "портал недоступен"
@@ -154,7 +208,7 @@ def fetch(conn: psycopg.Connection, lot_id: int, url: str) -> tuple[str | None, 
            ON CONFLICT (lot_id) DO UPDATE SET file_url = excluded.file_url,
                text = excluded.text, text_kk = excluded.text_kk, error = excluded.error,
                fetched_at = now(),
-               attempts = CASE WHEN excluded.text IS NULL THEN lot_specs.attempts + 1 ELSE 0 END""",
+               attempts = CASE WHEN excluded.text IS NULL THEN lot_specs.attempts ELSE 0 END""",
         (lot_id, url, text, text_kk, error),
     )
     conn.commit()
