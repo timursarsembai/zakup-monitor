@@ -22,12 +22,14 @@ applied=$(docker compose exec -T postgres psql -U zakup -Atc \
 new_migrations=""
 for file in src/zakup/migrations/*.sql; do
   name=$(basename "$file" .sql)
-  grep -qx "$name" <<< "$applied" || new_migrations="$new_migrations $name"
+  grep -qxF "$name" <<< "$applied" || new_migrations="$new_migrations $name"
 done
 if [ -n "$new_migrations" ]; then
   echo "Новые миграции:$new_migrations — применяю при остановленных сборщиках"
   # Если миграция упадёт, службы не должны остаться остановленными.
-  trap 'echo "Миграция не прошла — поднимаю службы на старой схеме"; docker compose up -d; systemctl --user start zakup-research' EXIT
+  # Запускаем те же остановленные контейнеры (прежний код), а не пересоздаём из нового
+  # образа: новый код на старой схеме и повтор миграции при живых сборщиках — хуже.
+  trap 'echo "Миграция не прошла — запускаю прежние службы на старой схеме"; docker compose start worker archive specs research bot client-bot; systemctl --user start zakup-research' EXIT
   docker compose stop worker archive specs research bot client-bot
   systemctl --user stop zakup-research
   docker compose run --rm --no-deps --entrypoint zakup worker migrate

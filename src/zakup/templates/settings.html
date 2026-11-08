@@ -97,6 +97,6 @@
 {% include "settings/users.html" %}
 {% endif %}
 
-<div hidden data-settings data-tab="{{ tab or '' }}"></div>
+<div hidden data-settings data-initial-tab="{{ tab or '' }}"></div>
 <script src="/static/settings.js?v={{ asset_v }}"></script>
 {% endblock %}

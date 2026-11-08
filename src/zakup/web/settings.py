@@ -71,6 +71,8 @@ def _settings_page(request: Request, user: int, *, sent: str = "", saved: str = 
             **_users_tab(conn, user, is_admin, is_staff),
             "groups": _user_groups(conn, user),
         }
+    # Имя бота может спрашиваться у Telegram по сети — уже без соединения с базой.
+    context.update(_telegram_bot(is_staff))
     context.update({
         "is_admin": is_admin,
         "is_staff": is_staff,
@@ -91,21 +93,21 @@ def _settings_page(request: Request, user: int, *, sent: str = "", saved: str = 
 
 
 def _telegram_tab(conn, request: Request, user: int, chat_id: str | None, is_staff: bool) -> dict:
-    """Уведомления: подключён ли Telegram, какой бот, группа клиентов."""
-    tg_bot = "main" if is_staff else "client"
+    """Уведомления: подключён ли Telegram, группа клиентов."""
     client_group = None if is_staff else {
         "exists": bool(client_bot.group_id(conn)),
         "member": bool(conn.execute("SELECT 1 FROM client_group_members WHERE user_id = %s",
                                     (user,)).fetchone()),
         "linked": bool(chat_id and str(chat_id).startswith(telegram.CLIENT_PREFIX)),
         "paid": request.state.paid}
-    return {
-        "connected": bool(chat_id),
-        # Клиентам — свой бот (@tenderim_kz_bot), сотрудникам — прежний.
-        "bot_username": telegram.bot_username(tg_bot),
-        "configured": bool(telegram.token(tg_bot) and telegram.bot_username(tg_bot)),
-        "client_group": client_group,
-    }
+    return {"connected": bool(chat_id), "client_group": client_group}
+
+
+def _telegram_bot(is_staff: bool) -> dict:
+    # Клиентам — свой бот (@tenderim_kz_bot), сотрудникам — прежний.
+    tg_bot = "main" if is_staff else "client"
+    username = telegram.bot_username(tg_bot)
+    return {"bot_username": username, "configured": bool(telegram.token(tg_bot) and username)}
 
 
 def _ai_tab(conn, user: int, is_admin: bool) -> dict:

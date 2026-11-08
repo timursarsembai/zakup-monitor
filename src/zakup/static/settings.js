@@ -40,7 +40,7 @@
   for (const t of tabs) t.addEventListener("click", (event) => {
     event.preventDefault(); history.replaceState(null, "", "#" + t.dataset.tab); showTab(t.dataset.tab);
   });
-  showTab(document.querySelector("[data-settings]").dataset.tab || location.hash.slice(1));
+  showTab(document.querySelector("[data-settings]").dataset.initialTab || location.hash.slice(1));
 
   // ИИ: поля ключа и модели — только у выбранного API; у Claude Code полей нет.
   const aiForm = document.querySelector("[data-ai-form]");

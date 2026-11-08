@@ -7,9 +7,10 @@ out=${1:-/tmp/zakup-pytest.txt}
 password=$(grep -E '^POSTGRES_PASSWORD=' .env | cut -d= -f2- | tr -d '"')
 docker compose build -q worker
 set +e
-docker compose run --rm --no-deps \
-  -e TEST_DATABASE_URL="postgresql://zakup:${password}@postgres:5432/zakup_test" \
-  -e DATABASE_URL="postgresql://zakup:${password}@postgres:5432/zakup_test" \
+# Адрес базы — через окружение по имени, не в командной строке (иначе пароль виден в ps).
+export TEST_DATABASE_URL="postgresql://zakup:${password}@postgres:5432/zakup_test"
+export DATABASE_URL="$TEST_DATABASE_URL"
+docker compose run --rm --no-deps -e TEST_DATABASE_URL -e DATABASE_URL \
   -e ZAKUP_TELEGRAM_BOT_TOKEN= -e ZAKUP_CLIENT_BOT_TOKEN= -e ZAKUP_TELEGRAM_CHAT_ID= \
   -e KAZPAYMENT_API_KEY= -e KAZPAYMENT_WEBHOOK_SECRET= -e GOSZAKUP_TOKEN= \
   --entrypoint pytest worker -q -p no:cacheprovider > "$out" 2>&1

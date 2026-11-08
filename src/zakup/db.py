@@ -43,6 +43,9 @@ def pending(conn: psycopg.Connection) -> list[str]:
     return [name for name, _ in migrations() if name not in done]
 
 
+MIGRATE_LOCK = 7_403
+
+
 def migrate(conn: psycopg.Connection, attempts: int = 10) -> bool:
     """Применяет новые миграции. True — что-то применилось.
 
@@ -58,6 +61,13 @@ def migrate(conn: psycopg.Connection, attempts: int = 10) -> bool:
         for attempt in range(attempts):
             try:
                 conn.execute("SET lock_timeout = '500ms'")
+                # Сайт и сборщик могут начать одновременно: миграции — по одной, и
+                # уже применённую другим процессом не повторяем.
+                conn.execute("SELECT pg_advisory_xact_lock(%s)", (MIGRATE_LOCK,))
+                if conn.execute("SELECT 1 FROM schema_migrations WHERE name = %s", (name,)).fetchone():
+                    conn.execute("RESET lock_timeout")
+                    conn.commit()
+                    break
                 conn.execute(sql)
                 conn.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (name,))
                 conn.execute("RESET lock_timeout")

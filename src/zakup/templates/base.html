@@ -138,6 +138,15 @@
   }
   {% block style %}{% endblock %}
 </style>
+<script id="app-config" type="application/json">{{ {"paid": (request.state.paid if request.state.paid is defined else false) == true,
+  "t": {"light": _("Светлая"), "beige": _("Бежевая"), "navy": _("Синяя"), "dark": _("Тёмная"),
+        "theme": _("Тема"), "press": _("Нажмите"),
+        "loading": _("Загружаю…"), "load_failed": _("Не удалось загрузить."), "refresh": _("Обновить"),
+        "offline": _("Нет связи с сайтом."), "copy_link": _("Скопируйте ссылку:"),
+        "login_again": _("войдите заново"), "copied": _("Скопировано ✓"),
+        "copy_failed": _("Не удалось скопировать"), "copy_questions": _("Скопировать вопросы"),
+        "session_expired": _("Сессия истекла —")}} | tojson }}</script>
+<script>const CONFIG = JSON.parse(document.getElementById("app-config").textContent);</script>
 </head>
 <body>
 {% if request.state.impersonator %}
@@ -212,14 +221,6 @@
     </div>
   </div>
 </dialog>
-<script id="app-config" type="application/json">{{ {"paid": (request.state.paid if request.state.paid is defined else false) == true,
-  "t": {"light": _("Светлая"), "beige": _("Бежевая"), "navy": _("Синяя"), "dark": _("Тёмная"),
-        "theme": _("Тема"), "press": _("Нажмите"),
-        "loading": _("Загружаю…"), "load_failed": _("Не удалось загрузить."), "refresh": _("Обновить"),
-        "offline": _("Нет связи с сайтом."), "copy_link": _("Скопируйте ссылку:"),
-        "login_again": _("войдите заново"), "copied": _("Скопировано ✓"),
-        "copy_failed": _("Не удалось скопировать"), "copy_questions": _("Скопировать вопросы"),
-        "session_expired": _("Сессия истекла —")}} | tojson }}</script>
 <script src="/static/app.js?v={{ asset_v }}"></script>
 </body>
 </html>
