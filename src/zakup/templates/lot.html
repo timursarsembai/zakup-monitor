@@ -71,7 +71,12 @@
   .q-head { display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; position: sticky; top: 0; background: var(--bg); padding: 8px 0; }
   .q-head h2 { margin: 0; font-size: 18px; }
   .q-tools { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0 4px; }
-  .q-list { padding-left: 22px; } .q-list li { margin: 8px 0; } .q-list label { display: flex; gap: 8px; align-items: flex-start; cursor: pointer; }
+  /* Номера — своим счётчиком, не маркером списка: мобильный Safari/Chrome при вставке
+     окна рисовал маркер поверх флажка, пока страница не перерисуется. */
+  .q-list { list-style: none; padding-left: 0; counter-reset: q; }
+  .q-list li { margin: 8px 0; display: flex; gap: 8px; align-items: flex-start; counter-increment: q; }
+  .q-list li::before { content: counter(q) "."; flex: none; min-width: 1.6em; text-align: right; }
+  .q-list label { display: flex; gap: 8px; align-items: flex-start; cursor: pointer; }
   .q-list input { margin-top: 4px; flex: none; } .q-list input:checked + span { text-decoration: line-through; color: var(--muted); }
 {% endblock %}
 {% block main %}

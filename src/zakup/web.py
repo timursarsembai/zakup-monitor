@@ -43,6 +43,7 @@ from zakup import (
     legal,
     marks,
     matcher,
+    overview,
     payments,
     questions,
     research,
@@ -2108,6 +2109,13 @@ def toggle_reregister(request: Request, admin: Admin, user_id: int):
     _audit(request, admin, "user_reregister", login, allowed=allowed)
     return _settings_page(request, admin, tab="users", notice=f"{login}: повторная регистрация "
                           f"{'разрешена' if allowed else 'запрещена'}.")
+
+
+@app.get("/settings/overview")
+def settings_overview(admin: Admin, days: int = 30):
+    """Данные дашборда администратора (вкладка «Обзор» в настройках)."""
+    with pool.connection() as conn:
+        return overview.stats(conn, days)
 
 
 @app.post("/settings/users/{user_id}/reset", dependencies=[Depends(same_origin)])

@@ -1095,3 +1095,21 @@ def test_moderator_cannot_reset_client_password(client, conn):
     uid = conn.execute("SELECT id FROM users WHERE email = 'client'").fetchone()[0]
     client.post("/login", data={"email": "amir", "password": "amir-password-1"}, headers=ORIGIN)
     assert client.post(f"/settings/users/{uid}/reset", headers=ORIGIN).status_code == 403
+
+
+def test_admin_overview_tab_and_data(client, conn):
+    auth.set_password(conn, "amir", "amir-password-1")
+    conn.execute("UPDATE users SET role = 'moderator' WHERE email = 'amir'")
+    conn.commit()
+    _login(client)
+    page = client.get("/settings").text
+    assert 'data-tab="overview"' in page and page.index('data-tab="overview"') < page.index('data-tab="interface"')
+    for days in (7, 30, 90, 365):
+        data = client.get(f"/settings/overview?days={days}").json()
+        assert data["days"] == days and len(data["labels"]) == len(data["series"]["lots"])
+        assert len(data["weekdays"]["lots"]) == 7 and len(data["hours"]) == 24
+    assert len(client.get("/settings/overview?days=365").json()["labels"]) <= 54  # по неделям
+    client.post("/logout", headers=ORIGIN)
+    client.post("/login", data={"email": "amir", "password": "amir-password-1"}, headers=ORIGIN)
+    assert 'data-tab="overview"' not in client.get("/settings").text
+    assert client.get("/settings/overview").status_code == 403
