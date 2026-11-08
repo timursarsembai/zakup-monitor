@@ -43,10 +43,11 @@
     <p>{{ _("ИИ читает техспецификацию, находит подходящие товары у продавцов Казахстана с ценами, контактами и маржой. «Найти ещё» — тоже поиск. Купленные и неиспользованные поиски со временем не сгорают.") }}</p>
     <div class="packs">
       {% for count, price in packs %}<form class="pack" method="post" action="/pay/searches"><b>{{ count }}</b>{{ _("поисков") }}<br>{{ "{:,}".format(price).replace(",", " ") }} ₸
-        <input type="hidden" name="count" value="{{ count }}">{% if request.state.user_id %}<button class="buy small">{{ _("Купить") }}</button>{% endif %}</form>{% endfor %}
+        <input type="hidden" name="count" value="{{ count }}">{% if request.state.paid %}<button class="buy small">{{ _("Купить") }}</button>{% endif %}</form>{% endfor %}
     </div>
     <form class="calc" method="post" action="/pay/searches"><label>{{ _("Своё количество:") }} <input type="number" name="count" min="1" max="10000" value="30" data-calc></label> = <b data-calc-total></b> ₸
-      {% if request.state.user_id %}<button class="buy small">{{ _("Купить") }}</button>{% endif %}</form>
+      {% if request.state.paid %}<button class="buy small">{{ _("Купить") }}</button>{% endif %}</form>
+    {% if request.state.user_id and not request.state.paid %}<p class="muted">{{ _("Поиски докупаются к оплаченному тарифу: сначала оплатите тариф.") }}</p>{% endif %}
     {% if not request.state.user_id %}<p><a class="buy" href="/register">{{ _("Зарегистрироваться и купить") }}</a></p>{% endif %}
   </section>
 </div>

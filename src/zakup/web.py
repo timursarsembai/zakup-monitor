@@ -311,13 +311,12 @@ Viewer = Annotated[int | None, Depends(optional_user)]
 User = Annotated[int, Depends(current_user)]
 
 
-def _sees_research(request: Request, user: int, conn=None) -> bool:
-    if request.state.paid:
-        return True
-    if conn is not None:
-        return credits.has_access(conn, user)
-    with pool.connection() as own:
-        return credits.has_access(own, user)
+def _research_view(request: Request, conn, user: int, lot_id: int) -> tuple[dict | None, dict | None]:
+    """(последний запуск, готовый результат) по лоту. Клиент видит только свои поиски;
+    сотрудники — все поиски по лоту одной таблицей без повторов."""
+    if request.state.staff:
+        return research.latest(conn, lot_id), research.merged_done(conn, lot_id)
+    return research.latest(conn, lot_id, user), research.latest_done(conn, lot_id, user)
 
 
 class PaymentRequired(Exception):
@@ -683,12 +682,13 @@ def pay_tariff(request: Request, user: User):
 
 
 @app.post("/pay/searches", dependencies=[Depends(same_origin)])
-def pay_searches(request: Request, user: User, count: Annotated[int, Form()]):
+def pay_searches(request: Request, user: Paid, count: Annotated[int, Form()]):
+    # Поиски — дополнение к тарифу: без оплаченного тарифа купить нельзя.
     if not 1 <= count <= payments.MAX_SEARCHES:
         raise HTTPException(422, f"от 1 до {payments.MAX_SEARCHES} поисков")
     with pool.connection() as conn:
         return _pay(request, conn, user, "searches", count, payments.searches_price(count),
-                    f"Zakup: {count} поисков товаров с ИИ")
+                    f"Tenderim: {count} поисков товаров с ИИ")
 
 
 def _pay(request: Request, conn, user: int, kind: str, quantity: int, amount: int, title: str):
@@ -1104,10 +1104,8 @@ def lot_page(request: Request, user: Viewer, lot_id: int, background: Background
     if lot is None:
         raise HTTPException(404, "Лот удалён из объявления")
     with pool.connection() as conn:
-        # Результаты подбора — платная часть: тариф, сотрудник или купленные поиски.
-        sees = bool(user) and _sees_research(request, user, conn)
-        job = research.latest(conn, lot_id) if sees else None
-        done = research.latest_done(conn, lot_id) if sees else None
+        # Результаты подбора — платная часть (тариф или сотрудник), у каждого клиента свои.
+        job, done = _research_view(request, conn, user, lot_id) if user and request.state.paid else (None, None)
         lot_info = research.lot_context(conn, lot_id)
         provider = (conn.execute(
             "SELECT ai_provider FROM users WHERE role = 'admin' ORDER BY id LIMIT 1"
@@ -1128,7 +1126,7 @@ def lot_page(request: Request, user: Viewer, lot_id: int, background: Background
 @app.post("/lots/{lot_id}/research", dependencies=[Depends(same_origin)])
 def start_research(
     request: Request,
-    user: User,
+    user: Paid,
     lot_id: int,
     region: Annotated[str, Form()] = "",
     whole_kz: Annotated[str, Form()] = "",
@@ -1188,12 +1186,9 @@ def questions_fragment(request: Request, _: Paid, lot_id: int, url: str):
 
 
 @app.get("/lots/{lot_id}/research")
-def research_fragment(request: Request, user: User, lot_id: int):
-    if not _sees_research(request, user):
-        raise PaymentRequired()
+def research_fragment(request: Request, user: Paid, lot_id: int):
     with pool.connection() as conn:
-        job = research.latest(conn, lot_id)
-        done = research.latest_done(conn, lot_id)
+        job, done = _research_view(request, conn, user, lot_id)
         lot_info = research.lot_context(conn, lot_id)
     return templates.TemplateResponse(
         request, "research_fragment.html",
@@ -1437,16 +1432,17 @@ def research_list(request: Request, user: Paid, q: str = "", sources_open: int =
                       a.id, a.number_anno, a.end_date
                FROM lot_research r JOIN lots l ON l.id = r.lot_id
                JOIN announcements a ON a.id = l.trd_buy_id
-               WHERE r.status = 'done'
+               WHERE r.status = 'done' AND (%(staff)s OR r.user_id = %(me)s)
                  AND (%(q)s = '' OR l.name_ru ILIKE %(like)s OR l.name_kz ILIKE %(like)s
                       OR a.number_anno ILIKE %(like)s)
                ORDER BY r.lot_id, r.id DESC""",
-            {"q": q.strip(), "like": f"%{q.strip()}%"},
+            {"q": q.strip(), "like": f"%{q.strip()}%", "staff": request.state.staff, "me": user},
         ).fetchall()
         running = conn.execute(
             """SELECT r.lot_id, r.status, r.base_id IS NOT NULL, l.name_ru, l.name_kz, r.created_at
                FROM lot_research r JOIN lots l ON l.id = r.lot_id
-               WHERE r.status IN ('queued', 'running') ORDER BY r.id"""
+               WHERE r.status IN ('queued', 'running') AND (%s OR r.user_id = %s) ORDER BY r.id""",
+            (request.state.staff, user),
         ).fetchall()
         active = len(running)
         source_rows = sources.listing(conn)

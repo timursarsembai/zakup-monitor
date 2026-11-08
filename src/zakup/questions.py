@@ -57,7 +57,7 @@ PROMPT = """Ты помогаешь поставщику на госзакупк
 
 
 def _item(conn: psycopg.Connection, lot_id: int, url: str) -> dict[str, Any] | None:
-    done = research.latest_done(conn, lot_id)
+    done = research.merged_done(conn, lot_id)
     items = ((done or {}).get("result") or {}).get("items") or []
     return next((i for i in items if i.get("url") == url), None)
 

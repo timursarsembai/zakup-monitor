@@ -330,9 +330,11 @@ def enqueue(conn: psycopg.Connection, user_id: int, lot_id: int, region: str,
         "SELECT ai_provider, ai_model FROM users WHERE role = 'admin' ORDER BY id LIMIT 1"
     ).fetchone() or ("claude_code", None)
     provider = provider or "claude_code"
+    # Свои поиски у каждого клиента: ждём только свой незаконченный (сотрудник — любой).
     active = conn.execute(
-        """SELECT id FROM lot_research WHERE lot_id = %s AND status IN ('queued', 'running')""",
-        (lot_id,),
+        """SELECT id FROM lot_research WHERE lot_id = %s AND status IN ('queued', 'running')
+           AND (%s OR user_id = %s)""",
+        (lot_id, is_admin, user_id),
     ).fetchone()
     if active:
         return active[0]
@@ -348,8 +350,9 @@ def enqueue(conn: psycopg.Connection, user_id: int, lot_id: int, region: str,
     if more:
         base = conn.execute(
             """SELECT id, region, whole_kz FROM lot_research
-               WHERE lot_id = %s AND status = 'done' ORDER BY id DESC LIMIT 1""",
-            (lot_id,),
+               WHERE lot_id = %s AND status = 'done' AND (%s OR user_id = %s)
+               ORDER BY id DESC LIMIT 1""",
+            (lot_id, is_admin, user_id),
         ).fetchone()
         if base:
             base_id, region, whole_kz = base
@@ -370,19 +373,55 @@ def enqueue(conn: psycopg.Connection, user_id: int, lot_id: int, region: str,
     return job
 
 
-def latest_done(conn: psycopg.Connection, lot_id: int) -> dict[str, Any] | None:
+# Результаты подбора у каждого клиента свои (решение 2026-11-08: каждый платит за
+# свой поиск). owner — чьи поиски показывать; None — все (для сотрудников).
+
+
+def latest_done(conn: psycopg.Connection, lot_id: int, owner: int | None = None) -> dict[str, Any] | None:
     """Последний готовый результат — его показываем, пока идёт новый поиск."""
     row = conn.execute(
-        "SELECT id FROM lot_research WHERE lot_id = %s AND status = 'done' ORDER BY id DESC LIMIT 1",
-        (lot_id,),
+        """SELECT id FROM lot_research WHERE lot_id = %s AND status = 'done'
+           AND (%s::bigint IS NULL OR user_id = %s) ORDER BY id DESC LIMIT 1""",
+        (lot_id, owner, owner),
     ).fetchone()
     return _job(conn, row[0]) if row else None
 
 
-def latest(conn: psycopg.Connection, lot_id: int) -> dict[str, Any] | None:
+def latest(conn: psycopg.Connection, lot_id: int, owner: int | None = None) -> dict[str, Any] | None:
     """Последний запуск по лоту — любой: в очереди, в работе, готовый или с ошибкой."""
-    row = conn.execute("SELECT max(id) FROM lot_research WHERE lot_id = %s", (lot_id,)).fetchone()
+    row = conn.execute(
+        "SELECT max(id) FROM lot_research WHERE lot_id = %s AND (%s::bigint IS NULL OR user_id = %s)",
+        (lot_id, owner, owner),
+    ).fetchone()
     return _job(conn, row[0]) if row and row[0] else None
+
+
+def _url_key(url: str) -> str:
+    return (url or "").strip().lower().rstrip("/").split("#")[0]
+
+
+def merged_done(conn: psycopg.Connection, lot_id: int) -> dict[str, Any] | None:
+    """Все готовые поиски по лоту одной таблицей (для сотрудников): одно предложение
+    (по адресу) — один раз, из самого свежего поиска."""
+    ids = [row[0] for row in conn.execute(
+        "SELECT id FROM lot_research WHERE lot_id = %s AND status = 'done' ORDER BY id DESC",
+        (lot_id,),
+    ).fetchall()]
+    if not ids:
+        return None
+    newest = _job(conn, ids[0])
+    seen: set[str] = set()
+    items: list[dict[str, Any]] = []
+    for job_id in ids:
+        result = _job(conn, job_id)["result"] if job_id != ids[0] else newest["result"]
+        for item in (result or {}).get("items") or []:
+            key = _url_key(item.get("url"))
+            if key and key not in seen:
+                seen.add(key)
+                items.append(item)
+    newest["result"] = {**(newest["result"] or {}), "items": items}
+    newest["merged"] = len(ids)
+    return newest
 
 
 def _job(conn: psycopg.Connection, job_id: int) -> dict[str, Any] | None:

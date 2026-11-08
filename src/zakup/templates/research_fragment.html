@@ -10,13 +10,15 @@
 {% elif job.status == "error" %}
   <p class="notice">{{ _("Поиск не удался") }}{% if is_admin %}: {{ job.error }}{% else %}{{ _(". Попробуйте ещё раз позже.") }}{% endif %}</p>
 {% endif %}
-{% set shown = job if job and job.status == "done" else done %}
+{# Сотрудникам — все поиски по лоту одной таблицей (done.merged), клиенту — его последний. #}
+{% set shown = done if done and done.merged else (job if job and job.status == "done" else done) %}
 {% if shown %}
   {% set busy = job and job.status in ("queued", "running") %}
   {% set job = shown %}
   {% set r = job.result %}
   {% set lot_price = lot_info.price if lot_info else none %}
   {% set count = lot_info["count"] if lot_info else 0 %}
+  {% if job.merged and job.merged > 1 %}<p class="muted">{{ _("Все поиски по лоту вместе: {n}, одинаковые предложения показаны один раз.", n=job.merged) }}</p>{% endif %}
   {% if r.summary %}<p>{{ r.summary }}</p>{% endif %}
   <div class="view-switch r-switch" role="group" aria-label="{{ _("Вид отображения") }}">
     <button type="button" data-rview="table"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18M3 12h18M3 19h18"/></svg><span>{{ _("Таблица") }}</span></button>

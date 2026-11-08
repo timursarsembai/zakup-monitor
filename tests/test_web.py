@@ -868,7 +868,7 @@ def test_search_balance_charge_refund_history(client, conn):
 
     _announcement_with_lots(conn)
     auth.set_password(conn, "+77011112233", "client-password-1")
-    conn.execute("UPDATE users SET role = 'user' WHERE email = '+77011112233'")
+    conn.execute("UPDATE users SET role = 'user', paid_until = now() + interval '30 days' WHERE email = '+77011112233'")
     conn.commit()
     client_id = conn.execute("SELECT id FROM users WHERE email = '+77011112233'").fetchone()[0]
     client.post("/login", data={"email": "87011112233", "password": "client-password-1"}, headers=ORIGIN)
@@ -1113,3 +1113,40 @@ def test_admin_overview_tab_and_data(client, conn):
     client.post("/login", data={"email": "amir", "password": "amir-password-1"}, headers=ORIGIN)
     assert 'data-tab="overview"' not in client.get("/settings").text
     assert client.get("/settings/overview").status_code == 403
+
+
+def test_each_client_sees_own_research_staff_sees_all_merged(client, conn, monkeypatch):
+    import json as _json
+
+    from tests.test_research import _lot
+
+    _lot(conn)
+    owner = auth.set_password(conn, "owner@mail.kz", "long-enough-password")
+    a = auth.set_password(conn, "client-a", "client-password-1")
+    b = auth.set_password(conn, "client-b", "client-password-1")
+    conn.execute("UPDATE users SET role = 'user', paid_until = now() + interval '30 days' WHERE id IN (%s, %s)", (a, b))
+    conn.execute("UPDATE users SET role = 'admin' WHERE id = %s", (owner,))
+    for uid, urls in ((a, ["https://shop.kz/a", "https://shop.kz/same"]), (b, ["https://shop.kz/b", "https://shop.kz/same/"])):
+        items = [{"name": u, "url": u, "unit_price": 50000, "in_region": True, "fit": "полностью"} for u in urls]
+        conn.execute("""INSERT INTO lot_research (lot_id, user_id, provider, region, status, finished_at, result)
+                        VALUES (90, %s, 'claude_code', 'Актобе', 'done', now(), %s)""", (uid, _json.dumps({"items": items})))
+    conn.commit()
+    client.post("/login", data={"email": "client-a", "password": "client-password-1"}, headers=ORIGIN)
+    page = client.get("/lots/90/research").text
+    assert "shop.kz/a" in page and "shop.kz/b" not in page
+    research_list = client.get("/research").text
+    assert "/lots/90#research" in research_list
+    client.post("/logout", headers=ORIGIN)
+    _login(client)
+    page = client.get("/lots/90/research").text
+    assert "shop.kz/a" in page and "shop.kz/b" in page and page.count('href="https://shop.kz/same') == 2  # фото и название — один товар
+    assert "Все поиски по лоту вместе: 2" in page
+
+
+def test_searches_cannot_be_bought_without_tariff(client, conn):
+    auth.set_password(conn, "+77011112233", "client-password-1")
+    conn.execute("UPDATE users SET role = 'user', phone = email")
+    conn.commit()
+    client.post("/login", data={"email": "87011112233", "password": "client-password-1"}, headers=ORIGIN)
+    response = client.post("/pay/searches", data={"count": "20"}, headers=ORIGIN)
+    assert response.status_code == 402

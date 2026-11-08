@@ -74,10 +74,3 @@ def history(conn: psycopg.Connection, user_id: int, limit: int = 500) -> list[di
     keys = ("at", "delta", "kind", "lot_id", "research_id", "note", "lot_ru", "lot_kz",
             "lot_number", "status", "found")
     return [dict(zip(keys, row)) for row in rows]
-
-
-def has_access(conn: psycopg.Connection, user_id: int) -> bool:
-    """Пользовался ли поиском с ИИ (покупал или получал поиски) — тогда видит результаты."""
-    return conn.execute(
-        "SELECT EXISTS (SELECT 1 FROM search_ledger WHERE user_id = %s AND delta > 0)", (user_id,)
-    ).fetchone()[0]
