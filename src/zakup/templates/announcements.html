@@ -12,19 +12,19 @@
 {% set found %}{{ _("Найдено объявлений:") }} <b>{{ total }}</b>{% if deadline_date %} {{ _("· окончание") }} {{ "" if f.deadline == rule else _("по") ~ " " }}{{ deadline_date.strftime("%d.%m.%Y") }}{% endif %}{% endset %}
 {{ sort_bar(found) }}
 
-<div class="table-wrap"><table class="results">
+<div class="table-wrap" data-view-box><table class="results anns-table">
   <tr><th>№</th><th>{{ _("Наименование объявления") }}</th><th>{{ _("Способ") }}</th><th>{{ _("Начало приема заявок") }}</th><th>{{ _("Окончание приема заявок") }}</th><th>{{ _("Сумма, ₸") }}</th><th>{{ _("Аванс") }}</th><th>{{ _("Статус") }}</th></tr>
   {% for r in rows %}
   <tr>
-    <td class="muted"><b>{{ r[1] or r[0] }}</b><div>{{ _("Лотов:") }} {{ r[2] or "—" }}</div></td>
-    <td style="min-width:260px"><a class="title" href="{{ announcement_url(r[0]) }}">{{ pick(r[3], r[14]) or _("Без названия") }}</a>
+    <td class="muted c-num"><b>{{ r[1] or r[0] }}</b><div>{{ _("Лотов:") }} {{ r[2] or "—" }}</div></td>
+    <td class="c-title" style="min-width:260px"><a class="title" href="{{ announcement_url(r[0]) }}">{{ pick(r[3], r[14]) or _("Без названия") }}</a>
       <div class="muted">{{ _("Организатор:") }} {{ pick(r[4], r[17]) or "—" }}</div></td>
-    <td class="muted">{{ pick(r[12], r[15]) or _(method_names.get(r[5], "")) }}</td>
-    <td>{{ (r[6]|local).strftime("%d.%m.%Y %H:%M") if r[6] else "—" }}</td>
-    <td>{{ (r[7]|local).strftime("%d.%m.%Y %H:%M") if r[7] else "—" }}{% if r[7] %}<div class="muted">{{ time_left(r[7]) }}</div>{% endif %}</td>
-    <td class="num"><b>{{ r[8] | money }}</b></td>
-    <td class="advances">{% for p in r[13] or [] %}{% if p %}<span class="badge {% if p >= 30 %}hot{% endif %}">{{ '%g'|format(p) }}%</span>{% else %}<span class="badge">0%</span>{% endif %}{% endfor %}</td>
-    <td class="muted">{{ pick(r[11], r[16]) or _(status_names.get(r[9], r[9] or "")) }}</td>
+    <td class="muted c-method">{{ pick(r[12], r[15]) or _(method_names.get(r[5], "")) }}</td>
+    <td class="c-start" data-label="{{ _("Начало приема заявок") }}">{{ (r[6]|local).strftime("%d.%m.%Y %H:%M") if r[6] else "—" }}</td>
+    <td class="c-end" data-label="{{ _("Окончание приема заявок") }}">{{ (r[7]|local).strftime("%d.%m.%Y %H:%M") if r[7] else "—" }}{% if r[7] %}<div class="muted">{{ time_left(r[7]) }}</div>{% endif %}</td>
+    <td class="num c-sum" data-label="{{ _("Сумма, ₸") }}"><b>{{ r[8] | money }}</b></td>
+    <td class="advances c-adv" data-label="{{ _("Аванс") }}">{% for p in r[13] or [] %}{% if p %}<span class="badge {% if p >= 30 %}hot{% endif %}">{{ '%g'|format(p) }}%</span>{% else %}<span class="badge">0%</span>{% endif %}{% endfor %}</td>
+    <td class="muted c-status">{{ pick(r[11], r[16]) or _(status_names.get(r[9], r[9] or "")) }}</td>
   </tr>
   {% else %}
   <tr><td colspan="8" class="muted">{{ _("Под фильтр ничего не подходит.") }}</td></tr>

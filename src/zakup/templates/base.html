@@ -3,6 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <title>{% block title %}{{ _("Закупки") }}{% endblock %} · Zakup</title>
 <meta name="description" content="{% block description %}{{ _("Госзакупки Казахстана: поиск объявлений и лотов goszakup.gov.kz, итоги, победители, аналитика рынка.") }}{% endblock %}">
 <link rel="canonical" href="{{ site_url }}{{ request.url.path }}">
@@ -26,18 +29,22 @@
   })();
 </script>
 <style>
-  :root { --bg: #fff; --fg: #1d1d1f; --muted: #6b6b70; --line: #e4e4e7; --accent: #0b6bcb; --ok: #137a43; --bad: #c0392b; --on-accent: #fff; color-scheme: light; }
-  :root[data-theme=dark] { --bg: #151517; --fg: #ececee; --muted: #9a9aa0; --line: #2c2c30; --accent: #5aa7ff; --ok: #6fdc9f; --bad: #ff7b6b; --on-accent: #0b1a2e; color-scheme: dark; }
+  :root { --bg: #fff; --fg: #1d1d1f; --muted: #6b6b70; --line: #e4e4e7; --accent: #c2410c; --ok: #137a43; --bad: #b42318; --on-accent: #fff; color-scheme: light; }
+  :root[data-theme=dark] { --bg: #151517; --fg: #ececee; --muted: #9a9aa0; --line: #2c2c30; --accent: #ff7a1a; --ok: #6fdc9f; --bad: #ff7b6b; --on-accent: #1a0c00; color-scheme: dark; }
   /* Промежуточные темы: светло-бежевая и тёмно-синяя. */
-  :root[data-theme=beige] { --bg: #f7f1dd; --fg: #2b2417; --muted: #6b604a; --line: #e3d8b6; --accent: #0b5cad; --ok: #2c6e33; --bad: #a3312a; --on-accent: #fff; color-scheme: light; }
-  :root[data-theme=navy] { --bg: #142738; --fg: #e8eef5; --muted: #9db0c3; --line: #25425c; --accent: #5cc4ff; --ok: #6fdc9f; --bad: #ff8a80; --on-accent: #0b1a2e; color-scheme: dark; }
+  :root[data-theme=beige] { --bg: #f7f1dd; --fg: #2b2417; --muted: #6b604a; --line: #e3d8b6; --accent: #b43c0b; --ok: #2c6e33; --bad: #a3312a; --on-accent: #fff; color-scheme: light; }
+  :root[data-theme=navy] { --bg: #0e1b2e; --fg: #e8eef5; --muted: #9db0c3; --line: #22385a; --accent: #ff8a3d; --ok: #6fdc9f; --bad: #ff8a80; --on-accent: #0b1a2e; color-scheme: dark; }
   :root[data-contrast=high] { --bg: #fff; --fg: #000; --muted: #1d1d1f; --line: #000; --accent: #0033cc; --ok: #005a1e; --bad: #a00000; --on-accent: #fff; }
   :root[data-contrast=high][data-theme=dark], :root[data-contrast=high][data-theme=navy] { --bg: #000; --fg: #fff; --muted: #f2f2f2; --line: #fff; --accent: #ffd400; --ok: #7dffb0; --bad: #ff8a80; --on-accent: #000; }
   :root[data-contrast=high] a { text-decoration: underline; }
   :root[data-contrast=high] .main-nav a, :root[data-contrast=high] .icon-button { text-decoration: none; }
   :root[data-contrast=high] :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.45 system-ui, sans-serif; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 "Manrope", system-ui, sans-serif; }
+  h1 { font-size: 26px; line-height: 1.25; letter-spacing: -0.01em; font-weight: 700; }
+  h2 { letter-spacing: -0.005em; }
+  button, input, select, textarea { font-family: inherit; }
+  button, .icon-button, input, select { border-radius: 8px; }
   header, main { max-width: 1600px; margin: 0 auto; padding: 12px 24px; }
   header { display: flex; gap: 18px; align-items: center; border-bottom: 1px solid var(--line);
            position: sticky; top: 0; z-index: 50; background: var(--bg); }
@@ -283,7 +290,7 @@
   });
   // Темы по кругу: светлая → бежевая → синяя → тёмная → светлая.
   // Значок кнопки — кружок цвета текущей темы.
-  const THEMES = [["light", "#ffffff", {{ _("Светлая")|tojson }}], ["beige", "#f2ecbc", {{ _("Бежевая")|tojson }}], ["navy", "#142738", {{ _("Синяя")|tojson }}], ["dark", "#151517", {{ _("Тёмная")|tojson }}]];
+  const THEMES = [["light", "#ffffff", {{ _("Светлая")|tojson }}], ["beige", "#f2ecbc", {{ _("Бежевая")|tojson }}], ["navy", "#0e1b2e", {{ _("Синяя")|tojson }}], ["dark", "#151517", {{ _("Тёмная")|tojson }}]];
   for (const button of document.querySelectorAll("[data-theme-toggle]")) {
     const index = () => Math.max(0, THEMES.findIndex(([name]) => name === document.documentElement.dataset.theme));
     const show = () => {

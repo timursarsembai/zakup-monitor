@@ -99,7 +99,27 @@
   .pages { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin: 16px 0; }
   .pages .page { min-width: 34px; padding: 4px 8px; text-align: center; border: 1px solid var(--line); border-radius: 6px; }
   .pages .page.on { background: var(--accent); color: var(--on-accent); border-color: transparent; font-weight: 600; }
-  .sortbar-controls { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+  .sortbar-controls { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; }
+  .view-switch { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .view-switch button { display: inline-flex; align-items: center; gap: 6px; border: 0; border-radius: 0; padding: 5px 10px; color: var(--muted); }
+  .view-switch button[aria-pressed=true] { background: var(--accent); color: var(--on-accent); }
+  .view-switch svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; }
+  /* Плитка: та же таблица, строки — карточки. */
+  [data-view=cards] { overflow: visible; }
+  [data-view=cards] table.results, [data-view=cards] table.results tbody { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; min-width: 0 !important; }
+  [data-view=cards] table.results tbody { grid-column: 1 / -1; }
+  [data-view=cards] table.results tr:first-child:has(th) { display: none; }
+  [data-view=cards] table.results tr { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+  [data-view=cards] table.results td { display: block; border: 0; padding: 0; min-width: 0 !important; text-align: left; }
+  [data-view=cards] table.results td[data-label]::before { content: attr(data-label) " "; display: block; font-size: 12px; color: var(--muted); font-weight: 400; }
+  [data-view=cards] .c-title { order: -2; flex: 1 1 100%; font-size: 16px; }
+  [data-view=cards] .c-title .title { font-weight: 700; }
+  [data-view=cards] .c-num { order: -3; flex: 1 1 100%; font-size: 12px; }
+  [data-view=cards] .c-num div { display: inline; margin-left: 6px; }
+  [data-view=cards] .c-ann { order: -1; flex: 1 1 100%; font-size: 13px; }
+  [data-view=cards] .c-sum b { font-size: 18px; }
+  [data-view=cards] .c-method, [data-view=cards] .c-status { flex: 1 1 100%; font-size: 12px; }
+  [data-view=cards] .c-fav { margin-left: auto; }
   .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 13px; white-space: nowrap; border: 1px solid var(--line); }
   .badge.hot { background: color-mix(in srgb, #1e9e5a 15%, transparent); border-color: transparent; color: var(--ok); font-weight: 600; }
   .badge.sub { background: color-mix(in srgb, var(--accent) 14%, transparent); border-color: transparent; }
@@ -311,6 +331,10 @@
       <select data-param="sort" aria-label="{{ _("Сортировка") }}">
         {% for key, name in sorts.items() %}<option value="{{ key }}" {% if f.sort == key %}selected{% endif %}>{{ _(name) }}</option>{% endfor %}
       </select></label>
+    <div class="view-switch" role="group" aria-label="{{ _("Вид отображения") }}">
+      <button type="button" data-view="table" title="{{ _("Таблица") }}" aria-label="{{ _("Таблица") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18M3 12h18M3 19h18"/></svg><span>{{ _("Таблица") }}</span></button>
+      <button type="button" data-view="cards" title="{{ _("Плитка") }}" aria-label="{{ _("Плитка") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5"/></svg><span>{{ _("Плитка") }}</span></button>
+    </div>
     <label class="muted">{{ _("Показывать по") }}
       <select data-param="per_page" aria-label="{{ _("Сколько строк на странице") }}">
         {% for n in per_page_options %}<option value="{{ n }}" {% if per_page == n %}selected{% endif %}>{{ n }}</option>{% endfor %}
@@ -318,6 +342,24 @@
   </div>
 </div>
 <script>
+  // Вид результатов: таблица (по умолчанию) или плитка-карточки; запоминается в браузере.
+  // Панель стоит над таблицей — ждём, пока страница загрузится целиком.
+  document.addEventListener("DOMContentLoaded", () => {
+    const box = document.querySelector("[data-view-box]");
+    const buttons = document.querySelectorAll(".view-switch [data-view]");
+    if (!box) return;
+    const apply = (view) => {
+      box.dataset.view = view;
+      for (const b of buttons) b.setAttribute("aria-pressed", String(b.dataset.view === view));
+    };
+    let saved = "table";
+    try { saved = localStorage.getItem("zakup-view") || "table"; } catch (e) {}
+    apply(saved);
+    for (const b of buttons) b.addEventListener("click", () => {
+      apply(b.dataset.view);
+      try { localStorage.setItem("zakup-view", b.dataset.view); } catch (e) {}
+    });
+  });
   for (const select of document.querySelectorAll(".sortbar [data-param]")) {
     select.addEventListener("change", () => {
       const url = new URL(location.pathname + "?" + {{ query|tojson }}, location.origin);

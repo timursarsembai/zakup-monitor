@@ -76,7 +76,7 @@
 <section class="panel wide">
   <h2>{{ _("Тема") }}</h2>
   <div class="themes" role="radiogroup" aria-label="{{ _("Тема") }}">
-    {% for key, label, bg, fg, accent in [("light", "Светлая", "#ffffff", "#1d1d1f", "#0b5cad"), ("beige", "Бежевая", "#f7f1dd", "#2b2417", "#0b5cad"), ("navy", "Синяя", "#142738", "#e8eef5", "#5cc4ff"), ("dark", "Тёмная", "#151517", "#ececee", "#5aa7ff")] %}
+    {% for key, label, bg, fg, accent in [("light", "Светлая", "#ffffff", "#1d1d1f", "#c2410c"), ("beige", "Бежевая", "#f7f1dd", "#2b2417", "#b43c0b"), ("navy", "Синяя", "#0e1b2e", "#e8eef5", "#ff8a3d"), ("dark", "Тёмная", "#151517", "#ececee", "#ff7a1a")] %}
     <label class="theme-card"><input type="radio" name="theme" value="{{ key }}" data-theme-choice>
       <span class="preview" style="background: {{ bg }}; color: {{ fg }}"><b>Aa</b><i style="background: {{ accent }}"></i><i style="background: {{ fg }}; opacity: .25"></i></span>
       <span>{{ _(label) }}</span></label>
