@@ -6,6 +6,7 @@
 доля несостоявшихся и кто чаще выигрывает.
 """
 
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
@@ -176,3 +177,22 @@ def by_group(conn: psycopg.Connection, column: str, days: int, now: datetime, li
             WHERE r.outcome = 'winner' AND {DATE} >= %(since)s
             GROUP BY g HAVING count(*) >= 10 ORDER BY 2 DESC LIMIT %(limit)s""",
         {"since": now - timedelta(days=days), "limit": limit}).fetchall()
+
+
+# Сводка меняется медленно (итоги приходят пачками), а считается по тысячам строк:
+# держим её 5 минут на каждый фильтр. Не больше SUMMARY_KEYS разных фильтров в памяти.
+SUMMARY_TTL = 300
+SUMMARY_KEYS = 500
+_summaries: dict[str, tuple[float, dict[str, Any]]] = {}
+
+
+def summary_cached(conn: psycopg.Connection, f: ResultFilters, now: datetime) -> dict[str, Any]:
+    key = repr(f.query(sort="date"))  # сортировка на сводку не влияет
+    hit = _summaries.get(key)
+    if hit and hit[0] > time.monotonic():
+        return hit[1]
+    data = summary(conn, f, now)
+    if len(_summaries) >= SUMMARY_KEYS:
+        _summaries.clear()
+    _summaries[key] = (time.monotonic() + SUMMARY_TTL, data)
+    return data

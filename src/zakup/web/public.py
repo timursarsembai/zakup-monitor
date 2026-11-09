@@ -437,7 +437,7 @@ def results_page(request: Request, user: Viewer, page: int = 1):
     now = datetime.now(UTC)
     with core.pool.connection() as conn:
         rows, total = outcomes.search(conn, f, page, now)
-        summary = outcomes.summary(conn, f, now)
+        summary = outcomes.summary_cached(conn, f, now)
     pages = min((total + outcomes.PAGE_SIZE - 1) // outcomes.PAGE_SIZE, outcomes.MAX_PAGE)
     return templates.TemplateResponse(request, "results.html", {
         "f": f, "rows": rows, "total": total, "page": page, "pages": pages, "s": summary,
