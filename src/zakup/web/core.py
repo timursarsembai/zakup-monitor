@@ -151,6 +151,8 @@ def _org_link(bin_: str | None, name: str | None) -> Markup:
 
 
 templates.env.globals["org_link"] = _org_link
+# Адрес страницы на текущем языке: казахская версия — с ?lang=kk (как canonical).
+templates.env.globals["lang_url"] = lambda path: SITE_URL + path + ("?lang=kk" if i18n.language() == "kk" else "")
 # У ИП и физлиц — ИИН, у организаций — БИН.
 templates.env.globals["id_label"] = lambda number: i18n.gettext("ИИН" if subjects.is_iin(number) else "БИН")
 # Подборки: название категории КПВЭД и региона на языке интерфейса.

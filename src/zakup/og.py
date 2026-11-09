@@ -100,7 +100,7 @@ def _canvas() -> tuple[Image.Image, ImageDraw.ImageDraw]:
 
 def _png(image: Image.Image) -> bytes:
     out = io.BytesIO()
-    image.save(out, "PNG", optimize=True)
+    image.save(out, "PNG")  # optimize — втрое дольше ради 3% размера
     return out.getvalue()
 
 
@@ -153,7 +153,8 @@ def cached(key: tuple, render) -> bytes:
         if key in _cache:
             _cache.move_to_end(key)
             return _cache[key]
-    if not _drawing.acquire(timeout=5):
+    # Не ждать долго: ожидающие запросы держали бы потоки сайта.
+    if not _drawing.acquire(timeout=0.3):
         raise Busy
     try:
         data = render()

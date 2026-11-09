@@ -3,7 +3,7 @@
 {% macro supplier_rows(rows, total, here, paid, shown) %}
 <ul class="sup-list">
   {% for r in rows %}
-  <li{% if not paid and loop.index > shown %} hidden{% endif %}>
+  <li>
     <a href="/org/{{ r.bin }}">{{ pick(r.name_ru, r.name_kz) }}</a>
     {% set parts = [] %}
     {% if here %}{% set __ = parts.append(_("побед здесь:") ~ " " ~ (r.here_wins or 0) ~ ", " ~ _("заявок:") ~ " " ~ (r.here_offers or 0)) %}{% endif %}
@@ -53,7 +53,6 @@
   .sup-list { list-style: none; margin: 0; padding: 0; }
   .sup-list li { padding: 7px 0; border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
   .sup-list li:first-child { border-top: 0; }
-  .sup-list li[hidden] { display: none; }
   .sup-list .sup-contacts { margin-left: auto; white-space: nowrap; font-size: 14px; }
   .link-button { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font: inherit; }
 {% endmacro %}

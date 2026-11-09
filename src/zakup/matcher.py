@@ -117,13 +117,19 @@ def seed(conn: psycopg.Connection, sub_id: int, current: Filters, scope: str,
         {**params, "sub_id": sub_id},
     ).fetchall()
     if rows:
-        nearest = conn.execute(
-            """SELECT l.id FROM lots l LEFT JOIN announcements a ON a.id = l.trd_buy_id
+        ordered = conn.execute(
+            """SELECT l.id, l.trd_buy_id FROM lots l LEFT JOIN announcements a ON a.id = l.trd_buy_id
                WHERE l.id = ANY(%s)
-               ORDER BY a.end_date NULLS LAST, l.trd_buy_id, l.prepayment DESC NULLS LAST, l.id
-               LIMIT %s""", ([r[0] for r in rows], PAGE_LOTS_LIMIT)).fetchall()
+               ORDER BY a.end_date NULLS LAST, l.trd_buy_id, l.prepayment DESC NULLS LAST, l.id""",
+            ([r[0] for r in rows],)).fetchall()
+        # Объявление целиком: последнее не обрезаем на середине.
+        nearest = []
+        for lot_id, announcement in ordered:
+            if len(nearest) >= PAGE_LOTS_LIMIT and announcement != ordered[len(nearest) - 1][1]:
+                break
+            nearest.append(lot_id)
         conn.execute("INSERT INTO match_pages (subscription_id, lot_ids, total) VALUES (%s, %s, %s)",
-                     (sub_id, [r[0] for r in nearest], len(rows)))
+                     (sub_id, nearest, len(rows)))
 
 
 class PendingLot(NamedTuple):

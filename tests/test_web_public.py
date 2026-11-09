@@ -364,6 +364,8 @@ def test_organization_pages_for_customer_and_supplier(client, conn):
     assert client.get("/org/abc").status_code == 404
     lot = client.get("/lots/9001").text
     assert f'href="/org/{customer}"' in lot and f'href="/org/{person}">ИП Иванов</a>' in lot
+    from zakup import orgs
+    orgs.refresh_directory(conn)
     index = client.get("/sitemap.xml").text
     assert "sitemap-o-0.xml" in index
     part = client.get("/sitemap-o-0.xml").text
@@ -471,3 +473,36 @@ def test_portal_card_phone_without_prefix_and_individual_form(conn):
     assert [p["tel"] for p in card["phones"]] == ["+77011752191", "+77075060312"]
     assert card["phones"][1]["wa"] and card["kopf"] == "ИП" and card["id_label"] == "ИИН"
     assert card["addresses"] == ["г.Шу, дом 62"]
+
+
+def test_switch_to_russian_from_kazakh_url(client):
+    switched = client.get("/lang/ru", headers={"referer": "https://testserver/regions?lang=kk&x=1"},
+                          follow_redirects=False)
+    assert switched.headers["location"] == "/regions?x=1"
+
+
+def test_unpaid_see_only_five_suppliers_in_html(client, conn):
+    from zakup import orgs
+    bidders = [(f"0605400{n:05d}", f"ТОО Участник {n}") for n in range(8)]
+    _tender(conn, 811, code="310912.100.000001", kato="551010000", end="2099-01-01 09:00:00")
+    _tender(conn, 812, code="310912.100.000001", kato="551010000", end="2026-10-30 09:00:00",
+            winner=bidders[0], offers=bidders[1:])
+    conn.commit()
+    orgs.refresh_directory(conn)
+    block = client.get("/lots/8110").text.split('id="suppliers"', 1)[1].split("</section>", 1)[0]
+    assert block.count("<li>") == 5 and block.count("ТОО Участник") == 5 and "Показать всех (8)" in block
+
+
+def test_lot_level_customer_has_page_and_description_without_amount(client, conn):
+    from zakup import orgs
+    db.upsert_announcement(conn, {"id": 820, "name_ru": "Совместная закупка", "end_date": "2099-01-01 09:00:00"})
+    details.save(conn, {"id": 820, "nameRu": "Совместная закупка", "endDate": "2099-01-01 09:00:00",
+                        "Lots": [{"id": 8201, "trdBuyId": 820, "lotNumber": "S-1", "nameRu": "Мел",
+                                  "customerBin": "990740007777", "customerNameRu": "ГУ Школа №7"}]})
+    conn.execute("UPDATE lots SET customer_bin = '990740007777', customer_name_ru = 'ГУ Школа №7' WHERE id = 8201")
+    conn.commit()
+    orgs.refresh_directory(conn)
+    page = client.get("/org/990740007777")
+    assert page.status_code == 200 and "ГУ Школа №7" in page.text and "/a/820" in page.text
+    description = client.get("/lots/8201").text.split('name="description" content="', 1)[1].split('"', 1)[0]
+    assert ". ," not in description and description.count(". .") == 0 and "приём заявок до" in description

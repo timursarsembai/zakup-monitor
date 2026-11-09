@@ -264,7 +264,7 @@
 {# Телефон: «Ещё» в нижней панели — шторка с остальными разделами, по 4 в ряд. #}
 {% macro tile(href, label, icon, on=false, paid_only=false) %}<a href="{{ href }}" class="more-tile {{ 'on' if on }}"{% if paid_only and not request.state.paid %} data-paid{% endif %}><svg viewBox="0 0 24 24" aria-hidden="true">{{ icon | safe }}</svg><span>{{ label }}</span></a>{% endmacro %}
 <div class="more-backdrop" data-more-backdrop hidden></div>
-<div class="more-sheet" id="more-sheet" data-more-sheet hidden role="dialog" aria-label="{{ _("Ещё разделы") }}">
+<div class="more-sheet" id="more-sheet" data-more-sheet hidden role="dialog" aria-modal="true" aria-label="{{ _("Ещё разделы") }}">
   <div class="more-grip" aria-hidden="true"></div>
   <div class="more-grid">
     {{ tile("/subscriptions", _("nav:Подписки"), '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/>', path == "/subscriptions", true) }}

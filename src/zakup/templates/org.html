@@ -5,7 +5,7 @@
 {% block description %}{{ name }}, {{ id_label(o.bin) }} {{ o.bin }}.{% if o.buyer.total %} {{ _("Госзакупки:") }} {{ o.buyer.total }} {{ _("объявл. на") }} {{ o.buyer.amount | money }} ₸{% if o.buyer.open %}, {{ _("сейчас открыто:") }} {{ o.buyer.open }}{% endif %}.{% endif %}{% if o.seller.wins %} {{ _("Побед в закупках:") }} {{ o.seller.wins }} {{ _("на") }} {{ o.seller.amount | money }} ₸.{% endif %}{% if o.card and (o.card.phones or o.card.addresses) %} {{ _("Телефоны и адрес.") }}{% endif %}{% endblock %}
 {% block structured %}
 {% set org = {"@context": "https://schema.org", "@type": "Organization", "name": name, "taxID": o.bin,
-              "url": site_url ~ "/org/" ~ o.bin} %}
+              "url": lang_url("/org/" ~ o.bin)} %}
 {% if o.card %}
   {% if o.card.phones %}{% set __ = org.update({"telephone": o.card.phones[0].number}) %}{% endif %}
   {% if o.card.email %}{% set __ = org.update({"email": o.card.email}) %}{% endif %}
@@ -15,8 +15,8 @@
 <script type="application/ld+json">{{ [
   org,
   {"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [
-    {"@type": "ListItem", "position": 1, "name": _("Закупки"), "item": site_url ~ "/announcements"},
-    {"@type": "ListItem", "position": 2, "name": name, "item": site_url ~ "/org/" ~ o.bin}]}
+    {"@type": "ListItem", "position": 1, "name": _("Организации"), "item": lang_url("/orgs")},
+    {"@type": "ListItem", "position": 2, "name": name, "item": lang_url("/org/" ~ o.bin)}]}
 ] | tojson }}</script>
 {% endblock %}
 {% block style %}
@@ -32,7 +32,7 @@
   .chips-row a { padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px; font-size: 14px; }
 {% endblock %}
 {% block main %}
-<p class="crumbs muted"><a href="/announcements">{{ _("Закупки") }}</a> {{ _("→ организация") }}</p>
+<p class="crumbs muted"><a href="/orgs">{{ _("Организации") }}</a> {{ _("→ организация") }}</p>
 <div class="org-head">
   <h1>{{ name }}</h1>
   {% set full = pick(o.card.full_name_ru, o.card.full_name_kz) if o.card else none %}

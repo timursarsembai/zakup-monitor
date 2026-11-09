@@ -122,8 +122,8 @@
       </div>
     </div>
     {% if r.outcome == "winner" %}
-    <p style="margin:10px 0 0"><b>{{ org_link(r.winner_bin, r.winner_name) }}</b> <span class="muted">{{ _("БИН") }} {{ r.winner_bin }}</span>{% if r.winner_total is not none %} — <b>{{ r.winner_total | money }} ₸</b>{% if lot.amount %} <span class="muted">(−{{ '%.1f'|format((1 - (r.winner_total|float) / lot.amount) * 100) }}{{ _("% от плана)") }}</span>{% endif %}{% endif %}</p>
-    {% if r.second_name %}<p class="muted" style="margin:4px 0 0">{{ _("Второе место:") }} {{ org_link(r.second_bin, r.second_name) }}{{ _(", БИН") }} {{ r.second_bin }}</p>{% endif %}
+    <p style="margin:10px 0 0"><b>{{ org_link(r.winner_bin, r.winner_name) }}</b> <span class="muted">{{ id_label(r.winner_bin) }} {{ r.winner_bin }}</span>{% if r.winner_total is not none %} — <b>{{ r.winner_total | money }} ₸</b>{% if lot.amount %} <span class="muted">(−{{ '%.1f'|format((1 - (r.winner_total|float) / lot.amount) * 100) }}{{ _("% от плана)") }}</span>{% endif %}{% endif %}</p>
+    {% if r.second_name %}<p class="muted" style="margin:4px 0 0">{{ _("Второе место:") }} {{ org_link(r.second_bin, r.second_name) }}, {{ id_label(r.second_bin) }} {{ r.second_bin }}</p>{% endif %}
     {% else %}
     <p style="margin:10px 0 0">{{ _("Закупка не состоялась") }}{% if r.reason %} {{ _("в связи с") }} {{ r.reason }}{% endif %}.</p>
     {% endif %}

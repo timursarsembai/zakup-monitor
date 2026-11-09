@@ -110,7 +110,10 @@ LOT_REGION = "left((coalesce(nullif(l.kato, '{}'), a.kato))[1], 2)"
 LIST_LIMIT = 50
 TTL = 3600
 
+PAGE_TTL = 900
+
 _counts: dict[str, Any] = {"at": 0.0, "rows": {}}
+_pages: dict[tuple, tuple[float, dict[str, Any]]] = {}
 _lock = threading.Lock()
 
 
@@ -120,23 +123,26 @@ def division_name(code: str | None, lang: str = "ru") -> str | None:
 
 
 def open_filter(division: str | None = None, region: str | None = None) -> Filters:
-    """Фильтр открытых лотов — как в поиске для гостей, плюс категория и регион."""
+    """Фильтр открытых лотов — как в поиске для гостей, плюс категория и регион (для ссылки
+    «все в поиске»: там лот попадает по любому своему коду и месту поставки)."""
     return replace(Filters.public(), enstru=division or "", regions=[region] if region else [], sort="end")
 
 
 def counts(conn: psycopg.Connection, now: datetime | None = None) -> dict[tuple[str, str], tuple[int, float]]:
-    """Открытые лоты по (категория, регион): число и сумма. Пересчёт раз в час."""
+    """Открытые лоты по (категория, регион): число и сумма. Пересчёт раз в час. Запрос — вне
+    блокировки: пересчитывает один поток, остальные пока получают прежние цифры."""
     with _lock:
-        if _counts["at"] > time.monotonic():
+        if _counts["at"] > time.monotonic() and _counts["rows"]:
             return _counts["rows"]
-        where, params = open_filter().where(now or datetime.now(UTC), "lots")
-        rows = conn.execute(
-            f"""SELECT coalesce({LOT_DIVISION}, ''), coalesce({LOT_REGION}, ''), count(*), coalesce(sum(l.amount), 0)
-                FROM lots l, announcements a WHERE {where} GROUP BY 1, 2""", params).fetchall()
-        _counts["rows"] = {(d, r): (n, float(s)) for d, r, n, s in rows}
-        _counts["at"] = time.monotonic() + TTL
-        return _counts["rows"]
-
+        _counts["at"] = time.monotonic() + 60  # пересчёт взят; не удастся — повтор через минуту
+    where, params = open_filter().where(now or datetime.now(UTC), "lots")
+    rows = conn.execute(
+        f"""SELECT coalesce({LOT_DIVISION}, ''), coalesce({LOT_REGION}, ''), count(*), coalesce(sum(l.amount), 0)
+            FROM lots l, announcements a WHERE {where} GROUP BY 1, 2""", params).fetchall()
+    result = {(d, r): (n, float(s)) for d, r, n, s in rows}
+    with _lock:
+        _counts.update(rows=result, at=time.monotonic() + TTL)
+    return result
 
 def totals(conn: psycopg.Connection, by: str) -> dict[str, tuple[int, float]]:
     """Сводка по категориям (by="division") или регионам (by="region")."""
@@ -150,27 +156,38 @@ def totals(conn: psycopg.Connection, by: str) -> dict[str, tuple[int, float]]:
     return {key: (n, amount) for key, (n, amount) in out.items()}
 
 
+def _scope(division: str | None, region: str | None) -> tuple[str, dict[str, str]]:
+    """Лот в подборке — по первому коду ЕНС ТРУ и первому месту поставки, как в counts()."""
+    scope, params = [], {}
+    if division:
+        scope.append(f"{LOT_DIVISION} = %(division)s")
+        params["division"] = division
+    if region:
+        scope.append(f"{LOT_REGION} = %(region)s")
+        params["region"] = region
+    return " AND ".join(scope) or "true", params
+
+
 def page(conn: psycopg.Connection, division: str | None, region: str | None,
          now: datetime | None = None) -> dict[str, Any]:
-    """Открытые лоты подборки и кто в ней покупает и выигрывает (за всё время)."""
+    """Открытые лоты подборки и кто в ней покупает и выигрывает (за всё время). Держится
+    в памяти PAGE_TTL: «кто покупает» — за всё время и считается сотни миллисекунд."""
+    key = (division, region)
+    cached = _pages.get(key)
+    if cached and cached[0] > time.monotonic():
+        return cached[1]
     now = now or datetime.now(UTC)
-    current = open_filter(division, region)
-    where, params = current.where(now, "lots")
-    total, amount = conn.execute(
-        f"SELECT count(*), coalesce(sum(l.amount), 0) FROM lots l, announcements a WHERE {where}", params).fetchone()
+    n, amount = 0, 0.0
+    for (d, r), (count, total) in counts(conn, now).items():
+        if (not division or d == division) and (not region or r == region):
+            n, amount = n + count, amount + total
+    condition, scope_params = _scope(division, region)
+    where, params = open_filter().where(now, "lots")
     lots = conn.execute(
         f"""SELECT l.id, l.name_ru, l.name_kz, l.amount, l.customer_bin,
                    coalesce(a.customer_name_ru, l.customer_name_ru), a.end_date, l.lot_number
-            FROM lots l, announcements a WHERE {where} ORDER BY {current.order_by('lots')}
-            LIMIT {LIST_LIMIT}""", params).fetchall()
-    scope, scope_params = [], {}
-    if division:
-        scope.append(f"{LOT_DIVISION} = %(division)s")
-        scope_params["division"] = division
-    if region:
-        scope.append(f"{LOT_REGION} = %(region)s")
-        scope_params["region"] = region
-    condition = " AND ".join(scope) or "true"
+            FROM lots l, announcements a WHERE {where} AND {condition}
+            ORDER BY a.end_date, l.id LIMIT {LIST_LIMIT}""", {**params, **scope_params}).fetchall()
     customers = conn.execute(
         f"""SELECT l.customer_bin, max(coalesce(a.customer_name_ru, l.customer_name_ru)), count(*),
                    coalesce(sum(l.amount), 0)
@@ -182,9 +199,13 @@ def page(conn: psycopg.Connection, division: str | None, region: str | None,
             FROM lot_results r JOIN lots l ON l.id = r.lot_id JOIN announcements a ON a.id = l.trd_buy_id
             WHERE {condition} AND r.outcome = 'winner'
             GROUP BY 1 ORDER BY 3 DESC, 4 DESC LIMIT 10""", scope_params).fetchall()
-    return {"total": total, "amount": amount, "lots": lots, "customers": customers, "winners": winners,
-            "search": "/lots?" + current.to_query("lots")}
-
+    data = {"total": n, "amount": amount, "lots": lots, "customers": customers, "winners": winners,
+            "search": "/lots?" + open_filter(division, region).to_query("lots")}
+    with _lock:
+        if len(_pages) > 2000:  # пар «категория × регион» около тысячи
+            _pages.clear()
+        _pages[key] = (time.monotonic() + PAGE_TTL, data)
+    return data
 
 def sitemap_paths(conn: psycopg.Connection) -> list[str]:
     """Хабы, категории, регионы и пары «категория в регионе», где есть открытые лоты."""

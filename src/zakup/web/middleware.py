@@ -32,7 +32,8 @@ async def language(request: Request, call_next):
         chosen = None
     i18n.set_language(chosen or request.cookies.get(i18n.COOKIE))
     response = await call_next(request)
-    if chosen and request.cookies.get(i18n.COOKIE, "ru") != chosen:
+    # Картинки-превью кэшируются публично — без cookie в ответе.
+    if chosen and request.cookies.get(i18n.COOKIE, "ru") != chosen and not request.url.path.startswith("/og/"):
         response.set_cookie(i18n.COOKIE, chosen, max_age=365 * 86400, secure=True, samesite="lax")
     return response
 

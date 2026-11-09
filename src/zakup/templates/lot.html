@@ -3,14 +3,14 @@
 {% from "_share.html" import share_buttons, share_styles with context %}
 {% from "_suppliers.html" import suppliers_block, suppliers_styles with context %}
 {% block title %}{{ loc(lot) }} — {{ _("лот") }} {{ lot.lotNumber or lot.id }}{% endblock %}
-{% block description %}{{ _("Госзакупка") }}: {{ loc(lot) }}. {{ _("Заказчик") }}: {{ loc(lot, "customerNameRu") or "—" }}. {% if lot.get("amount") is not none %}{{ _("Сумма") }} {{ lot.amount | money }} ₸{% endif %}{% if end %}, {{ _("приём заявок до") }} {{ (end|local).strftime("%d.%m.%Y %H:%M") }}{% endif %}.{% endblock %}
+{% block description %}{% set facts = [] %}{% if lot.get("amount") is not none %}{% set __ = facts.append(_("Сумма") ~ " " ~ (lot.amount | money) ~ " ₸") %}{% endif %}{% if end %}{% set __ = facts.append(_("приём заявок до") ~ " " ~ (end|local).strftime("%d.%m.%Y %H:%M")) %}{% endif %}{{ _("Госзакупка") }}: {{ loc(lot) }}. {{ _("Заказчик") }}: {{ loc(lot, "customerNameRu") or "—" }}.{% if facts %} {{ facts | join(", ") }}.{% endif %}{% endblock %}
 {% block og_image %}{{ site_url }}/og/lot/{{ lot.id }}.png{% endblock %}
 {% block structured %}
-{% set lot_url = site_url ~ "/lots/" ~ lot.id %}
+{% set lot_url = lang_url("/lots/" ~ lot.id) %}
 <script type="application/ld+json">{{ [
   {"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [
-    {"@type": "ListItem", "position": 1, "name": _("Закупки"), "item": site_url ~ "/announcements"},
-    {"@type": "ListItem", "position": 2, "name": _("Объявление №") ~ " " ~ (a.numberAnno or a.id), "item": site_url ~ "/a/" ~ a.id},
+    {"@type": "ListItem", "position": 1, "name": _("Закупки"), "item": lang_url("/announcements")},
+    {"@type": "ListItem", "position": 2, "name": _("Объявление №") ~ " " ~ (a.numberAnno or a.id), "item": lang_url("/a/" ~ a.id)},
     {"@type": "ListItem", "position": 3, "name": loc(lot), "item": lot_url}]},
   structured_demand(name=loc(lot), description=loc(lot, "descriptionRu"), url=lot_url, end=end,
                     amount=lot.get("amount"), count=lot.get("count"), unit=pick(info[lot.id].unit_name, info[lot.id].unit_name_kz),

@@ -328,3 +328,18 @@ def test_notification_language_follows_settings(conn):
     conn.execute("INSERT INTO telegram_groups (chat_id, title, notify_lang) VALUES ('-1', 'g', 'kk')")
     conn.execute("UPDATE subscriptions SET chat_id = '-1'")
     assert "Мүгедектер" in text() and "Среди организаций" not in text()
+
+
+def test_first_batch_limit_keeps_whole_announcement(conn, monkeypatch):
+    monkeypatch.setattr(matcher, "PAGE_LOTS_LIMIT", 1)
+    _announcement(conn, 1, lots=[{"id": 11, "amount": 500000, "prepayment": 30, "kato": ["751410000"], "name": "А"},
+                                 {"id": 12, "amount": 500000, "prepayment": 30, "kato": ["751410000"], "name": "Б"}])
+    _announcement(conn, 2, ends_in_days=5)
+    user = _paid_user(conn)
+    sub = conn.execute(
+        """INSERT INTO subscriptions (user_id, name, query, kind, filters)
+           VALUES (%s, 'Все', '', 'announcements', %s) RETURNING id""",
+        (user, db.Jsonb(Filters(deadline="").to_json()))).fetchone()[0]
+    matcher.seed(conn, sub, Filters(deadline=""), "lots", NOW)
+    lot_ids, total = conn.execute("SELECT lot_ids, total FROM match_pages").fetchone()
+    assert sorted(lot_ids) == [11, 12] and total == 3

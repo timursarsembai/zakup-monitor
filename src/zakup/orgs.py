@@ -7,6 +7,8 @@
 """
 
 import re
+import threading
+import time
 from datetime import UTC, datetime
 from typing import Any
 
@@ -30,20 +32,31 @@ def _rows(conn: psycopg.Connection, sql: str, params: tuple | dict) -> list[dict
 
 
 def _name(conn: psycopg.Connection, bin_: str) -> tuple[str | None, str | None]:
+    """Название: из карточки портала, иначе как заказчика (лот, объявление), победителя или
+    участника. org_name_ru в объявлениях портал не заполняет — его не берём."""
     row = conn.execute("SELECT name_ru, name_kz FROM subjects WHERE bin = %s AND name_ru IS NOT NULL",
                        (bin_,)).fetchone()
     if row:
         return row[0], row[1]
-    row = conn.execute(
-        """SELECT CASE WHEN customer_bin = %(b)s THEN customer_name_ru ELSE org_name_ru END
-           FROM announcements WHERE customer_bin = %(b)s OR org_bin = %(b)s LIMIT 1""",
-        {"b": bin_}).fetchone() or conn.execute(
-        "SELECT winner_name FROM lot_results WHERE winner_bin = %s LIMIT 1", (bin_,)).fetchone() or conn.execute(
+    for sql in (
+        "SELECT customer_name_ru FROM lots WHERE customer_bin = %(b)s AND customer_name_ru IS NOT NULL LIMIT 1",
+        "SELECT customer_name_ru FROM announcements WHERE customer_bin = %(b)s AND customer_name_ru IS NOT NULL LIMIT 1",
+        "SELECT winner_name FROM lot_results WHERE winner_bin = %(b)s AND winner_name IS NOT NULL LIMIT 1",
         # Только подавал заявки — имя из списка заявок.
         """SELECT o->>'name' FROM lot_results r, jsonb_array_elements(r.offers) o
            WHERE r.offers @> jsonb_build_array(jsonb_build_object('bin', %(b)s::text)) AND o->>'bin' = %(b)s
-           LIMIT 1""", {"b": bin_}).fetchone()
-    return (row[0], None) if row else (None, None)
+             AND o->>'name' IS NOT NULL LIMIT 1""",
+    ):
+        row = conn.execute(sql, {"b": bin_}).fetchone()
+        if row and row[0]:
+            return row[0], None
+    return None, None
+
+
+# Объявления организации как заказчика или организатора, в том числе где она — заказчик
+# отдельного лота (совместные закупки). Так же считает справочник (org_directory).
+_MINE = """(SELECT id FROM announcements WHERE customer_bin = %(b)s OR org_bin = %(b)s
+            UNION SELECT trd_buy_id FROM lots WHERE customer_bin = %(b)s)"""
 
 
 def profile(conn: psycopg.Connection, bin_: str, now: datetime | None = None) -> dict[str, Any] | None:
@@ -58,21 +71,21 @@ def profile(conn: psycopg.Connection, bin_: str, now: datetime | None = None) ->
     buyer = _rows(conn, """
         SELECT count(*) AS total, coalesce(sum(total_sum), 0) AS amount,
                count(*) FILTER (WHERE end_date > %(now)s) AS open
-        FROM announcements WHERE customer_bin = %(b)s OR org_bin = %(b)s""", params)[0]
+        FROM announcements WHERE id IN """ + _MINE, params)[0]
     open_list = _rows(conn, """
         SELECT id, number_anno, name_ru, name_kz, total_sum, end_date, count_lots
-        FROM announcements WHERE (customer_bin = %(b)s OR org_bin = %(b)s) AND end_date > %(now)s
+        FROM announcements WHERE id IN """ + _MINE + """ AND end_date > %(now)s
         ORDER BY end_date LIMIT %(limit)s""", params) if buyer["open"] else []
     past_list = _rows(conn, """
         SELECT id, number_anno, name_ru, name_kz, total_sum, end_date, count_lots
-        FROM announcements WHERE (customer_bin = %(b)s OR org_bin = %(b)s) AND end_date <= %(now)s
+        FROM announcements WHERE id IN """ + _MINE + """ AND end_date <= %(now)s
         ORDER BY end_date DESC LIMIT %(limit)s""", params) if buyer["total"] > buyer["open"] else []
     their_winners = _rows(conn, """
-        SELECT r.winner_bin AS bin, r.winner_name AS name, count(*) AS wins,
+        SELECT r.winner_bin AS bin, max(r.winner_name) AS name, count(*) AS wins,
                sum(r.winner_total) AS amount
         FROM lot_results r JOIN lots l ON l.id = r.lot_id
         WHERE l.customer_bin = %(b)s AND r.outcome = 'winner'
-        GROUP BY 1, 2 ORDER BY 3 DESC, 4 DESC NULLS LAST LIMIT 10""", params) if buyer["total"] else []
+        GROUP BY 1 ORDER BY 3 DESC, 4 DESC NULLS LAST LIMIT 10""", params) if buyer["total"] else []
     discount = conn.execute(
         """SELECT avg(1 - r.winner_total / l.amount) FROM lot_results r JOIN lots l ON l.id = r.lot_id
            WHERE l.customer_bin = %s AND r.outcome = 'winner' AND l.amount > 0
@@ -121,13 +134,21 @@ def profile(conn: psycopg.Connection, bin_: str, now: datetime | None = None) ->
     }
 
 
+SITEMAP_TTL = 3600
+_sitemap: dict[str, Any] = {"at": 0.0, "bins": []}
+_sitemap_lock = threading.Lock()
+
+
 def sitemap_bins(conn: psycopg.Connection) -> list[str]:
-    """Организации для sitemap: заказчики, организаторы и победители (БИН и ИИН)."""
-    return [row[0] for row in conn.execute(
-        r"""SELECT b FROM (SELECT customer_bin AS b FROM announcements
-                           UNION SELECT org_bin FROM announcements
-                           UNION SELECT winner_bin FROM lot_results WHERE outcome = 'winner') x
-            WHERE b ~ '^\d{12}$' ORDER BY b""")]
+    """Организации для sitemap — те же, что в справочнике (с названием, иначе страница 404).
+    Раз в час."""
+    if _sitemap["at"] > time.monotonic():
+        return _sitemap["bins"]
+    bins = [row[0] for row in conn.execute(
+        "SELECT bin FROM org_directory WHERE name_ru IS NOT NULL ORDER BY bin")]
+    with _sitemap_lock:
+        _sitemap.update(at=time.monotonic() + SITEMAP_TTL, bins=bins)
+    return bins
 
 
 # --- Справочник /orgs: все организации с фильтрами (из org_directory) -----------------
@@ -146,6 +167,7 @@ MAX_PAGE = 200
 
 def refresh_directory(conn: psycopg.Connection) -> None:
     """Справочник и «кто что поставлял» — с новыми закупками, итогами и карточками."""
+    conn.execute("SET LOCAL work_mem = '64MB'")  # сортировки пересчёта — в памяти, не на диске
     conn.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY org_directory")
     conn.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY supplier_activity")
     conn.commit()

@@ -8,7 +8,7 @@ import time
 from datetime import UTC, datetime, timedelta
 from importlib.resources import files
 from typing import Any
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, parse_qsl, urlencode, urlsplit
 
 import httpx
 import psycopg
@@ -75,7 +75,9 @@ def switch_language(request: Request, user: Viewer, code: str):
             conn.execute("UPDATE users SET ui_lang = %s WHERE id = %s", (code, user))
     back = request.headers.get("referer") or "/"
     parts = urlsplit(back)
-    target = _safe_next(parts.path + (f"?{parts.query}" if parts.query else ""))
+    # ?lang=kk в адресе пересилил бы выбранный язык — убираем его.
+    query = urlencode([(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True) if k != i18n.QUERY])
+    target = _safe_next(parts.path + (f"?{query}" if query else ""))
     if parts.netloc and parts.netloc != request.headers.get("host"):
         target = "/"
     response = RedirectResponse(target, status_code=303)
@@ -540,7 +542,7 @@ def lot_page(request: Request, user: Viewer, lot_id: int, background: Background
         job, done = _research_view(request, conn, user, lot_id) if user and request.state.paid else (None, None)
         lot_info = research.lot_context(conn, lot_id)
         provider = ai_config.provider(conn)
-        rivals = suppliers.for_lot(conn, lot_id, sup or None)
+        rivals = suppliers.for_lot(conn, lot_id, sup or None, paid=bool(request.state.paid))
     if user:
         _audit(request, user, "view_lot", f"/lots/{lot_id}")
     context.update(lot=lot, others=[other for other in context["lots"] if other["id"] != lot_id],

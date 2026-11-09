@@ -93,13 +93,25 @@
         requestAnimationFrame(() => requestAnimationFrame(() => {
           sheet.classList.add("open");
           backdrop.classList.add("open");
+          sheet.querySelector(".more-tile")?.focus({ preventScroll: true });
         }));
-      } else {
+      } else if (!sheet.hidden) {
         sheet.classList.remove("open");
         backdrop.classList.remove("open");
         timer = setTimeout(() => { sheet.hidden = backdrop.hidden = true; }, 260);
+        if (sheet.contains(document.activeElement)) more.focus({ preventScroll: true });
       }
     };
+    // Нажали плитку — шторку закрыть (в том числе перед окном «платная функция»).
+    sheet.addEventListener("click", (e) => { if (e.target.closest("a.more-tile")) set(false); }, true);
+    // Tab не уходит за шторку, пока она открыта.
+    sheet.addEventListener("keydown", (e) => {
+      if (e.key !== "Tab") return;
+      const items = [...sheet.querySelectorAll("a, button")];
+      const first = items[0], last = items[items.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    });
     more.addEventListener("click", () => set(more.getAttribute("aria-expanded") !== "true"));
     backdrop.addEventListener("click", () => set(false));
     document.addEventListener("keydown", (e) => { if (e.key === "Escape") set(false); });
