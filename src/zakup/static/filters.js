@@ -84,7 +84,13 @@
       const freshBar = doc.querySelector("[data-chipbar]");
       if (!fresh) throw new Error("no results");
       document.querySelector("[data-results]").replaceWith(fresh);
-      if (chipbar && freshBar) chipbar.innerHTML = freshBar.innerHTML;
+      if (chipbar && freshBar) {
+        // Панель перерисована — прокрутка условий остаётся там, где была.
+        const scrolled = chipbar.querySelector(".chip-scroll")?.scrollLeft || 0;
+        chipbar.innerHTML = freshBar.innerHTML;
+        const strip = chipbar.querySelector(".chip-scroll");
+        if (strip) strip.scrollLeft = scrolled;
+      }
       const freshForm = doc.getElementById("filters");
       if (freshForm) syncForm(freshForm);
       history.pushState({ soft: true }, "", url);
