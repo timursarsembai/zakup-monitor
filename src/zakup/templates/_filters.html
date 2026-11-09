@@ -88,6 +88,7 @@
     .filters-panel.single[data-mode=subscribe] .single-actions, .filters-panel.single[data-mode=sort] .single-actions { display: none; }
     .single-actions button { min-height: 50px; border-radius: 12px; font-size: 17px; }
     .single-actions .primary { background: var(--accent); color: var(--on-accent); border-color: transparent; font-weight: 600; }
+    .filters-panel.single .sort-pick .fl { display: none; }
     .filters-panel.single .sort-pick.shown { display: flex; flex-direction: column; gap: 4px; padding-bottom: 16px; }
     .sort-option { text-align: left; padding: 14px 12px; border: 0; border-radius: 10px; background: none; font-size: 17px; color: var(--fg); }
     .sort-option.on { color: var(--accent); font-weight: 600; background: color-mix(in srgb, var(--accent) 10%, transparent); }
@@ -219,7 +220,7 @@
     {% for key, label in chip_names %}
     {% if key == "open_now" %}<button type="button" class="chip {{ 'set' if f.end_from == 'today' }}" data-chip-toggle="open_now">{{ label }}</button>
     {% elif key == "today_only" %}<button type="button" class="chip {{ 'set' if f.published_from == 'today' }}" data-chip-toggle="today_only">{{ label }}</button>
-    {% elif key != "number" or lots or f.number %}{% set value = chip_values[key] %}<button type="button" class="chip {{ 'set' if value }}" data-chip-open="{{ key }}">{{ value or label }}<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>{% endif %}
+    {% elif key != "number" or lots or f.number %}{% set value = chip_values[key] %}<button type="button" class="chip {{ 'set' if value }}" data-chip-open="{{ key }}" data-title="{{ label }}">{{ value or label }}<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>{% endif %}
     {% endfor %}
   </div>
 </div>

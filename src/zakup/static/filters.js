@@ -24,14 +24,14 @@
     sheet.classList.add("single");
     sheet.dataset.mode = mode;
     title.textContent = label;
-    for (const group of sheet.querySelectorAll(`[data-chip="${mode}"]`)) {
-      group.classList.add("shown");
-      for (const list of group.querySelectorAll("details.multi")) list.open = true;
-    }
+    for (const group of sheet.querySelectorAll(`[data-chip="${mode}"]`)) group.classList.add("shown");
+    // Списки (регионы, категории…) — сразу раскрыты; после этого же клика, иначе его
+    // закроет обработчик «клик мимо списка».
+    setTimeout(() => { for (const list of sheet.querySelectorAll(".shown details.multi")) list.open = true; });
     if (backdrop) backdrop.hidden = false;
   };
   for (const chip of document.querySelectorAll("[data-chip-open]")) {
-    chip.addEventListener("click", () => openSheet(chip.dataset.chipOpen, chip.getAttribute("aria-label") || chip.textContent.trim()));
+    chip.addEventListener("click", () => openSheet(chip.dataset.chipOpen, chip.dataset.title || chip.getAttribute("aria-label") || chip.textContent.trim()));
   }
   backdrop?.addEventListener("click", closeSheet);
   // «Только открытые», «Опубликованы сегодня» — переключаются сразу.
