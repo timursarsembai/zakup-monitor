@@ -202,6 +202,15 @@
       sheet.requestSubmit();
     }
   });
+  // Колесо мыши над строкой условий — прокрутка вбок (полосы прокрутки нет).
+  chipbar?.addEventListener("wheel", (event) => {
+    const strip = event.target.closest(".chip-scroll");
+    if (!strip || Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+    const max = strip.scrollWidth - strip.clientWidth;
+    if (max <= 0) return;
+    event.preventDefault();
+    strip.scrollLeft = Math.max(0, Math.min(max, strip.scrollLeft + event.deltaY));
+  }, { passive: false });
   backdrop?.addEventListener("click", () => closeSheet());
   // Окно изменило размер — выпадающая шторка стоит не там: закрыть.
   addEventListener("resize", () => { if (desktopChips() && sheet.classList.contains("open")) closeSheet(); });

@@ -68,7 +68,8 @@
     :root[data-chips=desktop] .chipbar { display: flex; gap: 8px; align-items: center; position: sticky; top: 0; z-index: 30;
                margin: -12px -24px 14px; padding: 10px 24px; background: var(--bg); border-bottom: 1px solid var(--line); }
     :root[data-chips=desktop] .chip-fixed { display: flex; gap: 6px; flex: none; padding-right: 8px; border-right: 1px solid var(--line); }
-    :root[data-chips=desktop] .chip-scroll { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: thin; padding-bottom: 2px; }
+    :root[data-chips=desktop] .chip-scroll { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+    :root[data-chips=desktop] .chip-scroll::-webkit-scrollbar { display: none; }
     :root[data-chips=desktop] .chip, :root[data-chips=desktop] .chip-icon { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap;
                border: 1px solid var(--line); background: color-mix(in srgb, var(--fg) 4%, var(--bg)); color: var(--fg); font-size: 14px; cursor: pointer; }
     :root[data-chips=desktop] .chip { padding: 6px 12px; border-radius: 999px; }
