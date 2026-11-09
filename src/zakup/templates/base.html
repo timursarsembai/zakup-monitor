@@ -175,7 +175,8 @@
     .side-head { order: 2; }
     .main-nav a, header .tool-row, header .tools .tool-row button, header .searches {
              display: flex; align-items: center; gap: 12px; padding: 8px 10px; border: 0; border-radius: 8px;
-             color: var(--fg); background: none; font-size: 14px; font-weight: 400; white-space: nowrap; width: 100%; text-align: left; }
+             color: var(--fg); background: none; font-size: 14px; font-weight: 400; white-space: nowrap; width: 100%; text-align: left;
+             justify-content: flex-start; }
     .main-nav a:hover, header .tool-row:hover, header .searches:hover { background: color-mix(in srgb, var(--fg) 6%, transparent); }
     .main-nav a.on, header .tool-row.on, header .searches.on { color: var(--accent); font-weight: 600;
              background: color-mix(in srgb, var(--accent) 12%, transparent); }
@@ -196,9 +197,13 @@
     .side-collapse { order: 6; display: flex; align-items: center; gap: 12px; padding: 8px 10px; border: 0; background: none; color: var(--muted); font-size: 13px; }
     .side-collapse svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; }
     /* Узкая панель: только значки, подписи — во всплывающей подсказке (title). */
-    :root[data-side=mini] .brand img:not(.brand-mark), :root[data-side=mini] .main-nav span, :root[data-side=mini] header .tool-label,
-    :root[data-side=mini] .main-nav::before, :root[data-side=mini] .side-head, :root[data-side=mini] header .who { display: none; }
-    :root[data-side=mini] .brand-mark { display: block; }
+    .brand img.brand-mark { display: none !important; }
+    :root[data-side=mini] .brand img:not(.brand-mark) { display: none !important; }
+    :root[data-side=mini] .brand img.brand-mark { display: block !important; }
+    :root[data-side=mini] .main-nav span, :root[data-side=mini] header .tool-label,
+    :root[data-side=mini] .main-nav::before, :root[data-side=mini] .side-head, :root[data-side=mini] header .who,
+    :root[data-side=mini] header .logout > a.primary-link { display: none; }
+    :root[data-side=mini] header .logout > a.icon-button:not(.searches) { padding: 8px 2px; font-size: 12px; }
     :root[data-side=mini] .side-view { flex-direction: column; }
     :root[data-side=mini] .side-collapse svg { transform: rotate(180deg); }
     :root[data-side=mini] header .searches { font-size: 12px; padding: 8px 4px; }
