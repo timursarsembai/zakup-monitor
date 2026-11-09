@@ -135,13 +135,12 @@ def progress(conn: psycopg.Connection, bounds: dict) -> dict[str, int | None]:
 FRESH_PERIODS = (("24 hours", "За 24 часа"), ("7 days", "За 7 дней"), ("30 days", "За 30 дней"))
 
 
-def fresh(conn: psycopg.Connection) -> list[dict]:
+def fresh(conn: psycopg.Connection, total: dict[str, int]) -> list[dict]:
     """Новое по дате публикации: сколько и примерный объём — по среднему размеру записи
     таблицы (точный подсчёт байтов строк читал бы всю таблицу)."""
-    per_row = dict(conn.execute(
-        """SELECT c.relname, pg_total_relation_size(c.oid) / greatest(c.reltuples, 1)
-           FROM pg_class c WHERE c.relname IN ('announcements', 'lots')
-             AND c.relnamespace = 'public'::regnamespace""").fetchall())
+    per_row = {table: size / max(1, total[table]) for table, size in conn.execute(
+        """SELECT relname, pg_total_relation_size(oid) FROM pg_class
+           WHERE relname IN ('announcements', 'lots') AND relnamespace = 'public'::regnamespace""")}
     rows = []
     for interval, label in FRESH_PERIODS:
         announcements, customers, lots = conn.execute(
@@ -167,13 +166,14 @@ def overview(conn: psycopg.Connection) -> dict:
            ORDER BY pg_total_relation_size(c.oid) DESC LIMIT 6""").fetchall()
     pending_details = conn.execute(
         "SELECT count(*) FROM announcements WHERE detail IS NULL").fetchone()[0]
+    now_counts = counts(conn)
     runs = conn.execute(
         """SELECT id, since, status, created_at, started_at, finished_at, bounds, before, after, error,
                   upto, note
            FROM backfill_runs ORDER BY id DESC LIMIT 20""").fetchall()
     last_run = runs[0] if runs else None
     return {
-        "first": first, "last": last, "size": size, "tables": tables, "counts": counts(conn),
-        "pending_details": pending_details, "runs": runs, "fresh": fresh(conn), "last_run": last_run,
+        "first": first, "last": last, "size": size, "tables": tables, "counts": now_counts,
+        "pending_details": pending_details, "runs": runs, "fresh": fresh(conn, now_counts), "last_run": last_run,
         "progress": progress(conn, last_run[6]) if last_run and last_run[2] in ACTIVE else None,
     }
