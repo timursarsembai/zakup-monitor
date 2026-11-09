@@ -483,3 +483,13 @@ def test_lot_customer_bin_includes_organizer(conn):
     _announcement(conn, 1)
     conn.execute("UPDATE announcements SET org_bin = '999999999999' WHERE id = 1")
     assert _lot_ids(conn, Filters(advance_min=0, customer="999999999999")) == [10]
+
+
+def test_result_date_follows_announcement_itogi_date(conn):
+    from zakup import details
+
+    _announcement(conn, 1)
+    conn.execute("INSERT INTO lot_results (lot_id, outcome) VALUES (10, 'failed')")
+    details.save(conn, {"id": 1, "itogiDatePublic": "2026-10-15 10:00:00", "Lots": []})
+    date = conn.execute("SELECT result_date FROM lot_results WHERE lot_id = 10").fetchone()[0]
+    assert date.astimezone(PORTAL_TZ).strftime("%Y-%m-%d %H:%M") == "2026-10-15 10:00"

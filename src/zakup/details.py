@@ -149,6 +149,12 @@ def save(conn: psycopg.Connection, item: dict[str, Any]) -> None:
             lot,
         )
     codes(conn, [int(item["id"])])
+    if fields.get("itogi_date"):
+        # Дата итогов у разобранных итогов лотов (миграция 0021) — по подробностям объявления.
+        conn.execute(
+            """UPDATE lot_results r SET result_date = %(date)s FROM lots l
+               WHERE l.id = r.lot_id AND l.trd_buy_id = %(id)s AND r.result_date IS DISTINCT FROM %(date)s""",
+            {"date": fields["itogi_date"], "id": int(item["id"])})
 
 
 def codes(conn: psycopg.Connection, announcement_ids: list[int]) -> None:

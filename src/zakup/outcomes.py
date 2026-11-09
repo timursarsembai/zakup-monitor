@@ -23,8 +23,8 @@ PAGE_SIZE = 50
 MAX_PAGE = 200
 
 SOURCE = "lot_results r JOIN lots l ON l.id = r.lot_id JOIN announcements a ON a.id = l.trd_buy_id"
-# Дата итогов: из подробностей объявления, иначе — когда разобрали протокол.
-DATE = "coalesce(a.itogi_date, r.parsed_at)"
+# Дата итогов (миграция 0021): из подробностей объявления, иначе — когда разобрали протокол.
+DATE = "r.result_date"
 # Снижение от плановой суммы лота — только там, где оно осмысленно. Цена победы меньше 5%
 # плановой — почти всегда цена за единицу в протоколе (топливо — за литр), а не за лот.
 DISCOUNT = """(CASE WHEN r.outcome = 'winner' AND l.amount > 0 AND r.winner_total BETWEEN l.amount * 0.05 AND l.amount

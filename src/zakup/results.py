@@ -161,17 +161,21 @@ def _save_protocol(conn: psycopg.Connection, detail: dict, url: str) -> int:
         winner = next((o for o in result["offers"] if o["bin"] == result.get("winner_bin")), None)
         conn.execute(
             """INSERT INTO lot_results (lot_id, outcome, reason, winner_bin, winner_name,
-                                        winner_total, second_bin, second_name, offers, protocol_url)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                        winner_total, second_bin, second_name, offers, protocol_url,
+                                        result_date)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                       -- Дата итогов (миграция 0021): из подробностей объявления, иначе — сейчас.
+                       coalesce((SELECT a.itogi_date FROM lots l JOIN announcements a ON a.id = l.trd_buy_id
+                                 WHERE l.id = %s), now()))
                ON CONFLICT (lot_id) DO UPDATE SET outcome = excluded.outcome,
                    reason = excluded.reason, winner_bin = excluded.winner_bin,
                    winner_name = excluded.winner_name, winner_total = excluded.winner_total,
                    second_bin = excluded.second_bin, second_name = excluded.second_name,
                    offers = excluded.offers, protocol_url = excluded.protocol_url,
-                   parsed_at = now()""",
+                   parsed_at = now(), result_date = coalesce(lot_results.result_date, excluded.result_date)""",
             (lot_id, result["outcome"], result.get("reason"), result.get("winner_bin"),
              result.get("winner_name"), winner and winner["total"], result.get("second_bin"),
-             result.get("second_name"), Jsonb(result["offers"]), url),
+             result.get("second_name"), Jsonb(result["offers"]), url, lot_id),
         )
         saved += 1
     return saved
