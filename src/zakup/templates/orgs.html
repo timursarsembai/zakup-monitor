@@ -16,7 +16,12 @@
   .view-switch button { display: inline-flex; align-items: center; gap: 6px; border: 0; border-radius: 0; padding: 5px 10px; color: var(--muted); background: none; }
   .view-switch button[aria-pressed=true] { background: var(--accent); color: var(--on-accent); }
   .view-switch svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; }
-  @media (max-width: 760px) { .org-panel .desk-sort { display: none; } }
+  @media (max-width: 760px) {
+    .org-panel .desk-sort { display: none; }
+    /* Панель условий — сразу под шапкой; заголовок и пояснение — под ней, мельче. */
+    .dir-head h1 { font-size: 20px; margin: 4px 0 4px; }
+    .dir-head p { font-size: 13px; margin: 0 0 6px; }
+  }
   /* Плитка: строки — карточки, подписи столбцов — над значениями. */
   [data-rview=cards] { overflow: visible; }
   [data-rview=cards] table.dir-table, [data-rview=cards] table.dir-table tbody { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; min-width: 0 !important; }
@@ -29,9 +34,6 @@
 {% endblock %}
 {% macro link() %}{% set params = dict(f) %}{% set __ = params.update({"page": 1}) %}{% set __ = params.update(kwargs) %}/orgs/{{ kind }}?{{ params | urlencode }}{% endmacro %}
 {% block main %}
-<h1>{{ heading }}</h1>
-<p class="muted">{{ _("По данным goszakup.gov.kz. Цифры — за всё время, что Tenderim собирает закупки.") }} <a href="/orgs/{{ 'suppliers' if buyers else 'customers' }}">{{ _("Поставщики →") if buyers else _("Заказчики →") }}</a></p>
-
 {# Телефон: панель как в поиске закупок — сортировка, весь фильтр; условия по одному. #}
 {% set chips = [("q", _("Название, БИН"), ("«" ~ f.q[:16] ~ "»") if f.q else ""),
                 ("form", _("Форма"), _(forms[f.form]) if f.form else ""),
@@ -46,6 +48,10 @@
   </div>
 </div>
 <div class="filter-backdrop" data-filter-backdrop hidden></div>
+<div class="dir-head">
+<h1>{{ heading }}</h1>
+<p class="muted">{{ _("По данным goszakup.gov.kz. Цифры — за всё время, что Tenderim собирает закупки.") }} <a href="/orgs/{{ 'suppliers' if buyers else 'customers' }}">{{ _("Поставщики →") if buyers else _("Заказчики →") }}</a></p>
+</div>
 
 <form method="get" action="/orgs/{{ kind }}" class="filters-panel org-panel" id="filters" aria-label="{{ _("Фильтр") }}">
   <div class="sheet-head"><b>{{ _("Фильтр") }}</b><button type="button" data-filter-close aria-label="{{ _("Закрыть") }}">✕</button></div>
