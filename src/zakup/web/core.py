@@ -60,7 +60,10 @@ PAGE_SIZE = 50
 SESSION_COOKIE = "zakup_session"
 
 
-pool = ConnectionPool(os.environ.get("DATABASE_URL", ""), min_size=1, max_size=5, open=False)
+# check — соединение проверяется перед выдачей: после перезапуска базы (выкладка) старые
+# соединения отбрасываются, а не дают ошибку на первом запросе.
+pool = ConnectionPool(os.environ.get("DATABASE_URL", ""), min_size=1, max_size=5, open=False,
+                      check=ConnectionPool.check_connection)
 
 
 templates = Jinja2Templates(directory=str(files("zakup").joinpath("templates")))

@@ -464,10 +464,15 @@ def lots_search(request: Request, user: Viewer, page: int = 1, per_page: int = P
                        jsonb_array_length(r.offers), r.reason,
                        l.name_kz, a.name_kz,
                        l.extra_desc_kz, l.unit_name_kz
-                FROM lots l JOIN announcements a ON true
+                -- Сначала номера нужной страницы, потом остальные поля только для них: иначе
+                -- итоги (offers) и тексты считались у всех подходящих лотов до сортировки.
+                FROM (SELECT l.id, row_number() OVER (ORDER BY {current.order_by("lots")}) AS n
+                      FROM lots l, announcements a WHERE {where}
+                      ORDER BY {current.order_by("lots")}
+                      LIMIT {per_page} OFFSET {(page - 1) * per_page}) shown
+                JOIN lots l ON l.id = shown.id JOIN announcements a ON a.id = l.trd_buy_id
                 LEFT JOIN lot_results r ON r.lot_id = l.id
-                WHERE {where} ORDER BY {current.order_by("lots")}
-                LIMIT {per_page} OFFSET {(page - 1) * per_page}""",
+                ORDER BY shown.n""",
             params,
         ).fetchall()
         total = conn.execute(

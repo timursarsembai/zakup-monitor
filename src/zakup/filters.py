@@ -356,8 +356,11 @@ class Filters:
             params["enstru"] = _like(self.enstru) + "%"
         if self.categories:
             # Лот — по любому своему коду ЕНС ТРУ; объявление — если такой есть у его лота.
-            codes = "l.enstru" if lots else "(SELECT array_agg(e) FROM lots l2, unnest(l2.enstru) e WHERE l2.trd_buy_id = a.id)"
-            clauses.append(f"EXISTS (SELECT 1 FROM unnest({codes}) c WHERE left(c, 2) = ANY(%(categories)s))")
+            if lots:
+                clauses.append("EXISTS (SELECT 1 FROM unnest(l.enstru) c WHERE left(c, 2) = ANY(%(categories)s))")
+            else:
+                clauses.append("""EXISTS (SELECT 1 FROM lots l2, unnest(l2.enstru) c
+                                          WHERE l2.trd_buy_id = a.id AND left(c, 2) = ANY(%(categories)s))""")
             params["categories"] = self.categories
         if self.customer:
             lot_part = " OR l.customer_{} {} %(customer)s" if lots else ""
