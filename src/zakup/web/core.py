@@ -87,6 +87,8 @@ def _money(value) -> str:
 
 
 templates.env.filters["money"] = _money
+# Целые числа с пробелами по тысячам: 12 345.
+templates.env.filters["count"] = lambda value: f"{int(value or 0):,}".replace(",", " ")
 
 
 templates.env.filters["local"] = lambda v: v.astimezone(PORTAL_TZ) if v else v

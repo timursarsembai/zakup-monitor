@@ -14,12 +14,12 @@
   <div class="table-wrap"><table>
     <tr><th></th><th class="num">{{ _("Сейчас") }}</th>{% if run and run[7] %}<th class="num">{{ _("До догрузки") }}</th><th class="num">{{ _("Прибавилось") }}</th>{% endif %}</tr>
     {% for key, label in labels.items() %}
-    <tr><td>{{ label }}</td><td class="num">{{ d.counts[key] | money }}</td>
-      {% if run and run[7] %}{% set was = run[7].get(key, 0) %}<td class="num">{{ was | money }}</td><td class="num">{% if d.counts[key] > was %}+{{ (d.counts[key] - was) | money }}{% else %}0{% endif %}</td>{% endif %}</tr>
+    <tr><td>{{ label }}</td><td class="num">{{ d.counts[key] | count }}</td>
+      {% if run and run[7] %}{% set was = run[7].get(key, 0) %}<td class="num">{{ was | count }}</td><td class="num">{% if d.counts[key] > was %}+{{ (d.counts[key] - was) | count }}{% else %}0{% endif %}</td>{% endif %}</tr>
     {% endfor %}
-    {% if run and run[7] and run[7].get("bytes") %}<tr><td>{{ _("Размер базы, МБ") }}</td><td class="num">{{ (d.counts.bytes / 1048576) | round | int | money }}</td><td class="num">{{ (run[7].bytes / 1048576) | round | int | money }}</td><td class="num">+{{ ((d.counts.bytes - run[7].bytes) / 1048576) | round | int | money }}</td></tr>{% endif %}
+    {% if run and run[7] and run[7].get("bytes") %}<tr><td>{{ _("Размер базы, МБ") }}</td><td class="num">{{ (d.counts.bytes / 1048576) | round | int | count }}</td><td class="num">{{ (run[7].bytes / 1048576) | round | int | count }}</td><td class="num">+{{ ((d.counts.bytes - run[7].bytes) / 1048576) | round | int | count }}</td></tr>{% endif %}
   </table></div>
-  <p class="muted note">{{ _("Заказчики и поставщики пересчитываются каждые 15 минут. Подробности (лоты, итоги) догружаются после объявлений; без подробностей сейчас:") }} {{ d.pending_details | money }}.</p>
+  <p class="muted note">{{ _("Заказчики и поставщики пересчитываются каждые 15 минут. Подробности (лоты, итоги) догружаются после объявлений; без подробностей сейчас:") }} {{ d.pending_details | count }}.</p>
 </section>
 
 <section class="panel wide">
@@ -28,7 +28,7 @@
   <div class="table-wrap"><table>
     <tr><th></th><th class="num">{{ _("Объявления") }}</th><th class="num">{{ _("Лоты") }}</th><th class="num">{{ _("Заказчики") }}</th><th class="num">{{ _("Объём, МБ") }}</th></tr>
     {% for p in d.fresh %}
-    <tr><td>{{ _(p.label) }}</td><td class="num">{{ p.announcements | money }}</td><td class="num">{{ p.lots | money }}</td><td class="num">{{ p.customers | money }}</td><td class="num">≈ {{ p.mb | money }}</td></tr>
+    <tr><td>{{ _(p.label) }}</td><td class="num">{{ p.announcements | count }}</td><td class="num">{{ p.lots | count }}</td><td class="num">{{ p.customers | count }}</td><td class="num">≈ {{ p.mb | count }}</td></tr>
     {% endfor %}
   </table></div>
 </section>
@@ -58,7 +58,7 @@
       <td>{{ ((r[4] or r[3]) | local).strftime("%d.%m.%Y %H:%M") }}</td>
       <td>{{ (r[5] | local).strftime("%d.%m.%Y %H:%M") if r[5] else "—" }}</td>
       {% set now_counts = r[8] or (d.counts if r[2] == "running" else none) %}
-      <td>{% if r[7] and now_counts %}{% for key in ("announcements", "lots", "customers", "suppliers") %}{{ labels[key] | lower }} +{{ ((now_counts[key] or 0) - (r[7][key] or 0)) | money }}{{ ", " if not loop.last }}{% endfor %}{% if r[7].get("bytes") and now_counts.get("bytes") %}, {{ _("база") }} +{{ ((now_counts.bytes - r[7].bytes) / 1048576) | round | int | money }} {{ _("МБ") }}{% endif %}{% else %}—{% endif %}</td></tr>
+      <td>{% if r[7] and now_counts %}{% for key in ("announcements", "lots", "customers", "suppliers") %}{{ labels[key] | lower }} +{{ ((now_counts[key] or 0) - (r[7][key] or 0)) | count }}{{ ", " if not loop.last }}{% endfor %}{% if r[7].get("bytes") and now_counts.get("bytes") %}, {{ _("база") }} +{{ ((now_counts.bytes - r[7].bytes) / 1048576) | round | int | count }} {{ _("МБ") }}{% endif %}{% else %}—{% endif %}</td></tr>
     {% endfor %}
   </table></div>
   {% endif %}
