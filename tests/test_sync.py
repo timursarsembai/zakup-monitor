@@ -128,3 +128,24 @@ def test_history_run_from_queue_to_done(conn, fake_client):
     assert history.stop(conn)
     assert history.step(conn, client, max_pages=10) == "idle"
     assert conn.execute("SELECT count(*) FROM announcements").fetchone()[0] == 16
+
+
+def test_open_announcement_without_lots_is_refetched_soon(conn):
+    from zakup import details
+
+    asked = []
+
+    class Portal:
+        def graphql(self, query):
+            asked.append(query)
+            return {"TrdBuy": []}
+
+    db.upsert_announcement(conn, {"id": 5, "name_ru": "Реагенты", "end_date": "2099-01-01 09:00:00"})
+    conn.execute("""UPDATE announcements SET detail = '{"nameKz": "x"}',
+                    details_fetched_at = now() - interval '20 minutes' WHERE id = 5""")
+    details.refresh(conn, Portal(), 10)
+    assert len(asked) == 1  # лотов нет — перечитали, не дожидаясь суток
+    db.upsert_lot(conn, {"id": 50, "trd_buy_id": 5, "name_ru": "Реагент"})
+    conn.execute("UPDATE announcements SET details_fetched_at = now() - interval '20 minutes' WHERE id = 5")
+    details.refresh(conn, Portal(), 10)
+    assert len(asked) == 1  # с лотами — как обычно, раз в сутки

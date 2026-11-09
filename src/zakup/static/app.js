@@ -236,7 +236,7 @@
     const EYE_OFF = '<path d="M3 3l18 18M10.6 5.1A10.8 10.8 0 0 1 12 5c6.4 0 10 7 10 7a17.6 17.6 0 0 1-3.2 4.1M6.6 6.6A17.4 17.4 0 0 0 2 12s3.6 7 10 7a10 10 0 0 0 5.4-1.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>';
     for (const input of document.querySelectorAll('input[type="password"]')) {
       const wrap = document.createElement("span");
-      wrap.className = "pw-wrap";
+      wrap.className = "pass-wrap";
       input.replaceWith(wrap);
       wrap.append(input);
       const button = document.createElement("button");

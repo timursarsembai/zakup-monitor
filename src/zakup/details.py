@@ -169,7 +169,11 @@ def refresh(conn: psycopg.Connection, client: Client, limit: int) -> int:
                  AND (details_fetched_at IS NULL OR detail IS NULL
                       OR NOT detail ? 'nameKz'
                       OR last_update_date > details_update_date
-                      OR details_fetched_at < now() - interval '1 day')
+                      OR details_fetched_at < now() - interval '1 day'
+                      -- Сразу после публикации портал бывает отдаёт объявление ещё без лотов:
+                      -- такие перечитываем на каждом круге сборщика (раз в 2 минуты).
+                      OR (details_fetched_at < now() - interval '1 minute'
+                          AND NOT EXISTS (SELECT 1 FROM lots l WHERE l.trd_buy_id = announcements.id)))
                ORDER BY details_fetched_at NULLS FIRST, end_date
                LIMIT %s""",
             (limit,),

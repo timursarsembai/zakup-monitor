@@ -112,8 +112,9 @@
   .a11y-row button { min-width: 40px; font-size: 18px; }
   a { color: var(--accent); text-decoration: none; }
   /* Поле пароля с кнопкой «показать» (app.js). */
-  .pw-wrap { position: relative; display: block; }
-  .pw-wrap > input { width: 100%; padding-right: 44px !important; box-sizing: border-box; }
+  /* span: сброс правил страниц для span в полях (.field span в настройках). */
+  .pass-wrap { position: relative; display: block; padding: 0; margin: 0; font-size: inherit; color: inherit; }
+  .pass-wrap > input { display: block; width: 100%; padding-right: 44px !important; box-sizing: border-box; }
   .pw-eye { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); display: inline-flex; align-items: center;
             justify-content: center; width: 36px; height: 36px; padding: 0; border: 0; background: none; color: var(--muted); cursor: pointer; }
   .pw-eye:hover { color: var(--fg); }
