@@ -5,13 +5,14 @@
   {% for r in rows %}
   <li{% if not paid and loop.index > shown %} hidden{% endif %}>
     <a href="/org/{{ r.bin }}">{{ pick(r.name_ru, r.name_kz) }}</a>
-    <span class="muted">
-      {%- if here %} · {{ _("побед здесь:") }} {{ r.here_wins or 0 }}, {{ _("заявок:") }} {{ r.here_offers or 0 }}{% endif -%}
-      {{ " · " }}{{ _("всего побед:") }} {{ r.wins or 0 }}, {{ _("заявок:") }} {{ r.offers or 0 }}
-      {%- if r.last_at %} · {{ _("последняя закупка") }} {{ (r.last_at|local).strftime("%d.%m.%Y") }}{% endif -%}
-      {%- if paid and r.discount is not none %} · {{ _("снижает цену в среднем на") }} {{ '%.1f'|format(r.discount * 100) }}%{% endif -%}
-      {%- if not here and r.regions %} · {{ r.regions | map("region_name_filter") | select | join(", ") }}{% endif -%}
-    </span>
+    {% set parts = [] %}
+    {% if here %}{% set __ = parts.append(_("побед здесь:") ~ " " ~ (r.here_wins or 0) ~ ", " ~ _("заявок:") ~ " " ~ (r.here_offers or 0)) %}{% endif %}
+    {% set __ = parts.append(_("всего побед:") ~ " " ~ (r.wins or 0) ~ ", " ~ _("заявок:") ~ " " ~ (r.offers or 0)) %}
+    {% if r.last_at %}{% set __ = parts.append(_("последняя закупка") ~ " " ~ (r.last_at|local).strftime("%d.%m.%Y")) %}{% endif %}
+    {% if paid and r.discount is not none %}{% set __ = parts.append(_("снижает цену в среднем на") ~ " " ~ '%.1f'|format(r.discount * 100) ~ "%") %}{% endif %}
+    {% if not here and r.regions %}{% set names = r.regions | map("region_name_filter") | select | list %}
+      {% set __ = parts.append(names[:3] | join(", ") ~ (" " ~ _("и ещё") ~ " " ~ (names|length - 3) if names|length > 3 else "")) %}{% endif %}
+    <span class="muted">{{ parts | join(" · ") }}</span>
     <a class="sup-contacts" href="/org/{{ r.bin }}">{{ _("Контакты →") }}</a>
   </li>
   {% endfor %}
@@ -52,6 +53,7 @@
   .sup-list { list-style: none; margin: 0; padding: 0; }
   .sup-list li { padding: 7px 0; border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
   .sup-list li:first-child { border-top: 0; }
+  .sup-list li[hidden] { display: none; }
   .sup-list .sup-contacts { margin-left: auto; white-space: nowrap; font-size: 14px; }
   .link-button { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font: inherit; }
 {% endmacro %}

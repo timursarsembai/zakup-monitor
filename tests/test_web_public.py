@@ -439,6 +439,7 @@ def test_lot_page_shows_competitors_and_suppliers(client, conn):
     assert 'href="/org/050540002222"' in here and 'href="/org/651114400549"' in here
     assert 'href="/org/060640003333"' in rest and "г. Алматы" in rest
     assert "снижает цену" not in page  # без тарифа — без процентов
+    assert "<span class=\"muted\"> ·" not in page and "· ·" not in page
     # Точный уровень — только диваны.
     exact = client.get("/lots/8010?sup=code").text.split("Конкуренты и поставщики", 1)[1]
     assert "060640003333" not in exact.split("</section>", 1)[0]

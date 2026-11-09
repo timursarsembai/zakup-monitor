@@ -173,9 +173,9 @@
     .nav-more { display: inline-flex; flex: 1 1 0; min-width: 0; flex-direction: column; align-items: center; gap: 3px; font-size: 11px; line-height: 1.15; color: var(--muted); padding: 2px 1px; background: none; border: 0; }
     .nav-more svg { width: 24px; height: 24px; fill: currentColor; stroke: none; }
     .nav-more.on, .nav-more[aria-expanded=true] { color: var(--accent); font-weight: 600; }
-    .more-backdrop:not([hidden]) { display: block; position: fixed; inset: 0; z-index: 38; background: rgb(0 0 0 / 45%); opacity: 0; transition: opacity .22s; }
+    .more-backdrop:not([hidden]) { display: block; position: fixed; inset: 0 0 calc(58px + env(safe-area-inset-bottom)) 0; z-index: 46; background: rgb(0 0 0 / 45%); opacity: 0; transition: opacity .22s; }
     .more-backdrop.open { opacity: 1; }
-    .more-sheet:not([hidden]) { display: block; position: fixed; left: 0; right: 0; bottom: calc(58px + env(safe-area-inset-bottom)); z-index: 39;
+    .more-sheet:not([hidden]) { display: block; position: fixed; left: 0; right: 0; bottom: calc(58px + env(safe-area-inset-bottom)); z-index: 47;
       background: var(--bg); border-top: 1px solid var(--line); border-radius: 18px 18px 0 0; padding: 8px 10px 14px;
       box-shadow: 0 -10px 30px rgb(0 0 0 / 25%); transform: translateY(100%); transition: transform .26s cubic-bezier(.2, .8, .2, 1); max-height: 70vh; overflow-y: auto; }
     .more-sheet.open { transform: translateY(0); }
