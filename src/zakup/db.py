@@ -207,6 +207,14 @@ def upsert_lot(conn: psycopg.Connection, item: dict[str, Any], overwrite: bool =
             Jsonb(item),
         ),
     )
+    # Новый лот — сразу со списками кодов для фильтров (миграция 0019): место поставки —
+    # объявления, пока подробности не дали своё.
+    conn.execute(
+        """UPDATE lots l SET regions = codes2(coalesce(nullif(l.kato, '{}'),
+                                (SELECT a.kato FROM announcements a WHERE a.id = l.trd_buy_id))),
+                             divisions = codes2(l.enstru)
+           WHERE l.id = %s AND l.regions IS NULL""",
+        (int(item["id"]),))
 
 
 UPSERT = {"announcements": upsert_announcement, "lots": upsert_lot}

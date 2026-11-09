@@ -369,11 +369,8 @@ class Filters:
             params["enstru"] = _like(self.enstru) + "%"
         if self.categories:
             # Лот — по любому своему коду ЕНС ТРУ; объявление — если такой есть у его лота.
-            if lots:
-                clauses.append("EXISTS (SELECT 1 FROM unnest(l.enstru) c WHERE left(c, 2) = ANY(%(categories)s))")
-            else:
-                clauses.append("""EXISTS (SELECT 1 FROM lots l2, unnest(l2.enstru) c
-                                          WHERE l2.trd_buy_id = a.id AND left(c, 2) = ANY(%(categories)s))""")
+            # Готовый список разделов с GIN-индексом (миграция 0019, zakup.details.codes).
+            clauses.append(f"{'l' if lots else 'a'}.divisions && %(categories)s::text[]")
             params["categories"] = self.categories
         if self.customer:
             by_bin = self.customer.isdigit()
@@ -394,10 +391,9 @@ class Filters:
     def _where_place_and_sum(self, clauses: list[str], params: dict[str, Any], lots: bool, now: datetime) -> None:
         """Регион поставки и сумма."""
         if self.regions:
-            # Место поставки лота; если у лота его нет — объявления.
-            kato = "coalesce(nullif(l.kato, '{}'), a.kato)" if lots else "a.kato"
-            clauses.append(f"""EXISTS (SELECT 1 FROM unnest({kato}) k
-                                       WHERE left(k, 2) = ANY(%(regions)s))""")
+            # Место поставки лота; если у лота его нет — объявления. Готовый список областей
+            # с GIN-индексом (миграция 0019, zakup.details.codes).
+            clauses.append(f"{'l' if lots else 'a'}.regions && %(regions)s::text[]")
             params["regions"] = self.regions
         amount = "l.amount" if lots else "a.total_sum"
         if self.min_sum is not None:
