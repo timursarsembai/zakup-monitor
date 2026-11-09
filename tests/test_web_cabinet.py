@@ -73,7 +73,7 @@ def test_edit_subscription_conditions_and_name(client, conn):
     edit = client.get(f"/subscriptions/{sub}/edit", follow_redirects=False).headers["location"]
     assert edit.startswith("/lots?") and f"edit={sub}" in edit and "region=75" in edit
     page = client.get(edit).text
-    assert "Редактирование подписки" in page and 'value="Алматы"' in page and f"/subscriptions/{sub}/update" in page
+    assert "★ Фильтр «" in page and 'value="Алматы"' in page and f"/subscriptions/{sub}/update" in page
     data.update(region="71", name="Астана")
     assert client.post(f"/subscriptions/{sub}/update", data=data, headers=ORIGIN,
                        follow_redirects=False).status_code == 303

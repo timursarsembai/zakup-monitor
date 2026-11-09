@@ -551,3 +551,26 @@ def test_mobile_chip_bar_shows_set_conditions(client):
     assert 'class="chip set" data-chip-toggle="open_now"' in bar and 'data-chip-open="sort"' in bar
     form = page.split('id="filters"', 1)[1]
     assert 'data-chip="region"' in form and 'data-sort-value="published"' in form and "data-chip-reset" in form
+
+
+def test_saved_filters_load_into_search(client, conn):
+    from zakup.filters import Filters
+    _announcement_with_lots(conn)
+    owner = conn.execute("SELECT id FROM users WHERE email = 'owner@mail.kz'").fetchone()[0]
+    sub = conn.execute(
+        """INSERT INTO subscriptions (user_id, name, query, kind, filters, scope)
+           VALUES (%s, 'Бумага', '', 'announcements', %s, 'lots') RETURNING id""",
+        (owner, db.Jsonb(Filters(q="бумага", regions=[], statuses=[], disable_person="", min_sum=None,
+                                 deadline="", advance_min=0).to_json()))).fetchone()[0]
+    conn.commit()
+    _login(client)
+    page = client.get("/lots").text
+    link = page.split('class="my-filter', 1)[1].split('href="', 1)[0]
+    assert "★ Мои фильтры" in page and f"edit={sub}" in page and "Бумага" in link + page
+    url = page.split('data-saved-filter', 1)[0].rsplit('href="', 1)[1].split('"', 1)[0].replace("&amp;", "&")
+    loaded = client.get(url).text
+    assert "Сохранить изменения в подписку" in loaded and 'value="бумага"' in loaded and "Бумага А4" in loaded
+    assert f'action="/subscriptions/{sub}/update"' in loaded or f'formaction="/subscriptions/{sub}/update"' in loaded
+    # Гость — без «Моих фильтров».
+    client.post("/logout", headers=ORIGIN)
+    assert "Мои фильтры" not in client.get("/lots").text

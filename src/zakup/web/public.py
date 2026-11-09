@@ -52,6 +52,7 @@ from zakup.web.core import (
     _editing,
     _per_page,
     _safe_next,
+    _saved_filters,
     _search_context,
     _track,
     _track_search,
@@ -501,9 +502,10 @@ def lots_search(request: Request, user: Viewer, page: int = 1, per_page: int = P
         ).fetchone()
         groups = _user_groups(conn, user)
         editing = _editing(conn, user, form)
+        saved = _saved_filters(conn, user) if request.state.paid else []
     _track_search(request, "lots", current, form, page, total)
     context = _search_context(request, current, "lots", total, page, form, now, per_page)
-    context.update(rows=rows, marks=lot_marks, stats=stats, groups=groups, editing=editing)
+    context.update(rows=rows, marks=lot_marks, stats=stats, groups=groups, editing=editing, saved=saved)
     return templates.TemplateResponse(request, "lots.html", context)
 
 
@@ -543,10 +545,11 @@ def announcements_search(request: Request, user: Viewer, page: int = 1, per_page
         ).fetchone()[0]
         groups = _user_groups(conn, user)
         editing = _editing(conn, user, form)
+        saved = _saved_filters(conn, user) if request.state.paid else []
     _track_search(request, "announcements", current, form, page, total)
     context = _search_context(request, current, "announcements", total, page, form, now,
                               per_page)
-    context.update(rows=rows, groups=groups, editing=editing)
+    context.update(rows=rows, groups=groups, editing=editing, saved=saved)
     return templates.TemplateResponse(request, "announcements.html", context)
 
 

@@ -61,6 +61,10 @@
     .subscribe { padding: 14px 0 0; border-left: 0; border-top: 1px solid var(--line); }
   }
   [data-results].loading { opacity: .45; transition: opacity .15s; pointer-events: none; }
+  .my-filters { margin: 0 0 14px; }
+  .my-filters-list { display: flex; flex-wrap: wrap; gap: 6px 8px; margin-top: 4px; }
+  .my-filter { padding: 5px 12px; border: 1px solid var(--line); border-radius: 999px; font-size: 14px; color: var(--fg); }
+  .my-filter.on { border-color: var(--accent); color: var(--accent); font-weight: 600; }
   .filter-bar, .filter-open, .sheet-head, .chipbar, .sort-pick, .single-actions, .filter-backdrop { display: none; }
   /* Телефон: панель условий под шапкой (закреплена вместе с ней), шторки снизу. */
   @media (max-width: 760px) {
@@ -85,6 +89,11 @@
     .filter-backdrop:not([hidden]) { bottom: calc(58px + env(safe-area-inset-bottom)); }
     .sortbar .sort-label { display: none; }
     .filters-panel.open.single { inset: auto 0 calc(58px + env(safe-area-inset-bottom)) 0; max-height: calc(82vh - 58px); border-radius: 18px 18px 0 0; box-shadow: 0 -10px 30px rgb(0 0 0 / 25%); }
+    .filters-panel.single .my-filters:not(.shown), .filters-panel.single[data-mode=saved] .single-actions { display: none; }
+    .filters-panel.single .my-filters.shown .fl { display: none; }
+    .filters-panel.single .my-filters-list { flex-direction: column; }
+    .filters-panel.single .my-filter { padding: 14px 12px; border: 0; border-radius: 10px; font-size: 17px; }
+    .filters-panel.single .my-filter.on { background: color-mix(in srgb, var(--accent) 10%, transparent); }
     .filters-panel.single .fgrid > div:not(.shown), .filters-panel.single .panel-actions,
     .filters-panel.single .subscribe, .filters-panel.single .sort-pick:not(.shown) { display: none; }
     .filters-panel.single[data-mode=subscribe] .subscribe { display: flex; padding-top: 0; border-top: 0; }
@@ -225,6 +234,7 @@
     <button type="button" class="chip-icon" data-chip-open="subscribe" {% if not request.state.paid %}data-paid data-feature="subscription"{% endif %} aria-label="{{ _("Сохранить фильтр — подписка") }}" title="{{ _("Сохранить фильтр — подписка") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg></button>
   </div>
   <div class="chip-scroll">
+    {% if saved %}<button type="button" class="chip {{ 'set' if editing }}" data-chip-open="saved" data-title="★ {{ _("Мои фильтры") }}">★ {{ editing.name[:18] if editing else _("Мои фильтры") }}<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>{% endif %}
     {% for key, label in chip_names %}
     {% if key == "open_now" %}<button type="button" class="chip {{ 'set' if f.end_from == 'today' }}" data-chip-toggle="open_now">{{ label }}</button>
     {% elif key == "today_only" %}<button type="button" class="chip {{ 'set' if f.published_from == 'today' }}" data-chip-toggle="today_only">{{ label }}</button>
@@ -241,6 +251,15 @@
   {% if per_page != 50 %}<input type="hidden" name="per_page" value="{{ per_page }}">{% endif %}
   <div class="flayout">
   <div class="fmain">
+  {# «Мои фильтры» — сохранённые фильтры (подписки): условия ставятся в фильтр одним нажатием. #}
+  {% if saved %}
+  <div class="my-filters" data-chip="saved">
+    <span class="fl">★ {{ _("Мои фильтры") }}</span>
+    <div class="my-filters-list">
+      {% for s in saved %}<a href="{{ s.url }}" class="my-filter {{ 'on' if editing and editing.id == s.id }}" data-saved-filter{% if s.scope != scope %} data-other-scope{% endif %} title="{{ s.describe }}">{{ s.name }}{% if s.scope != scope %} <span class="muted">· {{ _("лоты") if s.scope == "lots" else _("объявления") }}</span>{% endif %}</a>{% endfor %}
+    </div>
+  </div>
+  {% endif %}
   <div class="fgrid">
     <div data-chip="words"><label class="fl" for="f-q">{{ _("Наименование или описание лота") if lots else _("Наименование объявления") }}</label>
       <input id="f-q" name="q" value="{{ f.q }}" placeholder="{{ _("стол или стул -аренда") }}"></div>
@@ -341,7 +360,8 @@
   </div>
   <aside class="subscribe">
     {% if editing %}
-    <b>{{ _("✏️ Редактирование подписки") }}</b>
+    <b>★ {{ _("Фильтр") }} «{{ editing.name }}»</b>
+    <span class="muted">{{ _("Измените условия — и сохраните в подписку, или просто смотрите результаты.") }}</span>
     <input type="hidden" name="scope" value="{{ scope }}">
     <input type="hidden" name="edit" value="{{ editing.id }}">
     <input name="name" value="{{ editing.name }}" placeholder="{{ _("Название подписки") }}" aria-label="{{ _("Название подписки") }}">
@@ -350,11 +370,11 @@
       {% for chat_id, title in groups %}<option value="{{ chat_id }}" {% if editing.chat_id == chat_id %}selected{% endif %}>{{ _("в группу «") }}{{ title }}»</option>{% endfor %}
     </select>
     {% if f.relative() %}
-    <button data-paid data-feature="subscription" formmethod="post" formaction="/subscriptions/{{ editing.id }}/update" class="primary">{{ _("Сохранить изменения") }}</button>
+    <button data-paid data-feature="subscription" formmethod="post" formaction="/subscriptions/{{ editing.id }}/update" class="primary">{{ _("Сохранить изменения в подписку") }}</button>
     {% else %}
     <span class="muted">{{ _("Подписаться можно, когда в фильтре нет конкретных дат: окончание «в течение 2 рабочих дней» или без ограничения — тогда условия сами сдвигаются каждый день.") }}</span>
     {% endif %}
-    <span class="muted">{{ _("Поменяйте условия слева и название — и сохраните.") }} <a href="/subscriptions">{{ _("Отменить") }}</a></span>
+    <span class="muted"><a href="/{{ scope }}" data-reset-all>{{ _("Закрыть фильтр") }}</a> · <a href="/subscriptions">{{ _("Мои подписки") }}</a></span>
     {% else %}
     <b>{{ _("🔔 Подписка на этот поиск") }}</b>
     {% if f.relative() %}

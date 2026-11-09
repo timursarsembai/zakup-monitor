@@ -92,7 +92,14 @@
         if (strip) strip.scrollLeft = scrolled;
       }
       const freshForm = doc.getElementById("filters");
-      if (freshForm) syncForm(freshForm);
+      if (freshForm) {
+        syncForm(freshForm);
+        // Блоки «Мои фильтры» и подписки — как в ответе (загружен другой фильтр, режим правки).
+        for (const selector of [".my-filters", ".subscribe"]) {
+          const mine = sheet.querySelector(selector), theirs = freshForm.querySelector(selector);
+          if (mine && theirs) mine.innerHTML = theirs.innerHTML;
+        }
+      }
       history.pushState({ soft: true }, "", url);
       closeSheet();
       window.initSortbar?.();
@@ -140,10 +147,13 @@
     }
   });
   backdrop?.addEventListener("click", closeSheet);
-  // «Сбросить» в полном фильтре — тоже без перезагрузки.
-  sheet.querySelector("[data-reset-all]")?.addEventListener("click", (event) => {
+  // «Сбросить» и «Мои фильтры» (тот же вид поиска) — без перезагрузки; блоки внутри
+  // формы перерисовываются, поэтому — делегирование.
+  sheet.addEventListener("click", (event) => {
+    const link = event.target.closest("[data-reset-all], [data-saved-filter]:not([data-other-scope])");
+    if (!link) return;
     event.preventDefault();
-    softApply(event.currentTarget.getAttribute("href"));
+    softApply(link.getAttribute("href"));
   });
   for (const option of sheet.querySelectorAll("[data-sort-value]")) {
     option.addEventListener("click", () => {
@@ -178,14 +188,14 @@
   // Поля подписки живут в той же форме, что и поиск: в обычный поиск их не отправляем,
   // а Enter в названии подписки — подписывает, а не ищет.
   // При редактировании подписки обычный поиск сохраняет режим правки (поле edit).
-  const subscribeButton = sheet.querySelector(".subscribe button.primary");
+  // Блок подписки перерисовывается (режим правки) — кнопку ищем каждый раз.
   sheet.addEventListener("submit", (event) => {
-    if (event.submitter !== subscribeButton) {
+    if (event.submitter !== sheet.querySelector(".subscribe button.primary")) {
       for (const field of sheet.querySelectorAll(".subscribe [name]")) field.disabled = field.name !== "edit";
     }
   });
   sheet.querySelector('.subscribe [name="name"]')?.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") { event.preventDefault(); subscribeButton?.click(); }
+    if (event.key === "Enter") { event.preventDefault(); sheet.querySelector(".subscribe button.primary")?.click(); }
   });
   // Escape закрывает полноэкранный фильтр на телефоне.
   document.addEventListener("keydown", (event) => {

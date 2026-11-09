@@ -494,6 +494,24 @@ def _with_session(response: Response, token: str) -> Response:
     return response
 
 
+def _saved_filters(conn, user: int | None) -> list[dict]:
+    """«Мои фильтры»: подписки пользователя по фильтру — ссылка на поиск с их условиями
+    (в режиме правки: изменения можно сохранить обратно в подписку)."""
+    if not user:
+        return []
+    rows = conn.execute(
+        """SELECT id, name, scope, filters FROM subscriptions
+           WHERE user_id = %s AND kind = 'announcements' AND filters IS NOT NULL ORDER BY id""",
+        (user,)).fetchall()
+    out = []
+    for sub_id, name, scope, raw in rows:
+        scope = scope if scope in ("lots", "announcements") else "lots"
+        current = Filters.from_json(raw)
+        out.append({"id": sub_id, "name": name, "scope": scope,
+                    "url": f"{current.to_query(scope)}&edit={sub_id}", "describe": current.describe()})
+    return out
+
+
 def _editing(conn, user: int | None, form: dict) -> dict | None:
     """Поиск открыт кнопкой «Редактировать» подписки: её название и получатель."""
     raw = (form.get("edit") or [""])[0]
