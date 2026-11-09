@@ -72,7 +72,12 @@
   {% for lot in lots %}
   {{ lot_card(lot) }}
   {% else %}
+  {% if end and end > now %}
+  <p class="muted">{{ _("Лоты ещё загружаются: портал отдаёт их с задержкой до 20 минут. Страница обновится сама, как только они придут.") }}</p>
+  <script>setTimeout(() => { if (!document.hidden) location.reload(); }, 60000);</script>
+  {% else %}
   <p class="muted">{{ _("Лотов нет.") }}</p>
+  {% endif %}
   {% endfor %}
 </section>
 

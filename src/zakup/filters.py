@@ -322,7 +322,9 @@ class Filters:
         окном от сегодня до дня по правилу.
         """
         lots = scope == "lots"
-        clauses = ["l.trd_buy_id = a.id"] if lots else []
+        # Объявление без лотов не показываем: API портала отдаёт лоты с задержкой до ~20 минут,
+        # а пустое объявление выглядит как ошибка сайта. Появится, когда придут лоты.
+        clauses = ["l.trd_buy_id = a.id"] if lots else ["EXISTS (SELECT 1 FROM lots x WHERE x.trd_buy_id = a.id)"]
         params: dict[str, Any] = {"now": now}
         for part in (self._where_kind, self._where_ids, self._where_place_and_sum,
                      self._where_dates, self._where_advance, self._where_words):

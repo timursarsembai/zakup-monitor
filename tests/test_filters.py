@@ -425,3 +425,12 @@ def test_backfilled_lots_are_marked_seen_not_sent(conn):
     assert matcher.run_filters(conn, NOW) == 1  # только 20: 10 уже «увиден»
     assert conn.execute(
         "SELECT lot_id FROM matches WHERE notified_at IS NULL").fetchall() == [(20,)]
+
+
+def test_announcements_without_lots_are_hidden(conn):
+    _announcement(conn, 1)
+    db.upsert_announcement(conn, {"id": 2, "name_ru": "Без лотов", "total_sum": 500000,
+                                  "ref_buy_status_id": 240, "end_date": "2099-01-01 09:00:00"})
+    where, params = Filters(advance_min=0, disable_person="").where(NOW, "announcements")
+    ids = [r[0] for r in conn.execute(f"SELECT a.id FROM announcements a WHERE {where}", params)]
+    assert 1 in ids and 2 not in ids
