@@ -447,3 +447,11 @@ def test_details_fill_region_and_division_codes(conn):
     conn.execute("UPDATE lots SET regions = NULL")
     assert details.fill_codes(conn) >= 1
     assert conn.execute("SELECT count(*) FROM lots WHERE regions IS NULL").fetchone() == (0,)
+
+
+def test_lot_customer_filter_by_name_and_bin(conn):
+    _announcement(conn, 1)
+    conn.execute("UPDATE lots SET customer_name_ru = 'КГУ Школа №5', customer_bin = '123456789012' WHERE id = 10")
+    _announcement(conn, 2)
+    for value, expected in (("школа №5", [10]), ("123456789012", [10]), ("больница", [])):
+        assert _lot_ids(conn, Filters(advance_min=0, customer=value)) == expected

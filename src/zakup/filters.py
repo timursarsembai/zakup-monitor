@@ -378,13 +378,9 @@ class Filters:
             params["customer"] = self.customer if by_bin else "%" + _like(self.customer) + "%"
             own = f"(a.customer_{column} {op} %(customer)s OR a.org_{column} {op} %(customer)s)"
             if lots:
-                # Лоты по заказчику объявления или своему (совместные закупки) — одним списком id:
-                # так оба условия идут по индексам, а не проверяются у каждого лота при соединении.
-                clauses.append(f"""l.id IN (
-                    SELECT x.id FROM lots x WHERE x.trd_buy_id IN (
-                        SELECT a2.id FROM announcements a2 WHERE {own.replace("a.", "a2.")})
-                    UNION ALL
-                    SELECT x.id FROM lots x WHERE x.customer_{column} {op} %(customer)s)""")
+                # Заказчик лота (он есть у каждого лота, в совместных закупках — свой): одна
+                # таблица и один индекс. Условие «или у объявления» читало всю таблицу лотов.
+                clauses.append(f"l.customer_{column} {op} %(customer)s")
             else:
                 clauses.append(own)
 
