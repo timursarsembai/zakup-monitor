@@ -223,7 +223,7 @@ def test_reminder_schedule_and_language_settings(client, conn):
 def test_admin_data_tab_starts_and_stops_history(client, conn):
     _login(client)
     page = client.get("/settings").text
-    assert "Догрузка истории" in page and "Размер базы" in page
+    assert "Догрузка истории" in page and "Размер базы" in page and "Свежие данные" in page
     assert client.post("/settings/history/start", data={"since": "2099-01-01"},
                        headers=ORIGIN).status_code == 422
     client.post("/settings/history/start", data={"since": "2026-10-01"}, headers=ORIGIN)

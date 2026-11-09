@@ -30,8 +30,9 @@ def counts(conn: psycopg.Connection) -> dict[str, int]:
     customers, suppliers = conn.execute(
         """SELECT count(*) FILTER (WHERE buys > 0),
                   count(*) FILTER (WHERE wins > 0 OR offers > 0) FROM org_directory""").fetchone()
+    size = conn.execute("SELECT pg_database_size(current_database())").fetchone()[0]
     return {"announcements": announcements, "lots": lots, "customers": customers,
-            "suppliers": suppliers, "results": results}
+            "suppliers": suppliers, "results": results, "bytes": size}
 
 
 def active(conn: psycopg.Connection) -> tuple | None:
@@ -131,6 +132,30 @@ def progress(conn: psycopg.Connection, bounds: dict) -> dict[str, int | None]:
     return result
 
 
+FRESH_PERIODS = (("24 hours", "За 24 часа"), ("7 days", "За 7 дней"), ("30 days", "За 30 дней"))
+
+
+def fresh(conn: psycopg.Connection) -> list[dict]:
+    """Новое по дате публикации: сколько и примерный объём — по среднему размеру записи
+    таблицы (точный подсчёт байтов строк читал бы всю таблицу)."""
+    per_row = dict(conn.execute(
+        """SELECT c.relname, pg_total_relation_size(c.oid) / greatest(c.reltuples, 1)
+           FROM pg_class c WHERE c.relname IN ('announcements', 'lots')
+             AND c.relnamespace = 'public'::regnamespace""").fetchall())
+    rows = []
+    for interval, label in FRESH_PERIODS:
+        announcements, customers, lots = conn.execute(
+            """WITH a AS (SELECT id, customer_bin FROM announcements
+                          WHERE publish_date >= now() - %s::interval)
+               SELECT (SELECT count(*) FROM a), (SELECT count(DISTINCT customer_bin) FROM a),
+                      (SELECT count(*) FROM lots l JOIN a ON a.id = l.trd_buy_id)""",
+            (interval,)).fetchone()
+        size = announcements * float(per_row.get("announcements", 0)) + lots * float(per_row.get("lots", 0))
+        rows.append({"label": label, "announcements": announcements, "lots": lots,
+                     "customers": customers, "mb": round(size / 1048576)})
+    return rows
+
+
 def overview(conn: psycopg.Connection) -> dict:
     """Для вкладки «Данные» в настройках."""
     first, last = conn.execute("SELECT min(publish_date), max(publish_date) FROM announcements").fetchone()
@@ -149,6 +174,6 @@ def overview(conn: psycopg.Connection) -> dict:
     last_run = runs[0] if runs else None
     return {
         "first": first, "last": last, "size": size, "tables": tables, "counts": counts(conn),
-        "pending_details": pending_details, "runs": runs, "last_run": last_run,
+        "pending_details": pending_details, "runs": runs, "fresh": fresh(conn), "last_run": last_run,
         "progress": progress(conn, last_run[6]) if last_run and last_run[2] in ACTIVE else None,
     }
