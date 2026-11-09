@@ -246,6 +246,7 @@ def prefetch(conn: psycopg.Connection, limit: int) -> int:
            LIMIT %(limit)s""",
         {"max": MAX_ATTEMPTS, "limit": limit},
     ).fetchall()
+    conn.commit()  # файлы качаем без открытой транзакции
     for lot_id, url in rows:
         fetch(conn, lot_id, url)
     return len(rows)

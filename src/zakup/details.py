@@ -151,6 +151,7 @@ def save(conn: psycopg.Connection, item: dict[str, Any]) -> None:
 
 
 def fetch_one(conn: psycopg.Connection, client: Client, announcement_id: int) -> bool:
+    conn.commit()  # портал ждём без открытой транзакции
     data = client.graphql(BATCH_QUERY % {"limit": 1, "ids": json.dumps([announcement_id])})
     found = data.get("TrdBuy") or []
     for item in found:
@@ -207,6 +208,7 @@ def refresh_finished(conn: psycopg.Connection, client: Client, limit: int) -> in
 
 
 def _fetch(conn: psycopg.Connection, client: Client, ids: list[int]) -> int:
+    conn.commit()  # ждём портал без открытой транзакции (выборка ids выше её открыла)
     done = 0
     for start in range(0, len(ids), BATCH):
         batch = ids[start : start + BATCH]

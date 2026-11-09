@@ -235,6 +235,7 @@ def parse_pending(conn: psycopg.Connection, limit: int) -> int:
            ORDER BY a.end_date DESC LIMIT %s""",
         (PROTOCOL_NAME, limit),
     ).fetchall()
+    conn.commit()  # протоколы качаем без открытой транзакции
     for announcement_id, detail in rows:
         parse_announcement(conn, announcement_id, detail)
         conn.commit()
@@ -262,6 +263,7 @@ def follow(conn: psycopg.Connection, client: Client, limit: int = 50) -> int:
             (timedelta(days=FOLLOW_DAYS), RESULTS_TTL, limit),
         )
     ]
+    conn.commit()  # портал ждём без открытой транзакции
     for announcement_id in ids:
         try:
             details.fetch_one(conn, client, announcement_id)

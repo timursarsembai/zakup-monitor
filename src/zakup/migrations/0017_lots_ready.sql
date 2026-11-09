@@ -4,4 +4,5 @@
 ALTER TABLE announcements ADD COLUMN IF NOT EXISTS lots_ready boolean NOT NULL DEFAULT false;
 -- Правило касается только открытых — их и размечаем (несколько тысяч строк).
 UPDATE announcements SET lots_ready = true
-WHERE end_date > now() AND jsonb_typeof(detail->'Lots') = 'array' AND jsonb_array_length(detail->'Lots') > 0;
+WHERE end_date > now()
+  AND jsonb_array_length(CASE WHEN jsonb_typeof(detail->'Lots') = 'array' THEN detail->'Lots' ELSE '[]' END) > 0;

@@ -106,10 +106,15 @@ def refresh(conn: psycopg.Connection, client: Client, limit: int = 300) -> int:
             LIMIT %s""",
         (limit,),
     )]
+    # Ответа портала ждём без открытой транзакции: иначе она держит таблицы и не даёт
+    # пройти миграциям (DeadlockDetected, LockNotAvailable).
+    conn.commit()
     done = 0
     for bin_ in bins:
         try:
-            save(conn, bin_, fetch(client, bin_))
+            data = fetch(client, bin_)
+            save(conn, bin_, data)
+            conn.commit()
             done += 1
         except GoszakupError as error:
             logger.info("subject %s: %s", bin_, error)
@@ -122,8 +127,11 @@ def ensure(conn: psycopg.Connection, client: Client, *bins: str | None) -> None:
         if not conn.execute(
                 f"SELECT 1 FROM subjects WHERE bin = %s AND fetched_at > now() - interval '{REFRESH_AFTER}'",
                 (bin_,)).fetchone():
+            conn.commit()  # ждём портал без открытой транзакции
             try:
-                save(conn, bin_, fetch(client, bin_))
+                data = fetch(client, bin_)
+                save(conn, bin_, data)
+                conn.commit()
             except GoszakupError as error:
                 logger.info("subject %s: %s", bin_, error)
 
