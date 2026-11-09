@@ -17,6 +17,8 @@
   .fl { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
   .fgrid input:not([type=checkbox]):not([type=range]), .fgrid select { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); font: inherit; font-size: 14px; width: 100%; min-width: 0; }
   .pair { display: flex; gap: 6px; }
+  /* На телефоне объявления / лоты переключаются шторкой «Закупки» в нижней панели. */
+  @media (max-width: 760px) { .scope-tabs { display: none; } }
   .check { display: flex; gap: 8px; align-items: flex-start; margin: 4px 0; color: var(--fg); font-size: 14px; }
   .open-now { font-weight: 600; }
   .filters-panel .hint { display: block; font-size: 12px; margin-top: 2px; }

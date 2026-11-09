@@ -101,50 +101,64 @@
       try { localStorage.setItem("zakup-side", mini ? "mini" : "full"); } catch (e) {}
     });
   }
-  // Телефон: «Ещё» в нижней панели — шторка снизу. Закрывается повторным нажатием,
-  // по фону, Esc и свайпом вниз.
+  // Телефон: шторки снизу над нижней панелью — «Ещё» и «Закупки» (объявления / лоты).
+  // Закрываются повторным нажатием, по фону, Esc и свайпом вниз; открыта одна за раз.
   (() => {
-    const more = document.querySelector("[data-more]");
-    const sheet = document.querySelector("[data-more-sheet]");
     const backdrop = document.querySelector("[data-more-backdrop]");
-    if (!more || !sheet || !backdrop) return;
-    let timer;
-    const set = (open) => {
-      clearTimeout(timer);
-      more.setAttribute("aria-expanded", String(open));
-      if (open) {
-        sheet.hidden = backdrop.hidden = false;
-        requestAnimationFrame(() => requestAnimationFrame(() => {
-          sheet.classList.add("open");
-          backdrop.classList.add("open");
-          sheet.querySelector(".more-tile")?.focus({ preventScroll: true });
-        }));
-      } else if (!sheet.hidden) {
-        sheet.classList.remove("open");
-        backdrop.classList.remove("open");
-        timer = setTimeout(() => { sheet.hidden = backdrop.hidden = true; }, 260);
-        if (sheet.contains(document.activeElement)) more.focus({ preventScroll: true });
-      }
+    if (!backdrop) return;
+    const phone = matchMedia("(max-width: 760px)");
+    const sheets = [];
+    const bind = (trigger, sheet) => {
+      if (!trigger || !sheet) return;
+      let timer;
+      const set = (open) => {
+        clearTimeout(timer);
+        trigger.setAttribute("aria-expanded", String(open));
+        if (open) {
+          for (const other of sheets) if (other.sheet !== sheet) other.set(false);
+          sheet.hidden = backdrop.hidden = false;
+          requestAnimationFrame(() => requestAnimationFrame(() => {
+            sheet.classList.add("open");
+            backdrop.classList.add("open");
+            sheet.querySelector(".more-tile")?.focus({ preventScroll: true });
+          }));
+        } else if (!sheet.hidden) {
+          sheet.classList.remove("open");
+          if (!sheets.some((o) => o.sheet !== sheet && !o.sheet.hidden)) backdrop.classList.remove("open");
+          timer = setTimeout(() => {
+            sheet.hidden = true;
+            if (sheets.every((o) => o.sheet.hidden)) backdrop.hidden = true;
+          }, 260);
+          if (sheet.contains(document.activeElement)) trigger.focus({ preventScroll: true });
+        }
+      };
+      sheets.push({ sheet, set });
+      // Нажали плитку — шторку закрыть (в том числе перед окном «платная функция»).
+      sheet.addEventListener("click", (e) => { if (e.target.closest("a.more-tile")) set(false); }, true);
+      // Tab не уходит за шторку, пока она открыта.
+      sheet.addEventListener("keydown", (e) => {
+        if (e.key !== "Tab") return;
+        const items = [...sheet.querySelectorAll("a, button")];
+        const first = items[0], last = items[items.length - 1];
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      });
+      trigger.addEventListener("click", (e) => {
+        if (trigger.tagName === "A" && !phone.matches) return;  // на компьютере — обычная ссылка
+        e.preventDefault();
+        set(trigger.getAttribute("aria-expanded") !== "true");
+      });
+      let startY = null;
+      sheet.addEventListener("touchstart", (e) => { startY = sheet.scrollTop ? null : e.touches[0].clientY; }, { passive: true });
+      sheet.addEventListener("touchend", (e) => {
+        if (startY !== null && e.changedTouches[0].clientY - startY > 60) set(false);
+        startY = null;
+      }, { passive: true });
     };
-    // Нажали плитку — шторку закрыть (в том числе перед окном «платная функция»).
-    sheet.addEventListener("click", (e) => { if (e.target.closest("a.more-tile")) set(false); }, true);
-    // Tab не уходит за шторку, пока она открыта.
-    sheet.addEventListener("keydown", (e) => {
-      if (e.key !== "Tab") return;
-      const items = [...sheet.querySelectorAll("a, button")];
-      const first = items[0], last = items[items.length - 1];
-      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
-      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
-    });
-    more.addEventListener("click", () => set(more.getAttribute("aria-expanded") !== "true"));
-    backdrop.addEventListener("click", () => set(false));
-    document.addEventListener("keydown", (e) => { if (e.key === "Escape") set(false); });
-    let startY = null;
-    sheet.addEventListener("touchstart", (e) => { startY = sheet.scrollTop ? null : e.touches[0].clientY; }, { passive: true });
-    sheet.addEventListener("touchend", (e) => {
-      if (startY !== null && e.changedTouches[0].clientY - startY > 60) set(false);
-      startY = null;
-    }, { passive: true });
+    bind(document.querySelector("[data-more]"), document.querySelector("[data-more-sheet]"));
+    bind(document.querySelector("[data-search-open]"), document.querySelector("[data-search-sheet]"));
+    backdrop.addEventListener("click", () => sheets.forEach((o) => o.set(false)));
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") sheets.forEach((o) => o.set(false)); });
   })();
   // Подтверждение для форм с data-confirm (выход, удаление и т.п.): защита от
   // случайного нажатия. Текст — из атрибута, не из кода.
