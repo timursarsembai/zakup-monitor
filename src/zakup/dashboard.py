@@ -165,9 +165,9 @@ def _competition(conn) -> dict[str, Any]:
             WHERE r.outcome = 'winner' AND l.amount > 0 AND r.winner_total <= l.amount GROUP BY 1""")),
         key=lambda m: -m[1])
     data["top_winners"] = _rows(conn, """
-        SELECT winner_name, count(*), sum(winner_total) FROM lot_results
+        SELECT winner_bin, max(winner_name), count(*), sum(winner_total) FROM lot_results
         WHERE outcome = 'winner' AND winner_name IS NOT NULL
-        GROUP BY winner_bin, winner_name ORDER BY 2 DESC, 3 DESC LIMIT 10""")
+        GROUP BY winner_bin ORDER BY 3 DESC, 4 DESC LIMIT 10""")
     return data
 
 

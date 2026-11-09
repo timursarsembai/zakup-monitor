@@ -238,8 +238,8 @@
       <p class="muted">{{ _("Поставщики по числу выигранных лотов в разобранных протоколах.") }}</p>
       <div class="scroll"><table class="stats">
         <tr><th></th><th style="text-align:left">{{ _("Поставщик") }}</th><th>{{ _("Побед") }}</th><th>{{ _("Сумма договоров") }}</th></tr>
-        {% for name, wins, total in m.top_winners %}
-        <tr><td class="rank">{{ loop.index }}</td><td class="text">{{ name }}</td><td class="num">{{ wins }}</td><td class="num">{{ big(total or 0) }}</td></tr>
+        {% for bin, name, wins, total in m.top_winners %}
+        <tr><td class="rank">{{ loop.index }}</td><td class="text">{{ org_link(bin, name) }}</td><td class="num">{{ wins }}</td><td class="num">{{ big(total or 0) }}</td></tr>
         {% endfor %}
       </table></div>
     </section>
