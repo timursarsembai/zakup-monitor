@@ -18,6 +18,8 @@
   .fgrid input:not([type=checkbox]):not([type=range]), .fgrid select { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); font: inherit; font-size: 14px; width: 100%; min-width: 0; }
   .pair { display: flex; gap: 6px; }
   .check { display: flex; gap: 8px; align-items: flex-start; margin: 4px 0; color: var(--fg); font-size: 14px; }
+  .open-now { font-weight: 600; }
+  .filters-panel .hint { display: block; font-size: 12px; margin-top: 2px; }
   details.multi { position: relative; }
   details.multi summary { list-style: none; cursor: pointer; padding: 6px 28px 6px 8px; border: 1px solid var(--line); border-radius: 6px; color: var(--fg); font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   details.multi summary::after { content: "▾"; position: absolute; right: 10px; top: 6px; color: var(--muted); }
@@ -209,9 +211,11 @@
         <option value="date" {% if f.deadline and f.deadline != rule %}selected{% endif %}>{{ _("по дате (поле «по»)") }}</option>
         <option value="" {% if not f.deadline %}selected{% endif %}>{{ _("без ограничения") }}</option>
       </select></div>
+    <div><label class="check open-now"><input type="checkbox" name="open_now" value="1" {% if f.end_from == 'today' %}checked{% endif %}> {{ _("Только с открытым приёмом заявок") }}</label>
+      <span class="muted hint">{{ _("Срок подачи заявок ещё не прошёл — проверяется каждый день заново.") }}</span></div>
     <div><span class="fl">{{ _("Окончание приема заявок с — по") }}</span>
       <div class="pair">
-        <input type="date" name="end_from" value="{{ today.isoformat() if f.end_from == 'today' else f.end_from }}" aria-label="{{ _("Окончание с") }}">
+        <input type="date" name="end_from" value="{{ '' if f.end_from == 'today' else f.end_from }}" aria-label="{{ _("Окончание с") }}">
         <input type="date" name="deadline_date" value="{{ f.deadline if f.deadline and f.deadline != rule else '' }}" aria-label="{{ _("Окончание по") }}">
       </div></div>
     <div class="advance" data-advance data-labels='{{ {"any": _("любой"), "none": _("без аванса"), "from": _("от"), "to": _("до")}|tojson }}'>

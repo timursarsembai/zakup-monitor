@@ -343,3 +343,16 @@ def test_first_batch_limit_keeps_whole_announcement(conn, monkeypatch):
     matcher.seed(conn, sub, Filters(deadline=""), "lots", NOW)
     lot_ids, total = conn.execute("SELECT lot_ids, total FROM match_pages").fetchone()
     assert sorted(lot_ids) == [11, 12] and total == 3
+
+
+def test_open_now_checkbox():
+    today = date.today().isoformat()
+    assert Filters.from_form({"applied": ["1"], "open_now": ["1"]}).end_from == "today"
+    assert Filters.from_form({"applied": ["1"]}).end_from == ""
+    assert Filters.from_form({"applied": ["1"], "open_now": ["1"], "end_from": ["2026-12-01"]}).end_from == "2026-12-01"
+    query = Filters().to_query("lots")
+    assert "open_now=1" in query and "end_from" not in query
+    from urllib.parse import parse_qs, urlsplit
+    assert Filters.from_form(parse_qs(urlsplit(query).query)).end_from == "today"
+    assert Filters.from_form({"applied": ["1"], "end_from": ["today"]}).end_from == "today"  # старые ссылки
+    assert today

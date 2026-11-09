@@ -201,7 +201,7 @@ def page(conn: psycopg.Connection, division: str | None, region: str | None,
             WHERE {condition} AND r.outcome = 'winner'
             GROUP BY 1 ORDER BY 3 DESC, 4 DESC LIMIT 10""", scope_params).fetchall()
     data = {"total": n, "amount": amount, "lots": lots, "customers": customers, "winners": winners,
-            "search": "/lots?" + open_filter(division, region).to_query("lots")}
+            "search": open_filter(division, region).to_query("lots")}
     with _lock:
         if len(_pages) > 2000:  # пар «категория × регион» около тысячи
             _pages.clear()

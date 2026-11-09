@@ -402,6 +402,7 @@ def test_category_and_region_pages(client, conn):
     assert 'href="/category/17/75"' in category  # Алматы
     both = client.get("/category/17/75").text
     assert "Бумага и изделия из бумаги — г. Алматы" in both and "/lots/5001" in both
+    assert "/lots?/lots" not in category
     region = client.get("/region/75").text
     assert "Госзакупки: г. Алматы" in region and "/lots/5001" in region
     assert client.get("/category/99").status_code == 404 and client.get("/region/00").status_code == 404

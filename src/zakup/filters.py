@@ -249,9 +249,9 @@ class Filters:
             # Заполненная дата «по» важнее выбранного режима.
             deadline=_date(one("deadline_date"))
             or (DEADLINE_RULE if one("deadline_mode") == "rule" else ""),
-            # Сегодняшняя дата в поле «с» — это «с сегодня», а не зафиксированный день.
-            end_from=TODAY if one("end_from") in (TODAY, _today().isoformat())
-            else _date(one("end_from")),
+            # «Только с открытым приёмом заявок» — окончание с сегодня, каждый день заново.
+            # Своя дата в поле «с» важнее галочки.
+            end_from=_date(one("end_from")) or (TODAY if one("open_now") == "1" or one("end_from") == TODAY else ""),
             start_from=_date(one("start_from")),
             start_to=_date(one("start_to")),
             published_from=_date(one("published_from")),
@@ -451,7 +451,9 @@ class Filters:
         names = {"stages": "stage", "statuses": "status", "regions": "region", "categories": "category",
                  "methods": "method", "subjects": "subject", "years": "year"}
         for key, value in self.to_json().items():
-            if key == "deadline":
+            if key == "end_from" and value == TODAY:
+                pairs.append(("open_now", 1))
+            elif key == "deadline":
                 pairs.append(("deadline_mode", "rule" if value == DEADLINE_RULE else ""))
                 if value and value != DEADLINE_RULE:
                     pairs.append(("deadline_date", value))
@@ -512,6 +514,8 @@ class Filters:
             parts.append(_("окончание в течение 2 рабочих дней"))
         elif self.deadline:
             parts.append(_("окончание по {date}", date=self.deadline))
+        if self.end_from == TODAY:
+            parts.append(_("только с открытым приёмом заявок"))
         for label, start, end in (("окончание", "" if self.end_from == TODAY else self.end_from, ""),
                                   ("начало приёма", self.start_from, self.start_to),
                                   ("опубликовано", self.published_from, self.published_to),
