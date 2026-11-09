@@ -10,6 +10,7 @@
 «по названию»: участники итогов прошлых лотов с теми же словами в названии.
 """
 
+import time
 from typing import Any
 
 import psycopg
@@ -68,7 +69,24 @@ def _available(conn: psycopg.Connection, code: str) -> dict[str, int]:
 NAME_LOTS = 2000
 
 
+NAME_TTL = 900
+_name_cache: dict[int, tuple[float, list[dict[str, Any]]]] = {}
+
+
 def _by_name(conn: psycopg.Connection, lot_id: int, region: str) -> list[dict[str, Any]]:
+    """Подбор по названию держим 15 минут: считается по тысячам итогов (~0,4 с), а меняется
+    медленно. Копии строк — вызывающий режет снижение цены для гостей."""
+    hit = _name_cache.get(lot_id)
+    if hit and hit[0] > time.monotonic():
+        return [dict(row) for row in hit[1]]
+    rows = _by_name_query(conn, lot_id, region)
+    if len(_name_cache) > 2000:
+        _name_cache.clear()
+    _name_cache[lot_id] = (time.monotonic() + NAME_TTL, rows)
+    return [dict(row) for row in rows]
+
+
+def _by_name_query(conn: psycopg.Connection, lot_id: int, region: str) -> list[dict[str, Any]]:
     """Участники итогов прошлых лотов, в названии которых те же слова, что у этого лота."""
     name = conn.execute("SELECT name_ru FROM lots WHERE id = %s", (lot_id,)).fetchone()
     if not name or not (name[0] or "").strip():

@@ -5,7 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg_pool import ConnectionPool
 
-from zakup import auth, branding, catalog, db, orgs, outcomes, tariff, web
+from zakup import auth, branding, catalog, db, orgs, outcomes, suppliers, tariff, web
 from zakup.goszakup import Page
 
 
@@ -110,6 +110,7 @@ def client(conn, monkeypatch):
     monkeypatch.setattr(tariff, "_cache", None)
     monkeypatch.setattr(branding, "_cache", None)
     monkeypatch.setattr(outcomes, "_summaries", {})
+    monkeypatch.setattr(suppliers, "_name_cache", {})
     # Список лотов для sitemap кэшируется на час — в каждом тесте свой.
     monkeypatch.setattr(web.public, "_sitemap_lots", {"at": 0.0, "rows": []})
     monkeypatch.setattr(catalog, "_counts", {"at": 0.0, "rows": {}})
