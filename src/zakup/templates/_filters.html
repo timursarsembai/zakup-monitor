@@ -213,7 +213,9 @@
   table.results a.title { color: var(--accent); font-weight: 650; font-size: 15px; border-radius: 4px;
                           padding: 0 2px; margin: 0 -2px; -webkit-box-decoration-break: clone; box-decoration-break: clone;
                           transition: background-color .15s; }
-  table.results a.title:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+  table.results a.ann-link { border-radius: 4px; padding: 0 2px; margin: 0 -2px; -webkit-box-decoration-break: clone;
+                             box-decoration-break: clone; transition: background-color .15s; }
+  table.results a.title:hover, table.results a.ann-link:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
   .st { font-size: 13px; color: var(--muted); }
   .st.st-open { color: var(--ok); font-weight: 600; }
   .due { display: inline-block; margin-top: 3px; padding: 1px 8px; border-radius: 999px; font-size: 12px; background: color-mix(in srgb, var(--fg) 8%, transparent); color: var(--fg); white-space: nowrap; }

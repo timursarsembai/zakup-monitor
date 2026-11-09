@@ -20,7 +20,7 @@
   {% for r in rows %}
   <tr id="lot-{{ r[0] }}">
     <td class="muted c-num">{{ r[1] or r[0] }}</td>
-    <td class="c-ann" style="min-width:200px"><a href="{{ announcement_url(r[2]) }}">№ {{ r[3] or r[2] }}</a> {{ pick(r[4], r[23]) or "" }}
+    <td class="c-ann" style="min-width:200px"><a class="ann-link" href="{{ announcement_url(r[2]) }}">№ {{ r[3] or r[2] }} {{ pick(r[4], r[23]) or "" }}</a>
       <div class="muted">{{ r[5] or "" }}</div>
       {% set h = hours_left(r[15]) %}{% if r[15] %}<div class="deadline">{{ _("до") }} {{ (r[15]|local).strftime("%d.%m %H:%M") }}{% if h > 0 %} <span class="due {{ 'urgent' if h < 24 }}">⏱ {{ time_left(r[15]) }}</span>{% endif %}</div>{% endif %}</td>
     <td class="c-title" style="min-width:220px"><a class="title" href="/lots/{{ r[0] }}">{{ pick(r[6], r[22]) or "—" }}</a>
