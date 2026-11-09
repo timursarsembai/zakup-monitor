@@ -153,15 +153,18 @@ def save(conn: psycopg.Connection, item: dict[str, Any]) -> None:
 
 def codes(conn: psycopg.Connection, announcement_ids: list[int]) -> None:
     """Списки кодов регионов и разделов для фильтров (миграция 0019) — у объявлений и их лотов."""
+    # Порядок блокировок как в save: сначала объявления, потом их лоты — иначе встречные
+    # save и fill_codes (разные службы) могут заблокировать друг друга.
+    conn.execute("UPDATE announcements a SET regions = codes2(a.kato) WHERE a.id = ANY(%(ids)s)",
+                 {"ids": announcement_ids})
     conn.execute(
         """UPDATE lots l SET regions = codes2(coalesce(nullif(l.kato, '{}'), a.kato)),
                              divisions = codes2(l.enstru)
            FROM announcements a WHERE a.id = l.trd_buy_id AND l.trd_buy_id = ANY(%(ids)s)""",
         {"ids": announcement_ids})
     conn.execute(
-        """UPDATE announcements a SET regions = codes2(a.kato),
-                  divisions = (SELECT codes2(array_agg(c)) FROM lots l, unnest(l.enstru) c
-                               WHERE l.trd_buy_id = a.id)
+        """UPDATE announcements a SET divisions = (SELECT codes2(array_agg(c)) FROM lots l, unnest(l.enstru) c
+                                                   WHERE l.trd_buy_id = a.id)
            WHERE a.id = ANY(%(ids)s)""",
         {"ids": announcement_ids})
 
@@ -170,7 +173,7 @@ def fill_codes(conn: psycopg.Connection, batch: int = 2000) -> int:
     """Старые записи без списков кодов — пачками, с коммитом после каждой: не держать таблицы."""
     done = 0
     while ids := [r[0] for r in conn.execute(
-            "SELECT id FROM announcements WHERE regions IS NULL ORDER BY id DESC LIMIT %s", (batch,))]:
+            "SELECT id FROM announcements WHERE regions IS NULL ORDER BY id LIMIT %s", (batch,))]:
         codes(conn, ids)
         conn.commit()
         done += len(ids)
@@ -207,8 +210,11 @@ def refresh(conn: psycopg.Connection, client: Client, limit: int) -> int:
                       OR last_update_date > details_update_date
                       OR details_fetched_at < now() - interval '1 day'
                       -- API портала отдаёт лоты с задержкой (до ~20 минут): пока в подробностях
-                      -- нет лотов, перечитываем на каждом круге сборщика (раз в 2 минуты).
-                      OR (NOT lots_ready AND details_fetched_at < now() - interval '1 minute'))
+                      -- нет лотов, перечитываем на каждом круге сборщика (раз в 2 минуты) первые
+                      -- 3 часа после публикации, дальше — раз в час (отменённые, без лотов совсем).
+                      OR (NOT lots_ready AND details_fetched_at < now() - CASE
+                              WHEN coalesce(publish_date, now()) > now() - interval '3 hours' THEN interval '1 minute'
+                              ELSE interval '1 hour' END))
                -- Сначала новые и те, где ещё нет лотов: они не видны на сайте.
                ORDER BY details_fetched_at IS NOT NULL, lots_ready, details_fetched_at, end_date
                LIMIT %s""",

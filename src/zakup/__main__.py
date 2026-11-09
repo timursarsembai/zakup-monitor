@@ -266,7 +266,9 @@ def _backfill(conn, client: Client, max_pages: int) -> int:
     """Шаг службы history; запуск и остановка — в настройках (вкладка «Данные»)."""
     from zakup import history
 
-    if not conn.execute("SELECT pg_try_advisory_lock(%s)", (BACKFILL_LOCK,)).fetchone()[0]:
+    locked = conn.execute("SELECT pg_try_advisory_lock(%s)", (BACKFILL_LOCK,)).fetchone()[0]
+    conn.commit()  # блокировка — на сеанс; транзакцию не держим
+    if not locked:
         print("backfill: уже идёт в другом процессе")
         return 0
     try:

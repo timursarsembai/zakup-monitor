@@ -208,11 +208,12 @@ def upsert_lot(conn: psycopg.Connection, item: dict[str, Any], overwrite: bool =
         ),
     )
     # Новый лот — сразу со списками кодов для фильтров (миграция 0019): место поставки —
-    # объявления, пока подробности не дали своё.
+    # объявления, пока подробности не дали своё. Не известно — оставляем NULL (не пустой
+    # список), чтобы заполнили позже подробности или `zakup codes`.
     conn.execute(
-        """UPDATE lots l SET regions = codes2(coalesce(nullif(l.kato, '{}'),
-                                (SELECT a.kato FROM announcements a WHERE a.id = l.trd_buy_id))),
-                             divisions = codes2(l.enstru)
+        """UPDATE lots l SET regions = nullif(codes2(coalesce(nullif(l.kato, '{}'),
+                                (SELECT a.kato FROM announcements a WHERE a.id = l.trd_buy_id))), '{}'),
+                             divisions = nullif(codes2(l.enstru), '{}')
            WHERE l.id = %s AND l.regions IS NULL""",
         (int(item["id"]),))
 

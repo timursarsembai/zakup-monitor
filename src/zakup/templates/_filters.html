@@ -145,7 +145,7 @@
     .filters-panel.single .subscribe, .filters-panel.single .sort-pick:not(.shown) { display: none; }
     .filters-panel.single[data-mode=subscribe] .subscribe { display: flex; padding-top: 0; border-top: 0; }
     .filters-panel.single[data-mode=subscribe] .fgrid { display: none; }
-    .filters-panel.single .single-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; position: sticky; bottom: 0;
+    .filters-panel.single .single-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; position: sticky; bottom: 0; z-index: 5;
                                            background: var(--bg); padding: 12px 0 14px; }
     .filters-panel.single[data-mode=subscribe] .single-actions, .filters-panel.single[data-mode=sort] .single-actions { display: none; }
     .single-actions button { min-height: 50px; border-radius: 12px; font-size: 17px; }
@@ -195,7 +195,8 @@
     .sheet-head { font-size: 20px; padding: 14px 0; }
     .sheet-head button { font-size: 24px; min-width: 44px; min-height: 44px; }
     .multi-list { position: static; min-width: 0; box-shadow: none; max-height: none; }
-    .panel-actions { position: sticky; bottom: 0; background: var(--bg); padding: 12px 0; }
+    /* z-index: бегунки аванса (у них свой z-index) прокручиваются под кнопками, а не поверх. */
+    .panel-actions { position: sticky; bottom: 0; z-index: 5; background: var(--bg); padding: 12px 0; }
     .panel-actions .primary { flex: 1; padding: 10px; }
     .panel-actions .spacer { display: none; }
     body.sheet-open { overflow: hidden; }

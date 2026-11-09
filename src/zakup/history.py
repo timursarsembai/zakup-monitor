@@ -36,17 +36,23 @@ def counts(conn: psycopg.Connection) -> dict[str, int]:
 
 
 def active(conn: psycopg.Connection) -> tuple | None:
-    return conn.execute(
+    row = conn.execute(
         "SELECT id, since, status FROM backfill_runs WHERE status = ANY(%s) ORDER BY id DESC LIMIT 1",
         (list(ACTIVE),)).fetchone()
+    conn.commit()  # дальше — запросы к порталу: без открытой транзакции
+    return row
 
 
 def start(conn: psycopg.Connection, since: date, user: int | None = None) -> int | None:
     """Новый запуск; None — уже идёт другой."""
     if active(conn):
         return None
-    run = conn.execute("INSERT INTO backfill_runs (since, created_by) VALUES (%s, %s) RETURNING id",
-                       (since, user)).fetchone()[0]
+    try:
+        run = conn.execute("INSERT INTO backfill_runs (since, created_by) VALUES (%s, %s) RETURNING id",
+                           (since, user)).fetchone()[0]
+    except psycopg.errors.UniqueViolation:  # одновременно с другой копией сайта (миграция 0020)
+        conn.rollback()
+        return None
     conn.commit()
     return run
 
@@ -55,12 +61,14 @@ def stop(conn: psycopg.Connection) -> bool:
     run = active(conn)
     if not run:
         return False
-    _finish(conn, run[0], "stopped")
+    # Из запроса сайта — без пересчёта справочника (долго; его пересчитает archive).
+    _finish(conn, run[0], "stopped", refresh=False)
     return True
 
 
-def _finish(conn: psycopg.Connection, run: int, status: str, error: str | None = None) -> None:
-    if status != "failed":
+def _finish(conn: psycopg.Connection, run: int, status: str, error: str | None = None,
+            refresh: bool = True) -> None:
+    if refresh and status != "failed":
         # Справочник организаций — сразу с догруженным, не дожидаясь круга archive.
         from zakup import orgs
 
@@ -73,6 +81,7 @@ def _finish(conn: psycopg.Connection, run: int, status: str, error: str | None =
 
 def _running(conn: psycopg.Connection, run: int) -> bool:
     row = conn.execute("SELECT status FROM backfill_runs WHERE id = %s", (run,)).fetchone()
+    conn.commit()  # проверка перед страницей портала: ждать его без открытой транзакции
     return bool(row) and row[0] == "running"
 
 
@@ -89,9 +98,16 @@ def _prepare(conn: psycopg.Connection, client: Client, run: int, since: date) ->
         "SELECT (min(publish_date) AT TIME ZONE 'Asia/Almaty')::date FROM announcements").fetchone()[0]
     bounds = {}
     for entity, floor in zip(ENTITIES, (first_announcement, first_lot), strict=True):
-        oldest = conn.execute(f"SELECT min(id) FROM {entity}").fetchone()[0]
-        # search_after=x отдаёт записи с id меньше x — то, чего в базе ещё нет.
-        top = oldest if oldest is not None and oldest > floor else None
+        previous = db.get_state(conn, f"backfill:{entity}")
+        if previous and previous.resume_after is not None:
+            # Прошлый запуск остановлен на полпути — продолжаем с его места: min(id) мог уже
+            # опуститься из-за лотов, заведённых из карточек объявлений, и часть пропустилась бы.
+            top = previous.resume_after
+        else:
+            oldest = conn.execute(f"SELECT min(id) FROM {entity}").fetchone()[0]
+            # search_after=x отдаёт записи с id меньше x — то, чего в базе ещё нет.
+            top = oldest
+        top = top if top is not None and top > floor else None
         db.save_state(conn, f"backfill:{entity}", db.SyncState(floor, None, top))
         bounds[entity] = {"floor": floor, "top": top}
     conn.execute(

@@ -280,6 +280,7 @@ class Filters:
                  self.regions, self.categories, self.methods, self.subjects, self.years, self.disable_person,
                  self.min_sum is not None or self.max_sum is not None, self.deadline,
                  self.start_from or self.start_to, self.published_from or self.published_to,
+                 self.end_from,  # «Только с открытым приёмом» (и «Окончание с») — тоже условие
                  self.itogi_from or self.itogi_to,
                  self.advance_only or self.advance_min > 0 or self.advance_max < 100,
                  self.statuses or (self.stages and self.stages != ["open"])]
@@ -325,7 +326,7 @@ class Filters:
         # Открытое объявление — только когда в его подробностях пришли лоты (lots_ready): API
         # портала отдаёт их с задержкой, а пустая страница объявления выглядит как ошибка сайта.
         # Так же и рассылка: подписки-фильтры строятся на этом условии.
-        clauses = ["(a.lots_ready OR a.end_date <= %(now)s)"]
+        clauses = ["(a.lots_ready OR a.end_date <= %(now)s OR a.end_date IS NULL)"]
         if lots:
             clauses.insert(0, "l.trd_buy_id = a.id")
         params: dict[str, Any] = {"now": now}
@@ -377,9 +378,17 @@ class Filters:
             column, op = ("bin", "=") if by_bin else ("name_ru", "ILIKE")
             params["customer"] = self.customer if by_bin else "%" + _like(self.customer) + "%"
             own = f"(a.customer_{column} {op} %(customer)s OR a.org_{column} {op} %(customer)s)"
-            if lots:
-                # Заказчик лота (он есть у каждого лота, в совместных закупках — свой): одна
-                # таблица и один индекс. Условие «или у объявления» читало всю таблицу лотов.
+            if lots and by_bin:
+                # БИН — заказчик лота или заказчик/организатор объявления (централизованные
+                # закупки): выборки по индексам маленькие, одним списком id.
+                clauses.append("""l.id IN (SELECT x.id FROM lots x WHERE x.customer_bin = %(customer)s
+                                           UNION ALL
+                                           SELECT x.id FROM lots x JOIN announcements a2 ON a2.id = x.trd_buy_id
+                                           WHERE a2.customer_bin = %(customer)s OR a2.org_bin = %(customer)s)""")
+            elif lots:
+                # Название — заказчик лота (он есть у каждого лота, в совместных закупках —
+                # свой): одна таблица и trigram-индекс. Условие «или у объявления» читало всю
+                # таблицу лотов (до 5 с на частых словах вроде «акимат»).
                 clauses.append(f"l.customer_{column} {op} %(customer)s")
             else:
                 clauses.append(own)

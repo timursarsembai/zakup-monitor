@@ -35,15 +35,20 @@ def get(conn: psycopg.Connection) -> dict[str, Any]:
     global _cache
     if (hit := cached()) is not None:
         return hit
-    row = conn.execute("SELECT value FROM app_settings WHERE key = 'brand'").fetchone()
-    data: dict[str, Any] = {}
-    if row:
-        try:
-            data = dict(json.loads(row[0]))
-        except (ValueError, TypeError):
-            data = {}
+    data = _load(conn)
     _cache = (time.monotonic() + TTL, data)
     return data
+
+
+def _load(conn: psycopg.Connection, lock: bool = False) -> dict[str, Any]:
+    """Прямо из базы. Для записи — с блокировкой строки: у другой копии сайта кэш до минуты
+    старый, и запись по нему затёрла бы чужие изменения (логотип, загруженный только что)."""
+    row = conn.execute("SELECT value FROM app_settings WHERE key = 'brand'"
+                       + (" FOR UPDATE" if lock else "")).fetchone()
+    try:
+        return dict(json.loads(row[0])) if row else {}
+    except (ValueError, TypeError):
+        return {}
 
 
 def _save(conn: psycopg.Connection, data: dict[str, Any]) -> None:
@@ -57,7 +62,7 @@ def _save(conn: psycopg.Connection, data: dict[str, Any]) -> None:
 
 
 def save_tagline(conn: psycopg.Connection, ru: str, kk: str) -> None:
-    data = dict(get(conn))
+    data = _load(conn, lock=True)
     data["tagline_ru"] = " ".join(ru.split())[:TAGLINE_MAX]
     data["tagline_kk"] = " ".join(kk.split())[:TAGLINE_MAX]
     _save(conn, data)
@@ -75,12 +80,16 @@ def check_image(content: bytes) -> tuple[str, int, int]:
             image.verify()
         with Image.open(io.BytesIO(content)) as image:
             kind, width, height = image.format, image.width, image.height
-    except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as error:
+    # Битый PNG (контрольная сумма) — SyntaxError, обрезанный файл — EOFError.
+    except (UnidentifiedImageError, OSError, SyntaxError, EOFError, ValueError,
+            Image.DecompressionBombError) as error:
         raise ValueError("Это не картинка PNG, JPEG или WebP.") from error
     if kind not in FORMATS:
         raise ValueError("Подходят PNG, JPEG или WebP.")
     if not (16 <= width <= 4000 and 8 <= height <= 2000):
         raise ValueError("Слишком маленькая или слишком большая картинка.")
+    if width > height * 12:  # в шапке высота 30 px — шире 360 px не помещается
+        raise ValueError("Слишком вытянутая картинка: ширина больше высоты не более чем в 12 раз.")
     return FORMATS[kind], width, height
 
 
@@ -90,7 +99,7 @@ def save_logo(conn: psycopg.Connection, kind: str, content: bytes) -> None:
         """INSERT INTO app_settings (key, value) VALUES (%s, %s)
            ON CONFLICT (key) DO UPDATE SET value = excluded.value""",
         (f"brand_logo_{kind}", json.dumps({"mime": mime, "data": base64.b64encode(content).decode()})))
-    data = dict(get(conn))
+    data = _load(conn, lock=True)
     data[f"logo_{kind}"] = {"v": hashlib.sha256(content).hexdigest()[:12],
                             "w": round(width * HEIGHT / height), "h": HEIGHT}
     _save(conn, data)
@@ -98,9 +107,15 @@ def save_logo(conn: psycopg.Connection, kind: str, content: bytes) -> None:
 
 def reset_logo(conn: psycopg.Connection, kind: str) -> None:
     conn.execute("DELETE FROM app_settings WHERE key = %s", (f"brand_logo_{kind}",))
-    data = dict(get(conn))
+    data = _load(conn, lock=True)
     data.pop(f"logo_{kind}", None)
     _save(conn, data)
+
+
+def version(conn: psycopg.Connection, kind: str) -> str | None:
+    """Текущая версия логотипа (хэш) — прямо из базы."""
+    own = _load(conn).get(f"logo_{kind}")
+    return own["v"] if own else None
 
 
 def logo(conn: psycopg.Connection, kind: str) -> tuple[str, bytes] | None:

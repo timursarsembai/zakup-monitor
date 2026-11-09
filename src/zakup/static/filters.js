@@ -137,7 +137,8 @@
         const scrolled = chipbar.querySelector(".chip-scroll")?.scrollLeft || 0;
         chipbar.innerHTML = freshBar.innerHTML;
         const strip = chipbar.querySelector(".chip-scroll");
-        if (strip) strip.scrollLeft = scrolled;
+        // Сразу, без плавной прокрутки (у строки scroll-behavior: smooth — иначе «едет» от начала).
+        if (strip) strip.scrollTo({ left: scrolled, behavior: "instant" });
         syncArrows();
       }
       const freshForm = doc.getElementById("filters");
@@ -221,19 +222,30 @@
   });
   chipbar?.addEventListener("scroll", syncArrows, true);
   addEventListener("resize", syncArrows);
+  // Ширина строки меняется и без resize окна: свернули левую панель, догрузился шрифт.
+  if (chipbar && "ResizeObserver" in window) new ResizeObserver(syncArrows).observe(chipbar);
+  document.fonts?.ready.then(syncArrows);
   syncArrows();
   // Колесо мыши над строкой условий — прокрутка вбок (полосы прокрутки нет).
   chipbar?.addEventListener("wheel", (event) => {
     const strip = event.target.closest(".chip-scroll");
     if (!strip || Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
     const max = strip.scrollWidth - strip.clientWidth;
-    if (max <= 0) return;
+    const next = Math.max(0, Math.min(max, strip.scrollLeft + event.deltaY));
+    // Строке некуда двигаться (у края или всё помещается) — колесо листает страницу.
+    if (Math.abs(next - strip.scrollLeft) < 1) return;
     event.preventDefault();
-    strip.scrollLeft = Math.max(0, Math.min(max, strip.scrollLeft + event.deltaY));
+    strip.scrollTo({ left: next, behavior: "instant" });
   }, { passive: false });
   backdrop?.addEventListener("click", () => closeSheet());
-  // Окно изменило размер — выпадающая шторка стоит не там: закрыть.
-  addEventListener("resize", () => { if (desktopChips() && sheet.classList.contains("open")) closeSheet(); });
+  // Окно изменило ширину — выпадающая шторка стоит не там: закрыть. Высоту не смотрим:
+  // её меняет экранная клавиатура на планшете, пока человек печатает в поле шторки.
+  let lastWidth = innerWidth;
+  addEventListener("resize", () => {
+    if (innerWidth === lastWidth) return;
+    lastWidth = innerWidth;
+    if (desktopChips() && sheet.classList.contains("open")) closeSheet();
+  });
   // «Сбросить» и «Мои фильтры» (тот же вид поиска) — без перезагрузки; блоки внутри
   // формы перерисовываются, поэтому — делегирование.
   sheet.addEventListener("click", (event) => {

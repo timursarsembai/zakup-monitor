@@ -149,3 +149,17 @@ def test_open_announcement_without_lots_is_refetched_soon(conn):
                     details_fetched_at = now() - interval '20 minutes' WHERE id = 5""")
     details.refresh(conn, Portal(), 10)
     assert len(asked) == 1  # лоты в подробностях есть — как обычно, раз в сутки
+
+
+def test_only_one_active_history_run(conn):
+    from datetime import date
+
+    from zakup import history
+
+    first = history.start(conn, date(2026, 10, 1))
+    import psycopg
+
+    with pytest.raises(psycopg.errors.UniqueViolation):  # вторая копия сайта в тот же момент: индекс 0020
+        conn.execute("INSERT INTO backfill_runs (since) VALUES ('2026-09-01')")
+    conn.rollback()
+    assert first and history.start(conn, date(2026, 9, 1)) is None

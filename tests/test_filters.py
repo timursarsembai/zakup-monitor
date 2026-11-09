@@ -455,3 +455,31 @@ def test_lot_customer_filter_by_name_and_bin(conn):
     _announcement(conn, 2)
     for value, expected in (("школа №5", [10]), ("123456789012", [10]), ("больница", [])):
         assert _lot_ids(conn, Filters(advance_min=0, customer=value)) == expected
+
+
+def test_active_count_includes_open_and_today_checkboxes():
+    from zakup.filters import TODAY
+
+    base = Filters(advance_min=0, disable_person="", end_from="", published_from="")
+    both = Filters(advance_min=0, disable_person="", end_from=TODAY, published_from=TODAY)
+    assert both.active_count() - base.active_count() == 2  # две галочки — два условия
+
+
+def test_closed_lots_are_never_notified_as_new(conn):
+    user = conn.execute("INSERT INTO users (email) VALUES ('c@b.kz') RETURNING id").fetchone()[0]
+    sub = conn.execute(
+        """INSERT INTO subscriptions (user_id, name, query, kind, filters)
+           VALUES (%s, 'Все статусы', '', 'announcements', %s) RETURNING id""",
+        (user, db.Jsonb(Filters(advance_min=0, statuses=[], stages=[], end_from="").to_json())),
+    ).fetchone()[0]
+    _announcement(conn, 1)
+    _announcement(conn, 2, ends_in_days=-3)  # завершённое: история или карточка старого объявления
+    matcher.run_filters(conn, NOW)
+    lots = [r[0] for r in conn.execute("SELECT lot_id FROM matches WHERE subscription_id = %s", (sub,))]
+    assert lots == [10]
+
+
+def test_lot_customer_bin_includes_organizer(conn):
+    _announcement(conn, 1)
+    conn.execute("UPDATE announcements SET org_bin = '999999999999' WHERE id = 1")
+    assert _lot_ids(conn, Filters(advance_min=0, customer="999999999999")) == [10]

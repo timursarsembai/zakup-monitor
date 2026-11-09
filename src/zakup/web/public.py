@@ -157,17 +157,19 @@ def og_announcement(announcement_id: int) -> Response:
 
 
 @router.get("/brand/logo-{kind}")
-def brand_logo(kind: str) -> Response:
-    """Логотип из настроек «Оформление»; адрес с ?v=<хэш> — кэшируется надолго."""
+def brand_logo(kind: str, v: str = "") -> Response:
+    """Логотип из настроек «Оформление». Надолго кэшируется только текущая версия (?v=хэш):
+    устаревшая страница с другой копии сайта не должна закрепить в браузере чужую картинку."""
     if kind not in branding.KINDS:
         raise HTTPException(404)
     with core.pool.connection() as conn:
         stored = branding.logo(conn, kind)
+        current = branding.version(conn, kind)
     if stored is None:
         return RedirectResponse("/" + branding.KINDS[kind], status_code=302)
     mime, content = stored
-    return Response(content, media_type=mime, headers={
-        "Cache-Control": "public, max-age=31536000, immutable", "X-Content-Type-Options": "nosniff"})
+    cache = "public, max-age=31536000, immutable" if v and v == current else "no-cache"
+    return Response(content, media_type=mime, headers={"Cache-Control": cache, "X-Content-Type-Options": "nosniff"})
 
 
 @router.get("/llms.txt")

@@ -44,6 +44,9 @@ def run(conn: psycopg.Connection) -> int:
            FROM subscriptions s
            JOIN lots l ON l.seen_seq > s.matched_up_to AND l.seen_seq <= %(max_seq)s
            WHERE s.active AND s.kind = 'lots'
+             -- Лоты завершённых закупок (догруженная история и т. п.) — не «новые».
+             AND NOT EXISTS (SELECT 1 FROM announcements a
+                             WHERE a.id = l.trd_buy_id AND a.end_date <= now())
              AND l.tsv @@ websearch_to_tsquery(
                  'russian', regexp_replace(s.query, '\\s+или\\s+', ' or ', 'gi'))
              AND (s.min_amount IS NULL OR l.amount >= s.min_amount)
@@ -85,6 +88,10 @@ def insert_matches(conn: psycopg.Connection, sub_id: int, current: Filters, scop
     if lot_ids is not None:
         where += " AND l.id = ANY(%(lot_ids)s)"
         params = {**params, "lot_ids": lot_ids}
+    if not notified:
+        # Присылаем только закупки, куда ещё можно подать заявку: завершённые (догруженная
+        # история, лоты из карточек старых объявлений) — никогда не «новые».
+        where += " AND a.end_date > %(now)s"
     # Подписка с поиска объявлений присылает объявление целиком — со всеми лотами.
     source = (
         "lots l, announcements a" if scope == "lots"
