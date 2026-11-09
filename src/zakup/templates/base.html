@@ -111,6 +111,13 @@
   .a11y-row output { min-width: 48px; text-align: center; font-weight: 600; }
   .a11y-row button { min-width: 40px; font-size: 18px; }
   a { color: var(--accent); text-decoration: none; }
+  /* Поле пароля с кнопкой «показать» (app.js). */
+  .pw-wrap { position: relative; display: block; }
+  .pw-wrap > input { width: 100%; padding-right: 44px !important; box-sizing: border-box; }
+  .pw-eye { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); display: inline-flex; align-items: center;
+            justify-content: center; width: 36px; height: 36px; padding: 0; border: 0; background: none; color: var(--muted); cursor: pointer; }
+  .pw-eye:hover { color: var(--fg); }
+  .pw-eye svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
   /* Ссылки в содержимом и подвале: при наведении — светло-оранжевая заливка (боковое меню
      и кнопки-ссылки — со своими стилями). :where — нулевой вес: свои :hover страниц важнее. */
   :where(main a:not(.button, .primary, .pw-buy, .buy, .wa, .org-wa, .org-call, .call, .icon-button,
@@ -290,7 +297,8 @@
         "offline": _("Нет связи с сайтом."), "copy_link": _("Скопируйте ссылку:"),
         "login_again": _("войдите заново"), "copied": _("Скопировано ✓"),
         "copy_failed": _("Не удалось скопировать"), "copy_questions": _("Скопировать вопросы"),
-        "session_expired": _("Сессия истекла —")}} | tojson }}</script>
+        "session_expired": _("Сессия истекла —"),
+        "show_password": _("Показать пароль"), "hide_password": _("Скрыть пароль")}} | tojson }}</script>
 <script>const CONFIG = JSON.parse(document.getElementById("app-config").textContent);</script>
 </head>
 <body>

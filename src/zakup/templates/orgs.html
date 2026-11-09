@@ -11,7 +11,7 @@
   .pager { display: flex; gap: 10px; align-items: center; margin: 14px 0; }
   .org-panel .fgrid { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
   .org-panel .fgrid .wide { grid-column: 1 / -1; }
-  .org-panel input, .org-panel select { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); font: inherit; }
+  .org-panel input:not([type=checkbox]), .org-panel select { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); font: inherit; }
   .found-row { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; margin: 12px 0 8px; }
   .view-switch { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
   .view-switch button { display: inline-flex; align-items: center; gap: 6px; border: 0; border-radius: 0; padding: 5px 10px; color: var(--muted); background: none; }
