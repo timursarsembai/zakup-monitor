@@ -3,14 +3,74 @@
 (() => {
   // На телефоне фильтр открывается на весь экран.
   const sheet = document.getElementById("filters");
+  const backdrop = document.querySelector("[data-filter-backdrop]");
+  const title = sheet.querySelector(".sheet-head b");
+  const fullTitle = title.textContent;
+  // Панель условий (телефон): условие открывает этот же фильтр снизу, но только своё поле;
+  // «Фильтры» — весь фильтр; «Сохранить» — только подписку; «Сортировка» — список.
+  const closeSheet = () => {
+    sheet.classList.remove("open", "single");
+    delete sheet.dataset.mode;
+    for (const group of sheet.querySelectorAll(".shown")) group.classList.remove("shown");
+    if (backdrop) backdrop.hidden = true;
+    title.textContent = fullTitle;
+    document.body.classList.remove("sheet-open");
+  };
+  const openSheet = (mode, label) => {
+    closeSheet();
+    sheet.classList.add("open");
+    document.body.classList.add("sheet-open");
+    if (mode === "all") return;
+    sheet.classList.add("single");
+    sheet.dataset.mode = mode;
+    title.textContent = label;
+    for (const group of sheet.querySelectorAll(`[data-chip="${mode}"]`)) {
+      group.classList.add("shown");
+      for (const list of group.querySelectorAll("details.multi")) list.open = true;
+    }
+    if (backdrop) backdrop.hidden = false;
+  };
+  for (const chip of document.querySelectorAll("[data-chip-open]")) {
+    chip.addEventListener("click", () => openSheet(chip.dataset.chipOpen, chip.getAttribute("aria-label") || chip.textContent.trim()));
+  }
+  backdrop?.addEventListener("click", closeSheet);
+  // «Только открытые», «Опубликованы сегодня» — переключаются сразу.
+  for (const chip of document.querySelectorAll("[data-chip-toggle]")) {
+    chip.addEventListener("click", () => {
+      const box = sheet.querySelector(`[name="${chip.dataset.chipToggle}"]`);
+      box.checked = !box.checked;
+      sheet.requestSubmit();
+    });
+  }
+  for (const option of sheet.querySelectorAll("[data-sort-value]")) {
+    option.addEventListener("click", () => {
+      sheet.querySelector("[data-sort-field]").value = option.dataset.sortValue;
+      sheet.requestSubmit();
+    });
+  }
+  // «Сбросить» в шторке условия — очистить только его поля и применить.
+  sheet.querySelector("[data-chip-reset]")?.addEventListener("click", () => {
+    for (const group of sheet.querySelectorAll(".shown")) {
+      for (const field of group.querySelectorAll("input, select")) {
+        if (field.type === "checkbox") field.checked = false;
+        else if (field.type === "range") field.value = field === group.querySelector("input[type=range]") ? 0 : 100;
+        else if (field.tagName === "SELECT") field.value = [...field.options].some((o) => o.value === "") ? "" : field.options[0].value;
+        else field.value = "";
+      }
+    }
+    sheet.requestSubmit();
+  });
+  // Высота шапки — панель условий закрепляется сразу под ней.
+  const header = document.querySelector("header");
+  const syncHeader = () => header && document.documentElement.style.setProperty("--hdr", header.offsetHeight + "px");
+  syncHeader();
+  addEventListener("resize", syncHeader);
   for (const opener of document.querySelectorAll("[data-filter-open]")) opener.addEventListener("click", () => {
     sheet.classList.add("open"); document.body.classList.add("sheet-open");
     // «Подписаться» — сразу к блоку подписки внизу панели.
     if (opener.hasAttribute("data-filter-subscribe")) sheet.querySelector(".subscribe")?.scrollIntoView({ block: "start" });
   });
-  document.querySelector("[data-filter-close]").addEventListener("click", () => {
-    sheet.classList.remove("open"); document.body.classList.remove("sheet-open");
-  });
+  document.querySelector("[data-filter-close]").addEventListener("click", closeSheet);
   // Поля подписки живут в той же форме, что и поиск: в обычный поиск их не отправляем,
   // а Enter в названии подписки — подписывает, а не ищет.
   // При редактировании подписки обычный поиск сохраняет режим правки (поле edit).
@@ -25,9 +85,7 @@
   });
   // Escape закрывает полноэкранный фильтр на телефоне.
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && sheet.classList.contains("open")) {
-      sheet.classList.remove("open"); document.body.classList.remove("sheet-open");
-    }
+    if (event.key === "Escape" && sheet.classList.contains("open")) closeSheet();
   });
   // Выпадающие списки: клик мимо — закрыть.
   document.addEventListener("click", (event) => {

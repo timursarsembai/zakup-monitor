@@ -539,3 +539,12 @@ def test_organization_tabs(client, conn):
     # Неизвестная вкладка или параметры — обзор, без ошибок.
     assert client.get(f"/org/{supplier}?tab=evil&sort=x&page=-3").status_code == 200
     assert client.get(f"/org/{customer}?tab=wins").status_code == 200  # у заказчика нет побед — обзор
+
+
+def test_mobile_chip_bar_shows_set_conditions(client):
+    page = client.get("/lots?applied=1&open_now=1&region=75&region=19&min_sum=300000&category=31").text
+    bar = page.split("data-chipbar", 1)[1].split('data-filter-backdrop', 1)[0]
+    assert "г. Алматы, +1" in bar and "от 300 000" in bar and "Мебель" in bar
+    assert 'class="chip set" data-chip-toggle="open_now"' in bar and 'data-chip-open="sort"' in bar
+    form = page.split('id="filters"', 1)[1]
+    assert 'data-chip="region"' in form and 'data-sort-value="published"' in form and "data-chip-reset" in form

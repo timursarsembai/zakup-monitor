@@ -58,7 +58,41 @@
     .flayout { grid-template-columns: minmax(0, 1fr); }
     .subscribe { padding: 14px 0 0; border-left: 0; border-top: 1px solid var(--line); }
   }
-  .filter-bar, .filter-open, .sheet-head { display: none; }
+  .filter-bar, .filter-open, .sheet-head, .chipbar, .sort-pick, .single-actions, .filter-backdrop { display: none; }
+  /* Телефон: панель условий под шапкой (закреплена вместе с ней), шторки снизу. */
+  @media (max-width: 760px) {
+    .chipbar { display: flex; gap: 8px; align-items: center; position: sticky; top: var(--hdr, 57px); z-index: 30;
+               margin: 0 -12px 10px; padding: 8px 12px; background: var(--bg); border-bottom: 1px solid var(--line); }
+    .chip-fixed { display: flex; gap: 6px; flex: none; padding-right: 8px; border-right: 1px solid var(--line); }
+    .chip-scroll { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+    .chip-scroll::-webkit-scrollbar { display: none; }
+    .chip, .chip-icon { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; border: 1px solid var(--line);
+                        background: color-mix(in srgb, var(--fg) 4%, var(--bg)); color: var(--fg); font-size: 14px; }
+    .chip { padding: 7px 12px; border-radius: 999px; }
+    .chip svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2.4; }
+    .chip.set { background: var(--accent); color: var(--on-accent); border-color: transparent; font-weight: 600; }
+    .chip-icon { position: relative; justify-content: center; width: 38px; height: 36px; padding: 0; border-radius: 10px; }
+    .chip-icon svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+    .chip-icon .count { position: absolute; top: -6px; right: -6px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px;
+                        background: var(--accent); color: var(--on-accent); font-size: 11px; line-height: 18px; text-align: center; }
+    .filter-backdrop:not([hidden]) { display: block; position: fixed; inset: 0; z-index: 79; background: rgb(0 0 0 / 45%); }
+    /* Одно условие: снизу, только его поле. */
+    .filters-panel.open.single { inset: auto 0 0 0; max-height: 82vh; border-radius: 18px 18px 0 0; box-shadow: 0 -10px 30px rgb(0 0 0 / 25%);
+                                 padding-bottom: env(safe-area-inset-bottom); }
+    .filters-panel.single .fgrid > div:not(.shown), .filters-panel.single .panel-actions,
+    .filters-panel.single .subscribe, .filters-panel.single .sort-pick:not(.shown) { display: none; }
+    .filters-panel.single[data-mode=subscribe] .subscribe { display: flex; padding-top: 0; border-top: 0; }
+    .filters-panel.single[data-mode=subscribe] .fgrid { display: none; }
+    .filters-panel.single .single-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; position: sticky; bottom: 0;
+                                           background: var(--bg); padding: 12px 0 14px; }
+    .filters-panel.single[data-mode=subscribe] .single-actions, .filters-panel.single[data-mode=sort] .single-actions { display: none; }
+    .single-actions button { min-height: 50px; border-radius: 12px; font-size: 17px; }
+    .single-actions .primary { background: var(--accent); color: var(--on-accent); border-color: transparent; font-weight: 600; }
+    .filters-panel.single .sort-pick.shown { display: flex; flex-direction: column; gap: 4px; padding-bottom: 16px; }
+    .sort-option { text-align: left; padding: 14px 12px; border: 0; border-radius: 10px; background: none; font-size: 17px; color: var(--fg); }
+    .sort-option.on { color: var(--accent); font-weight: 600; background: color-mix(in srgb, var(--accent) 10%, transparent); }
+    .filters-panel.single .multi-list { position: static; max-height: 50vh; overflow-y: auto; }
+  }
   @media (max-width: 760px) {
     .filter-bar { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 12px 0; }
     .filter-open { display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); color: var(--fg); font-size: 16px; font-weight: 600; }
@@ -151,29 +185,64 @@
 
 {% macro filter_form() %}
 {% set lots = scope == "lots" %}
-<div class="filter-bar">
-  <button type="button" class="filter-open" data-filter-open title="{{ f.describe() }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>{{ _("Фильтры") }}{% set n = f.active_count() %}{% if n %}<span class="count">{{ n }}</span>{% endif %}</button>
-  <button type="button" class="filter-open" data-filter-open data-filter-subscribe {% if not request.state.paid %}data-paid data-feature="subscription"{% endif %}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg>{{ _("Подписаться") }}</button>
+{# Телефон: панель как в Каспи — слева «Сортировка», «Фильтры», «Сохранить»; справа условия
+   по одному, у заданных — значение. Условие открывает этот же фильтр снизу, но только своё поле. #}
+{% macro short_list(names) %}{{ names[0] }}{% if names|length > 1 %}, +{{ names|length - 1 }}{% endif %}{% endmacro %}
+{% macro money_short(v) %}{{ "{:,.0f}".format(v).replace(",", " ") }}{% endmacro %}
+{% set chip_values = {
+  "region": short_list(f.regions | map("region_name_filter") | select | list) if f.regions else "",
+  "category": short_list(f.categories | map("division_label") | list) if f.categories else "",
+  "sum": ((_("от") ~ " " ~ money_short(f.min_sum)) if f.min_sum is not none else "") ~ (" " if f.min_sum is not none and f.max_sum is not none else "") ~ ((_("до") ~ " " ~ money_short(f.max_sum)) if f.max_sum is not none else ""),
+  "deadline": _("в 2 раб. дня") if f.deadline == rule else ((_("по") ~ " " ~ f.deadline[8:10] ~ "." ~ f.deadline[5:7]) if f.deadline else ""),
+  "status": (_("Статус") ~ " · " ~ ((f.statuses|length) + (f.stages|length))) if f.statuses or (f.stages and f.stages != ["open"]) else "",
+  "advance": (_("аванс") ~ " " ~ (f.advance_min ~ "–" ~ f.advance_max ~ "%")) if f.advance_only or f.advance_min > 0 or f.advance_max < 100 else "",
+  "disable": _("Инвалиды") if f.disable_person == "only" else (_("Без инвалидов") if f.disable_person == "exclude" else ""),
+  "method": (_("Способ") ~ " · " ~ f.methods|length) if f.methods else "",
+  "subject": (_("Предмет") ~ " · " ~ f.subjects|length) if f.subjects else "",
+  "dates": _("Даты ✓") if f.start_from or f.start_to or f.itogi_from or f.itogi_to or (f.published_from and f.published_from != "today") or f.published_to or (f.end_from and f.end_from != "today") else "",
+  "year": short_list(f.years | map("string") | list) if f.years else "",
+  "customer": f.customer[:18] if f.customer else "",
+  "words": ("«" ~ f.q[:16] ~ "»") if f.q else (_("без слов") if f.exclude else ""),
+  "number": f.number or f.lot_number or f.enstru,
+} %}
+{% set chip_names = [("region", _("Регион")), ("category", _("Категория")), ("sum", _("Сумма")), ("deadline", _("Срок")),
+  ("open_now", _("Только открытые")), ("today_only", _("Опубликованы сегодня")), ("status", _("Статус")), ("advance", _("Аванс")),
+  ("disable", _("Инвалиды")), ("method", _("Способ")), ("subject", _("Предмет")), ("words", _("Слова")),
+  ("customer", _("Заказчик")), ("dates", _("Даты")), ("year", _("Фин. год")), ("number", _("Номер, ЕНС ТРУ"))] %}
+<div class="chipbar" data-chipbar>
+  <div class="chip-fixed">
+    <button type="button" class="chip-icon" data-chip-open="sort" aria-label="{{ _("Сортировка") }}" title="{{ _("Сортировка") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4v16M3 8l4-4 4 4M17 20V4M13 16l4 4 4-4"/></svg></button>
+    <button type="button" class="chip-icon" data-chip-open="all" aria-label="{{ _("Фильтры") }}" title="{{ f.describe() }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>{% set n = f.active_count() %}{% if n %}<span class="count">{{ n }}</span>{% endif %}</button>
+    <button type="button" class="chip-icon" data-chip-open="subscribe" {% if not request.state.paid %}data-paid data-feature="subscription"{% endif %} aria-label="{{ _("Сохранить фильтр — подписка") }}" title="{{ _("Сохранить фильтр — подписка") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg></button>
+  </div>
+  <div class="chip-scroll">
+    {% for key, label in chip_names %}
+    {% if key == "open_now" %}<button type="button" class="chip {{ 'set' if f.end_from == 'today' }}" data-chip-toggle="open_now">{{ label }}</button>
+    {% elif key == "today_only" %}<button type="button" class="chip {{ 'set' if f.published_from == 'today' }}" data-chip-toggle="today_only">{{ label }}</button>
+    {% elif key != "number" or lots or f.number %}{% set value = chip_values[key] %}<button type="button" class="chip {{ 'set' if value }}" data-chip-open="{{ key }}">{{ value or label }}<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>{% endif %}
+    {% endfor %}
+  </div>
 </div>
+<div class="filter-backdrop" data-filter-backdrop hidden></div>
 <form method="get" action="/{{ scope }}" class="filters-panel" id="filters" aria-label="{{ _("Фильтр") }}">
   <div class="sheet-head"><b>{{ _("Фильтр") }}</b><button type="button" data-filter-close aria-label="{{ _("Закрыть") }}">✕</button></div>
   <input type="hidden" name="applied" value="1">
-  <input type="hidden" name="sort" value="{{ f.sort }}">
+  <input type="hidden" name="sort" value="{{ f.sort }}" data-sort-field>
   {% if per_page != 50 %}<input type="hidden" name="per_page" value="{{ per_page }}">{% endif %}
   <div class="flayout">
   <div class="fmain">
   <div class="fgrid">
-    <div><label class="fl" for="f-q">{{ _("Наименование или описание лота") if lots else _("Наименование объявления") }}</label>
+    <div data-chip="words"><label class="fl" for="f-q">{{ _("Наименование или описание лота") if lots else _("Наименование объявления") }}</label>
       <input id="f-q" name="q" value="{{ f.q }}" placeholder="{{ _("стол или стул -аренда") }}"></div>
-    <div><label class="fl" for="f-exclude">{{ _("Исключить слова") }}</label>
+    <div data-chip="words"><label class="fl" for="f-exclude">{{ _("Исключить слова") }}</label>
       <input id="f-exclude" name="exclude" value="{{ f.exclude }}" placeholder="{{ _("аренда, ремонт") }}"></div>
-    <div><label class="fl" for="f-number">{{ _("Номер объявления") }}</label>
+    <div data-chip="number"><label class="fl" for="f-number">{{ _("Номер объявления") }}</label>
       <input id="f-number" name="number" value="{{ f.number }}" placeholder="17914810-1"></div>
-    {% if lots %}<div><label class="fl" for="f-lot">{{ _("Номер лота") }}</label>
+    {% if lots %}<div data-chip="number"><label class="fl" for="f-lot">{{ _("Номер лота") }}</label>
       <input id="f-lot" name="lot_number" value="{{ f.lot_number }}" placeholder="{{ _("88448423-ЗЦП1") }}"></div>{% endif %}
-    <div><label class="fl" for="f-customer">{{ _("Заказчик или организатор") if lots else _("Организатор или заказчик") }}</label>
+    <div data-chip="customer"><label class="fl" for="f-customer">{{ _("Заказчик или организатор") if lots else _("Организатор или заказчик") }}</label>
       <input id="f-customer" name="customer" value="{{ f.customer }}" placeholder="{{ _("БИН или наименование") }}"></div>
-    <div><span class="fl">{{ _("Статус") }}</span>
+    <div data-chip="status"><span class="fl">{{ _("Статус") }}</span>
       <details class="multi">
         <summary>{% set picked = [] %}{% for k in f.stages %}{% set __ = picked.append(_(stages[k])) %}{% endfor %}{% for s in f.statuses %}{% set __ = picked.append(_(status_names.get(s, s))) %}{% endfor %}{% if picked %}{{ picked|join(", ") }}{% else %}<span class="muted">{{ _("Все статусы") }}</span>{% endif %}</summary>
         <div class="multi-list">
@@ -187,38 +256,38 @@
           {% endfor %}
         </div>
       </details></div>
-    <div><span class="fl">{{ _("Способ закупки") }}</span>
+    <div data-chip="method"><span class="fl">{{ _("Способ закупки") }}</span>
       {% set method_labels = {} %}{% for k, v in methods.items() %}{% set __ = method_labels.update({k: v[0]}) %}{% endfor %}
       {{ multi("method", method_labels, f.methods, _("Все способы")) }}</div>
-    <div><span class="fl">{{ _("Место поставки") }}</span>
+    <div data-chip="region"><span class="fl">{{ _("Место поставки") }}</span>
       {{ multi("region", regions, f.regions, _("Весь Казахстан")) }}</div>
-    <div><span class="fl">{{ _("Категория") }}</span>
+    <div data-chip="category"><span class="fl">{{ _("Категория") }}</span>
       {{ multi("category", categories, f.categories, _("Все категории")) }}</div>
-    <div><span class="fl">{{ _("Предмет закупки") }}</span>
+    <div data-chip="subject"><span class="fl">{{ _("Предмет закупки") }}</span>
       {{ multi("subject", subjects, f.subjects, _("Товары, работы, услуги")) }}</div>
-    <div><label class="fl" for="f-disable">{{ _("Признаки: организации инвалидов") }}</label>
+    <div data-chip="disable"><label class="fl" for="f-disable">{{ _("Признаки: организации инвалидов") }}</label>
       <select id="f-disable" name="disable_person">{% for key, name in disable_options.items() %}<option value="{{ key }}" {% if f.disable_person == key %}selected{% endif %}>{{ _(name) }}</option>{% endfor %}</select></div>
-    <div><span class="fl">{{ _("Сумма") }} {{ _("лота") if lots else _("закупки") }}{{ _(", ₸, с — по") }}</span>
+    <div data-chip="sum"><span class="fl">{{ _("Сумма") }} {{ _("лота") if lots else _("закупки") }}{{ _(", ₸, с — по") }}</span>
       <div class="pair">
         <input name="min_sum" value="{{ '%.0f'|format(f.min_sum) if f.min_sum is not none else '' }}" placeholder="{{ _("с") }}" inputmode="numeric" aria-label="{{ _("Сумма с") }}">
         <input name="max_sum" value="{{ '%.0f'|format(f.max_sum) if f.max_sum is not none else '' }}" placeholder="{{ _("по") }}" inputmode="numeric" aria-label="{{ _("Сумма по") }}">
       </div></div>
-    <div><label class="fl" for="f-deadline">{{ _("Окончание приема заявок") }}</label>
+    <div data-chip="deadline"><label class="fl" for="f-deadline">{{ _("Окончание приема заявок") }}</label>
       <select id="f-deadline" name="deadline_mode">
         <option value="rule" {% if f.deadline == rule %}selected{% endif %}>{{ _("в течение 2 рабочих дней — по") }} {{ rule_date.strftime("%d.%m") }}, {{ _(["пн", "вт", "ср", "чт", "пт", "сб", "вс"][rule_date.weekday()]) }}</option>
         <option value="date" {% if f.deadline and f.deadline != rule %}selected{% endif %}>{{ _("по дате (поле «по»)") }}</option>
         <option value="" {% if not f.deadline %}selected{% endif %}>{{ _("без ограничения") }}</option>
       </select></div>
-    <div><label class="check open-now"><input type="checkbox" name="open_now" value="1" {% if f.end_from == 'today' %}checked{% endif %}> {{ _("Только с открытым приёмом заявок") }}</label>
+    <div data-chip="open"><label class="check open-now"><input type="checkbox" name="open_now" value="1" {% if f.end_from == 'today' %}checked{% endif %}> {{ _("Только с открытым приёмом заявок") }}</label>
       <span class="muted hint">{{ _("Срок подачи заявок ещё не прошёл — проверяется каждый день заново.") }}</span>
       <label class="check open-now"><input type="checkbox" name="today_only" value="1" {% if f.published_from == 'today' %}checked{% endif %}> {{ _("Только опубликованные сегодня") }}</label>
       <span class="muted hint">{{ _("В выходные — с пятницы. Дата сдвигается сама каждый день.") }}</span></div>
-    <div><span class="fl">{{ _("Окончание приема заявок с — по") }}</span>
+    <div data-chip="deadline"><span class="fl">{{ _("Окончание приема заявок с — по") }}</span>
       <div class="pair">
         <input type="date" name="end_from" value="{{ '' if f.end_from == 'today' else f.end_from }}" aria-label="{{ _("Окончание с") }}">
         <input type="date" name="deadline_date" value="{{ f.deadline if f.deadline and f.deadline != rule else '' }}" aria-label="{{ _("Окончание по") }}">
       </div></div>
-    <div class="advance" data-advance data-labels='{{ {"any": _("любой"), "none": _("без аванса"), "from": _("от"), "to": _("до")}|tojson }}'>
+    <div class="advance" data-chip="advance" data-advance data-labels='{{ {"any": _("любой"), "none": _("без аванса"), "from": _("от"), "to": _("до")}|tojson }}'>
       <span class="fl">{{ _("Авансовый платёж") }}{% if not lots %} {{ _("(наибольший по лотам)") }}{% endif %}: <b data-advance-label></b></span>
       <div class="range2">
         <input type="range" name="advance_min" min="0" max="100" step="5" value="{{ f.advance_min if not f.advance_only or f.advance_min else 5 }}" aria-label="{{ _("Аванс от, %") }}">
@@ -232,17 +301,27 @@
       </div>
     </div>
 
-    <div><span class="fl">{{ _("Начало приема заявок с — по") }}</span>
+    <div data-chip="dates"><span class="fl">{{ _("Начало приема заявок с — по") }}</span>
       <div class="pair"><input type="date" name="start_from" value="{{ f.start_from }}" aria-label="{{ _("Начало с") }}"><input type="date" name="start_to" value="{{ f.start_to }}" aria-label="{{ _("Начало по") }}"></div></div>
-    <div><span class="fl">{{ _("Протокол итогов с — по") }}</span>
+    <div data-chip="dates"><span class="fl">{{ _("Протокол итогов с — по") }}</span>
       <div class="pair"><input type="date" name="itogi_from" value="{{ f.itogi_from }}" aria-label="{{ _("Протокол итогов с") }}"><input type="date" name="itogi_to" value="{{ f.itogi_to }}" aria-label="{{ _("Протокол итогов по") }}"></div></div>
-    <div><span class="fl">{{ _("Дата публикации с — по") }}</span>
+    <div data-chip="dates"><span class="fl">{{ _("Дата публикации с — по") }}</span>
       <div class="pair"><input type="date" name="published_from" value="{{ '' if f.published_from == 'today' else f.published_from }}" aria-label="{{ _("Публикация с") }}"><input type="date" name="published_to" value="{{ f.published_to }}" aria-label="{{ _("Публикация по") }}"></div></div>
-    <div><span class="fl">{{ _("Финансовый год") }}</span>
+    <div data-chip="year"><span class="fl">{{ _("Финансовый год") }}</span>
       {% set year_labels = {} %}{% for y in years %}{% set __ = year_labels.update({y: y|string}) %}{% endfor %}
       {{ multi("year", year_labels, f.years, _("Любой")) }}</div>
-    {% if lots %}<div><label class="fl" for="f-enstru">{{ _("ЕНС ТРУ") }}</label>
+    {% if lots %}<div data-chip="number"><label class="fl" for="f-enstru">{{ _("ЕНС ТРУ") }}</label>
       <input id="f-enstru" name="enstru" value="{{ f.enstru }}" placeholder="{{ _("код или его начало") }}"></div>{% endif %}
+  </div>
+  {# Шторка «Сортировка» (телефон): выбор сразу применяется. #}
+  <div class="sort-pick" data-chip="sort">
+    <span class="fl">{{ _("Сортировка") }}</span>
+    {% for key, name in sorts.items() %}<button type="button" class="sort-option {{ 'on' if f.sort == key }}" data-sort-value="{{ key }}">{{ _(name) }}</button>{% endfor %}
+  </div>
+  {# Шторка одного условия: сбросить только его или применить. #}
+  <div class="single-actions">
+    <button type="button" data-chip-reset>{{ _("Сбросить") }}</button>
+    <button class="primary">{{ _("Применить") }}</button>
   </div>
   <div class="panel-actions">
     <button class="primary">{{ _("Найти") }}</button>
