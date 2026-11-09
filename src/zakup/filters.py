@@ -376,16 +376,20 @@ class Filters:
                                           WHERE l2.trd_buy_id = a.id AND left(c, 2) = ANY(%(categories)s))""")
             params["categories"] = self.categories
         if self.customer:
-            lot_part = " OR l.customer_{} {} %(customer)s" if lots else ""
-            if self.customer.isdigit():
-                clauses.append("(a.customer_bin = %(customer)s OR a.org_bin = %(customer)s"
-                               + lot_part.format("bin", "=") + ")")
-                params["customer"] = self.customer
+            by_bin = self.customer.isdigit()
+            column, op = ("bin", "=") if by_bin else ("name_ru", "ILIKE")
+            params["customer"] = self.customer if by_bin else "%" + _like(self.customer) + "%"
+            own = f"(a.customer_{column} {op} %(customer)s OR a.org_{column} {op} %(customer)s)"
+            if lots:
+                # Лоты по заказчику объявления или своему (совместные закупки) — одним списком id:
+                # так оба условия идут по индексам, а не проверяются у каждого лота при соединении.
+                clauses.append(f"""l.id IN (
+                    SELECT x.id FROM lots x WHERE x.trd_buy_id IN (
+                        SELECT a2.id FROM announcements a2 WHERE {own.replace("a.", "a2.")})
+                    UNION ALL
+                    SELECT x.id FROM lots x WHERE x.customer_{column} {op} %(customer)s)""")
             else:
-                clauses.append("(a.customer_name_ru ILIKE %(customer)s"
-                               " OR a.org_name_ru ILIKE %(customer)s"
-                               + lot_part.format("name_ru", "ILIKE") + ")")
-                params["customer"] = "%" + _like(self.customer) + "%"
+                clauses.append(own)
 
     def _where_place_and_sum(self, clauses: list[str], params: dict[str, Any], lots: bool, now: datetime) -> None:
         """Регион поставки и сумма."""
