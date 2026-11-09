@@ -503,8 +503,13 @@ def announcements_search(request: Request, user: Viewer, page: int = 1, per_page
                         FROM lots p WHERE p.trd_buy_id = a.id),
                        a.name_kz, a.detail->'RefTradeMethods'->>'nameKz',
                        a.detail->'RefBuyStatus'->>'nameKz', a.detail->'Organizer'->>'nameKz'
-                FROM announcements a WHERE {where} ORDER BY {current.order_by("announcements")}
-                LIMIT {per_page} OFFSET {(page - 1) * per_page}""",
+                -- Сначала номера нужной страницы, потом поля из detail только для них: иначе
+                -- detail (сотни КБ) разворачивался у всех подходящих до сортировки — 5 с.
+                FROM (SELECT a.id, row_number() OVER (ORDER BY {current.order_by("announcements")}) AS n
+                      FROM announcements a WHERE {where}
+                      ORDER BY {current.order_by("announcements")}
+                      LIMIT {per_page} OFFSET {(page - 1) * per_page}) shown
+                JOIN announcements a ON a.id = shown.id ORDER BY shown.n""",
             params,
         ).fetchall()
         total = conn.execute(
