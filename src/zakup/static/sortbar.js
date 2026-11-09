@@ -22,6 +22,8 @@
     }
     for (const select of document.querySelectorAll(".sortbar [data-param]")) {
       select.addEventListener("change", () => {
+        // На странице с фильтром — без перезагрузки (filters.js); иначе обычный переход.
+        if (window.applyFilterParam) return window.applyFilterParam(select.dataset.param, select.value);
         const bar = select.closest(".sortbar");
         const url = new URL(location.pathname + "?" + bar.dataset.query, location.origin);
         url.searchParams.set(select.dataset.param, select.value);

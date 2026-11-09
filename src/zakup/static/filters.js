@@ -102,6 +102,19 @@
     }
   };
   addEventListener("popstate", () => location.reload());
+  // Для панели над результатами (sortbar.js): сортировка и «Показывать по» — без перезагрузки.
+  window.applyFilterParam = (name, value) => {
+    let field = sheet.querySelector(`input[type=hidden][name="${name}"]`);
+    if (!field) {
+      field = Object.assign(document.createElement("input"), { type: "hidden", name });
+      sheet.append(field);
+    }
+    field.value = value;
+    if (name === "sort") {
+      for (const option of sheet.querySelectorAll("[data-sort-value]")) option.classList.toggle("on", option.dataset.sortValue === value);
+    }
+    sheet.requestSubmit();
+  };
   sheet.addEventListener("submit", (event) => {
     // Подписка и выгрузка в Excel — обычной отправкой; поиск («Найти», «Применить», условия) — без перезагрузки.
     if (event.submitter === subscribeButtonRef() || event.submitter?.hasAttribute("formaction")) return;
