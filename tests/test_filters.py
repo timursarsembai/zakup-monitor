@@ -29,8 +29,15 @@ def test_defaults_match_the_owner_request():
     assert (f.statuses, f.disable_person, f.regions, f.min_sum, f.deadline) == (
         [240], "only", ["75", "19"], Decimal(300000), DEADLINE_RULE
     )
-    assert Filters.from_form({}) == f
     assert Filters.from_json(f.to_json()) == f
+    # Первый заход на поиск — свежая сводка; клиентам сначала новые, сотрудникам — как привыкли.
+    fresh = Filters.from_form({}, staff=False)
+    assert (fresh.published_from, fresh.end_from, fresh.regions, fresh.disable_person, fresh.sort) == (
+        "today", "today", [], "", "published")
+    assert Filters.from_form({}, staff=True).sort == "advance"
+    from zakup.filters import last_workday
+    assert last_workday(date(2026, 11, 7)) == last_workday(date(2026, 11, 8)) == date(2026, 11, 6)
+    assert last_workday(date(2026, 11, 9)) == date(2026, 11, 9)
 
 
 def test_form_parsing():
@@ -379,7 +386,7 @@ def test_today_only_checkbox_published_today(conn):
     current = Filters.from_form({"applied": ["1"], "today_only": ["1"], "open_now": ["1"]})
     assert current.published_from == "today" and current.relative()
     assert "today_only=1" in current.to_query("lots")
-    for ident, published in ((1, NOW - timedelta(days=1)), (2, NOW)):
+    for ident, published in ((1, NOW - timedelta(days=5)), (2, NOW)):
         _announcement(conn, ident)
         conn.execute("UPDATE announcements SET publish_date = %s WHERE id = %s", (published, ident))
     where, params = replace(current, statuses=[], disable_person="", regions=[], min_sum=None,

@@ -7,7 +7,7 @@
 """
 
 import re
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -215,11 +215,17 @@ class Filters:
         return cls(**known)
 
     @classmethod
+    def fresh(cls, staff: bool = False) -> "Filters":
+        """Первый заход на поиск — свежая сводка: опубликованные сегодня (в выходные — с
+        пятницы), с открытым приёмом заявок, все регионы, без признаков и аванса. Клиентам и
+        гостям — сначала новые; сотрудникам — их привычная сортировка."""
+        return replace(cls.public(), published_from=TODAY, sort="advance" if staff else "published")
+
+    @classmethod
     def from_form(cls, form: dict[str, list[str]], staff: bool = True) -> "Filters":
-        """Из параметров запроса. Пустая форма (первый заход) — значения по умолчанию:
-        у сотрудников — фильтр владельца, у остальных — все открытые, как на портале."""
+        """Из параметров запроса. Пустая форма (первый заход) — свежая сводка (fresh)."""
         if "applied" not in form:
-            return cls() if staff else cls.public()
+            return cls.fresh(staff)
 
         def one(name: str) -> str:
             return (form.get(name) or [""])[0].strip()
@@ -401,7 +407,9 @@ class Filters:
             )
         today = now.astimezone(PORTAL_TZ).date().isoformat()
         end_from = today if self.end_from == TODAY else self.end_from
-        published_from = today if self.published_from == TODAY else self.published_from
+        # «Опубликованные сегодня»: в выходные — с пятницы (портал в выходные почти не публикует).
+        published_from = last_workday(now.astimezone(PORTAL_TZ).date()).isoformat() \
+            if self.published_from == TODAY else self.published_from
         for column, start, end in (("end_date", end_from, ""),
                                    ("start_date", self.start_from, self.start_to),
                                    ("publish_date", published_from, self.published_to),
@@ -562,6 +570,11 @@ _OR_KK = re.compile(r"\s+немесе\s+", re.IGNORECASE)
 
 def _percent(value: str, default: int) -> int:
     return min(max(int(value), 0), 100) if value.isdigit() else default
+
+
+def last_workday(today: date) -> date:
+    """Сегодня, а в субботу и воскресенье — пятница."""
+    return today - timedelta(days=max(0, today.weekday() - 4))
 
 
 def _today() -> date:

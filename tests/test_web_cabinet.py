@@ -95,8 +95,8 @@ def test_unpaid_client_gets_paywall_until_access_granted(client, conn):
     client.post("/login", data={"email": "87011112233", "password": "client-password-1"}, headers=ORIGIN)
     assert client.post("/lots/5001/mark", data={"status": "interested"}, headers=ORIGIN).status_code == 402
     assert client.get("/my", follow_redirects=False).headers["location"] == "/pricing"
-    # Клиенту по умолчанию — все открытые закупки, а не фильтр владельца.
-    page = client.get("/lots").text
+    # Клиенту — все открытые закупки, а не фильтр владельца.
+    page = client.get("/lots?applied=1&open_now=1").text
     assert "Бумага А4" in page
     client.post("/logout", headers=ORIGIN)
     _login(client)

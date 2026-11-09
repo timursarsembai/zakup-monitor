@@ -44,9 +44,9 @@
 <script>
   // Тема: по умолчанию тёмная, выбор запоминается в браузере. До отрисовки, чтобы не мигало.
   (function () {
-    var theme = "dark", zoom = 1, contrast = "";
+    var theme = "light", zoom = 1, contrast = "";
     try {
-      theme = localStorage.getItem("zakup-theme") || "dark";
+      theme = localStorage.getItem("zakup-theme") || "light";
       zoom = parseFloat(localStorage.getItem("zakup-zoom")) || 1;
       contrast = localStorage.getItem("zakup-contrast") || "";
     } catch (e) {}
@@ -160,6 +160,7 @@
      или сама на экране уже 1100 px. Телефон — нижняя панель и шторка «Ещё» (ниже). */
   .side-head, .side-gap, .side-view, .side-collapse, .brand img.brand-mark { display: none; }
   @media (min-width: 761px) {
+    .main-nav a.nav-sub { display: flex; }
     :root { --side: 240px; }
     :root[data-side=mini] { --side: 68px; }
     body { padding-left: var(--side); }
@@ -182,6 +183,11 @@
              background: color-mix(in srgb, var(--accent) 12%, transparent); }
     .main-nav svg, header .tool-row svg { width: 20px; height: 20px; flex: none; }
     header .tool-label { display: inline; }
+    /* Подпункты «Закупок»: объявления и лоты — всегда видны, с отступом. */
+    .main-nav a.nav-sub { padding: 6px 10px 6px 42px; font-size: 13px; color: var(--muted); }
+    .main-nav a.nav-sub.on { color: var(--accent); background: none; }
+    .main-nav a.nav-sub::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; margin-left: -18px; margin-right: 8px; }
+    :root[data-side=mini] .main-nav a.nav-sub { display: none; }
     header .sec { order: 2; }
     .side-gap { display: block; order: 3; flex: 1 1 auto; min-height: 18px; }
     header .who { order: 4; display: block; padding: 6px 10px 2px; font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
@@ -210,7 +216,7 @@
     :root[data-side=mini] .main-nav a, :root[data-side=mini] header .tool-row, :root[data-side=mini] header .tools .tool-row button { justify-content: center; }
   }
   /* «Ещё» и шторка — только на телефоне; там же верхнее меню ☰ не нужно. */
-  .nav-more, .more-sheet, .more-backdrop { display: none; }
+  .nav-more, .more-sheet, .more-backdrop, .main-nav a.nav-sub { display: none; }
   @media (max-width: 760px) {
     .burger, .tools { display: none !important; }
     .main-nav .nav-wide { display: none; }
@@ -267,6 +273,8 @@
   {% set path = request.url.path %}
   <nav class="main-nav" aria-label="{{ _("Разделы") }}" data-head="{{ _("Закупки") }}">
     <a href="/announcements" data-search-open aria-controls="search-sheet" class="{{ 'on' if path in ('/', '/lots', '/announcements') or path.startswith('/lots/') or path.startswith('/a/') }}"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span>{{ _("nav:Закупки") }}</span></a>
+    <a href="/announcements" class="nav-sub {{ 'on' if path in ('/', '/announcements') or path.startswith('/a/') }}"><span>{{ _("Объявления") }}</span></a>
+    <a href="/lots" class="nav-sub {{ 'on' if path == '/lots' or path.startswith('/lots/') }}"><span>{{ _("Лоты") }}</span></a>
     <a href="/my" {% if not request.state.paid %}data-paid {% endif %}class="{{ 'on' if path == '/my' }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-6-4-6 4z"/></svg><span>{{ _("nav:Мои лоты") }}</span></a>
     <a href="/research" {% if not request.state.paid %}data-paid {% endif %}class="{{ 'on' if path == '/research' }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg><span>{{ _("nav:ИИ-подбор") }}</span></a>
     <a href="/subscriptions" {% if not request.state.paid %}data-paid {% endif %}class="nav-wide {{ 'on' if path == '/subscriptions' }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg><span>{{ _("nav:Подписки") }}</span></a>

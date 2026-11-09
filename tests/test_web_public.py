@@ -99,14 +99,12 @@ def test_announcements_page_lot_page_and_portal_fields(client, conn):
     assert client.get("/lots/999999").status_code == 404
 
 
-def test_links_keep_default_filter(client):
-    _login(client)
+def test_first_visit_shows_fresh_feed(client, conn):
+    _announcement_with_lots(conn)
     page = client.get("/lots").text
-    # Ссылка на поиск объявлений несёт значения по умолчанию, а не пустой фильтр.
-    link = page.split('href="/announcements?', 1)[1].split('"', 1)[0].replace("&amp;", "&")
-    assert "status=240" in link and "advance_min=30" in link and "deadline_mode=rule" in link
-    announcements = client.get("/announcements?" + link).text
-    assert 'value="240" checked' in announcements and 'value="75" checked' in announcements
+    assert 'name="today_only" value="1" checked' in page and 'value="published" selected' in page
+    assert "Бумага А4" not in page  # опубликована не сегодня
+    assert "Бумага А4" in client.get("/lots?applied=1&open_now=1").text
 
 
 def test_logo_and_share_buttons(client, conn):
@@ -190,9 +188,9 @@ def test_kazakh_interface_and_data(client, conn):
     assert "Үстелдер сатып алу" in page and "Үстел" in page and "Жарияланды" in page
     assert "Лоттар (" in page and 'lang="kk"' in page and "дана" in page
     search = client.get("/lots").text
-    assert "Лоттарды іздеу" in search and "Мәртебе" in search
+    assert 'lang="kk"' in search and "Мәртебе" in search
     client.get("/lang/ru")
-    assert "Поиск лотов" in client.get("/lots").text
+    assert "Статус" in client.get("/lots").text
 
 
 def test_customer_contacts_on_lot_page(client, conn):

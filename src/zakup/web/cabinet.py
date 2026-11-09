@@ -170,7 +170,7 @@ async def create_filter_subscription(request: Request, user: Paid):
             (user, name[:100], Jsonb(current.to_json()), scope, chat_id),
         ).fetchone()[0]
         # Только новое; уже открытое — одним сообщением, если попросили.
-        matcher.seed(conn, sub_id, current, scope, send_open=form.get("send_open") == "1")
+        matcher.seed(conn, sub_id, current, scope)
     _audit(request, user, "subscription_create", name[:100], scope=scope,
            to="group" if chat_id else "personal", conditions=current.describe()[:300])
     return RedirectResponse("/subscriptions", status_code=303)
@@ -211,7 +211,7 @@ async def update_subscription(request: Request, user: Paid, sub_id: int):
         if updated is None:
             raise HTTPException(404, "Нет такой подписки")
         # Под новые условия может подойти много старого — шлём только новое (или по просьбе).
-        matcher.seed(conn, sub_id, current, scope, send_open=form.get("send_open") == "1")
+        matcher.seed(conn, sub_id, current, scope)
     _audit(request, user, "subscription_update", name[:100], scope=scope,
            conditions=current.describe()[:300])
     return RedirectResponse("/subscriptions", status_code=303)
