@@ -61,10 +61,6 @@
     .subscribe { padding: 14px 0 0; border-left: 0; border-top: 1px solid var(--line); }
   }
   [data-results].loading { opacity: .45; transition: opacity .15s; pointer-events: none; }
-  .my-filters { margin: 0 0 14px; }
-  .my-filters-list { display: flex; flex-wrap: wrap; gap: 6px 8px; margin-top: 4px; }
-  .my-filter { padding: 5px 12px; border: 1px solid var(--line); border-radius: 999px; font-size: 14px; color: var(--fg); }
-  .my-filter.on { border-color: var(--accent); color: var(--accent); font-weight: 600; }
   .filter-bar, .filter-open, .sheet-head, .chipbar, .sort-pick, .single-actions, .filter-backdrop { display: none; }
   /* Телефон: панель условий под шапкой (закреплена вместе с ней), шторки снизу. */
   @media (max-width: 760px) {
@@ -89,11 +85,6 @@
     .filter-backdrop:not([hidden]) { bottom: calc(58px + env(safe-area-inset-bottom)); }
     .sortbar .sort-label { display: none; }
     .filters-panel.open.single { inset: auto 0 calc(58px + env(safe-area-inset-bottom)) 0; max-height: calc(82vh - 58px); border-radius: 18px 18px 0 0; box-shadow: 0 -10px 30px rgb(0 0 0 / 25%); }
-    .filters-panel.single .my-filters:not(.shown), .filters-panel.single[data-mode=saved] .single-actions { display: none; }
-    .filters-panel.single .my-filters.shown .fl { display: none; }
-    .filters-panel.single .my-filters-list { flex-direction: column; }
-    .filters-panel.single .my-filter { padding: 14px 12px; border: 0; border-radius: 10px; font-size: 17px; }
-    .filters-panel.single .my-filter.on { background: color-mix(in srgb, var(--accent) 10%, transparent); }
     .filters-panel.single .fgrid > div:not(.shown), .filters-panel.single .panel-actions,
     .filters-panel.single .subscribe, .filters-panel.single .sort-pick:not(.shown) { display: none; }
     .filters-panel.single[data-mode=subscribe] .subscribe { display: flex; padding-top: 0; border-top: 0; }
@@ -251,16 +242,19 @@
   {% if per_page != 50 %}<input type="hidden" name="per_page" value="{{ per_page }}">{% endif %}
   <div class="flayout">
   <div class="fmain">
-  {# «Мои фильтры» — сохранённые фильтры (подписки): условия ставятся в фильтр одним нажатием. #}
-  {% if saved %}
-  <div class="my-filters" data-chip="saved">
-    <span class="fl">★ {{ _("Мои фильтры") }}</span>
-    <div class="my-filters-list">
-      {% for s in saved %}<a href="{{ s.url }}" class="my-filter {{ 'on' if editing and editing.id == s.id }}" data-saved-filter{% if s.scope != scope %} data-other-scope{% endif %} title="{{ s.describe }}">{{ s.name }}{% if s.scope != scope %} <span class="muted">· {{ _("лоты") if s.scope == "lots" else _("объявления") }}</span>{% endif %}</a>{% endfor %}
-    </div>
-  </div>
-  {% endif %}
   <div class="fgrid">
+    {# «Мои фильтры» — сохранённые фильтры (подписки): один выбранный ставит все свои условия. #}
+    {% if saved %}
+    <div data-chip="saved"><span class="fl">★ {{ _("Мои фильтры") }}</span>
+      <details class="multi my-filters-pick">
+        <summary>{% if editing %}{{ editing.name }}{% else %}<span class="muted">{{ _("Без сохранённого фильтра") }}</span>{% endif %}</summary>
+        <div class="multi-list">
+          <label class="check all-opt"><input type="checkbox" name="saved_pick" value="/{{ scope }}" data-saved-none {% if not editing %}checked{% endif %}> {{ _("Без сохранённого фильтра") }}</label>
+          {% for s in saved %}<label class="check" title="{{ s.describe }}"><input type="checkbox" name="saved_pick" value="{{ s.url }}" data-saved-scope="{{ s.scope }}" {% if editing and editing.id == s.id %}checked{% endif %}> {{ s.name }}{% if s.scope != scope %} <span class="muted">· {{ _("лоты") if s.scope == "lots" else _("объявления") }}</span>{% endif %}</label>{% endfor %}
+        </div>
+      </details>
+    </div>
+    {% endif %}
     <div data-chip="words"><label class="fl" for="f-q">{{ _("Наименование или описание лота") if lots else _("Наименование объявления") }}</label>
       <input id="f-q" name="q" value="{{ f.q }}" placeholder="{{ _("стол или стул -аренда") }}"></div>
     <div data-chip="words"><label class="fl" for="f-exclude">{{ _("Исключить слова") }}</label>

@@ -1,3 +1,27 @@
+  // «Сбросить» — без перезагрузки; ссылки внутри перерисовываемых блоков — делегированием.
+  sheet.addEventListener("click", (event) => {
+    const link = event.target.closest("[data-reset-all]");
+    if (!link) return;
+    event.preventDefault();
+    softApply(link.getAttribute("href"));
+  });
+  // «Мои фильтры»: выбран один (как переключатель; повторное нажатие снимает выбор).
+  // Компьютер — загружается сразу; телефон (шторка) — по «Применить».
+  const loadSaved = (url, scope) => {
+    if (scope && !location.pathname.endsWith("/" + scope)) location.href = url;
+    else softApply(url);
+  };
+  const pickedSaved = () => sheet.querySelector('[name="saved_pick"]:checked');
+  sheet.addEventListener("change", (event) => {
+    const box = event.target.closest('[name="saved_pick"]');
+    if (!box) return;
+    for (const other of sheet.querySelectorAll('[name="saved_pick"]')) if (other !== box) other.checked = false;
+    if (!box.checked) sheet.querySelector("[data-saved-none]").checked = true;
+    if (sheet.dataset.mode === "saved") return;
+    const picked = pickedSaved();
+    box.closest("details").open = false;
+    loadSaved(picked.value, picked.dataset.savedScope);
+  });
 // Панель фильтров поиска: на телефоне — на весь экран, подписка, аванс, срок.
 // Подписи — из data-labels у блока аванса.
 (() => {
@@ -45,6 +69,7 @@
     for (const [key, value] of new FormData(sheet)) {
       const field = sheet.querySelector(`[name="${key}"]`);
       if (field && field.closest(".subscribe") && key !== "edit") continue;
+      if (key === "saved_pick") continue;  // выбор «Моих фильтров» — не условие поиска
       if (value === "") continue;  // пустые поля — короткий адрес; сервер понимает и так
       params.append(key, value);
     }
@@ -95,7 +120,7 @@
       if (freshForm) {
         syncForm(freshForm);
         // Блоки «Мои фильтры» и подписки — как в ответе (загружен другой фильтр, режим правки).
-        for (const selector of [".my-filters", ".subscribe"]) {
+        for (const selector of [".my-filters-pick", ".subscribe"]) {
           const mine = sheet.querySelector(selector), theirs = freshForm.querySelector(selector);
           if (mine && theirs) mine.innerHTML = theirs.innerHTML;
         }
@@ -124,6 +149,13 @@
   };
   sheet.addEventListener("submit", (event) => {
     // Подписка и выгрузка в Excel — обычной отправкой; поиск («Найти», «Применить», условия) — без перезагрузки.
+    if (sheet.dataset.mode === "saved") {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const picked = pickedSaved();
+      loadSaved(picked.value, picked.dataset.savedScope);
+      return;
+    }
     const subscribe = subscribeButtonRef();
     if ((subscribe && event.submitter === subscribe) || event.submitter?.hasAttribute("formaction")) return;
     event.preventDefault();
@@ -164,6 +196,7 @@
   }
   // «Сбросить» в шторке условия — очистить только его поля и применить.
   sheet.querySelector("[data-chip-reset]")?.addEventListener("click", () => {
+    if (sheet.dataset.mode === "saved") return softApply(sheet.querySelector("[data-saved-none]").value);
     for (const group of sheet.querySelectorAll(".shown")) {
       for (const field of group.querySelectorAll("input, select")) {
         if (field.type === "checkbox") field.checked = false;

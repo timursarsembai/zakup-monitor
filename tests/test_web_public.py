@@ -565,9 +565,8 @@ def test_saved_filters_load_into_search(client, conn):
     conn.commit()
     _login(client)
     page = client.get("/lots").text
-    link = page.split('class="my-filter', 1)[1].split('href="', 1)[0]
-    assert "★ Мои фильтры" in page and f"edit={sub}" in page and "Бумага" in link + page
-    url = page.split('data-saved-filter', 1)[0].rsplit('href="', 1)[1].split('"', 1)[0].replace("&amp;", "&")
+    assert "★ Мои фильтры" in page and "Без сохранённого фильтра" in page and "data-saved-none checked" in page
+    url = page.split(f'edit={sub}"', 1)[0].rsplit('value="', 1)[1].replace("&amp;", "&") + f"edit={sub}"
     loaded = client.get(url).text
     assert "Сохранить изменения в подписку" in loaded and 'value="бумага"' in loaded and "Бумага А4" in loaded
     assert f'action="/subscriptions/{sub}/update"' in loaded or f'formaction="/subscriptions/{sub}/update"' in loaded
