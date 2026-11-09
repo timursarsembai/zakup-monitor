@@ -62,8 +62,9 @@ SESSION_COOKIE = "zakup_session"
 
 # check — соединение проверяется перед выдачей: после перезапуска базы (выкладка) старые
 # соединения отбрасываются, а не дают ошибку на первом запросе.
+# statement_timeout — зависший запрос (перебор фильтров) не держит соединение пула дольше 15 с.
 pool = ConnectionPool(os.environ.get("DATABASE_URL", ""), min_size=1, max_size=5, open=False,
-                      check=ConnectionPool.check_connection)
+                      check=ConnectionPool.check_connection, kwargs={"options": "-c statement_timeout=15000"})
 
 
 templates = Jinja2Templates(directory=str(files("zakup").joinpath("templates")))

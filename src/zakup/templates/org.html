@@ -38,7 +38,8 @@
   .org-tabs .n { font-size: 12px; color: var(--muted); margin-left: 4px; }
   .tab-tools { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: end; margin: 0 0 12px; }
   .tab-tools label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
-  .tab-tools select { padding: 7px 9px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); font: inherit; min-width: 200px; }
+  .tab-tools label { min-width: 0; max-width: 100%; }
+  .tab-tools select { padding: 7px 9px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); font: inherit; min-width: 200px; max-width: 100%; }
   .view-switch { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
   .view-switch button { display: inline-flex; align-items: center; gap: 6px; border: 0; border-radius: 0; padding: 6px 10px; color: var(--muted); background: none; }
   .view-switch button[aria-pressed=true] { background: var(--accent); color: var(--on-accent); }
@@ -175,7 +176,7 @@
       <td class="wide" data-label="{{ _("Заказчик") }}">{{ org_link(w.customer_bin, w.customer) }}</td>
       <td class="num" data-label="{{ _("Плановая сумма, ₸") }}">{{ w.amount | money if w.amount is not none else "" }}</td>
       <td class="num" data-label="{{ _("Сумма победы, ₸") }}"><b>{{ w.winner_total | money if w.winner_total is not none else "" }}</b></td>
-      <td class="num" data-label="{{ _("Снижение") }}">{% if w.amount and w.winner_total is not none and w.winner_total <= w.amount %}{{ '%.1f'|format((1 - w.winner_total / w.amount) * 100) }}%{% endif %}</td>
+      <td class="num" data-label="{{ _("Снижение") }}">{% if not o.paid %}<span class="muted" data-paid>🔒</span>{% elif w.amount and w.winner_total is not none and w.winner_total <= w.amount %}{{ '%.1f'|format((1 - w.winner_total / w.amount) * 100) }}%{% endif %}</td>
       <td class="num" data-label="{{ _("Участников") }}">{{ w.bidders or "" }}</td>
       <td class="when" data-label="{{ _("Дата") }}">{{ (w.end_date|local).strftime("%d.%m.%Y") if w.end_date else "—" }}</td>
     </tr>
@@ -197,7 +198,7 @@
       <td class="wide"><a href="/lots/{{ h.id }}">{{ pick(h.name_ru, h.name_kz) or h.lot_number }}</a></td>
       <td class="wide" data-label="{{ _("Заказчик") }}">{{ org_link(h.customer_bin, h.customer) }}</td>
       <td class="num" data-label="{{ _("Плановая сумма, ₸") }}">{{ h.amount | money if h.amount is not none else "" }}</td>
-      <td class="num" data-label="{{ _("Его заявка, ₸") }}">{{ h.offer | money if h.offer else "" }}</td>
+      <td class="num" data-label="{{ _("Его заявка, ₸") }}">{% if not o.paid %}<span class="muted" data-paid>🔒</span>{% else %}{{ h.offer | money if h.offer else "" }}{% endif %}</td>
       <td data-label="{{ _("Итог") }}"><span class="res-{{ h.result }}">{{ _(results[h.result]) }}</span></td>
       <td data-label="{{ _("Победитель") }}">{% if h.result != "win" and h.winner_bin %}{{ org_link(h.winner_bin, h.winner_name) }}{% if h.winner_total is not none %}<div class="muted">{{ h.winner_total | money }} ₸</div>{% endif %}{% endif %}</td>
       <td class="when" data-label="{{ _("Дата") }}">{{ (h.end_date|local).strftime("%d.%m.%Y") if h.end_date else "—" }}</td>

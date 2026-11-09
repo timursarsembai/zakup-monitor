@@ -386,6 +386,7 @@ def test_organization_directory_filters(client, conn):
     assert "Найдено поставщиков: <b>0</b>" in client.get("/orgs/suppliers?q=%25_").text
     assert client.get("/orgs/suppliers?sort=evil;drop&region=zz&form=x&page=-5").status_code == 200
     assert client.get("/orgs/everyone").status_code == 404
+    assert client.get("/orgs", follow_redirects=False).headers["location"] == "/orgs/customers"
     old = client.get("/orgs?role=seller&form=ip", follow_redirects=False)
     assert old.status_code == 301 and old.headers["location"] == "/orgs/suppliers?form=ip"
     home = client.get("/").text
@@ -533,9 +534,9 @@ def test_organization_tabs(client, conn):
     assert 'aria-current="page">Обзор' in page and "?tab=wins" in page and "?tab=history" in page
     assert "Динамика участия за 30 дней" in page and "<svg class=\"org-chart\"" in page
     wins = client.get(f"/org/{supplier}?tab=wins&sort=amount&customer={customer}").text
-    assert "/lots/9001" in wins and "1 800 000.00" in wins and 'data-rview-box' in wins and "10.0%" in wins
+    assert "/lots/9001" in wins and "1 800 000.00" in wins and "data-rview-box" in wins and "10.0%" not in wins
     history = client.get(f"/org/{person}?tab=history").text
-    assert "Не выиграл" in history and "1 900 000.00" in history and f'href="/org/{supplier}"' in history
+    assert "Не выиграл" in history and "1 900 000.00" not in history and f'href="/org/{supplier}"' in history
     assert "Победа · 1" in client.get(f"/org/{supplier}?tab=history").text
     buys = client.get(f"/org/{customer}?tab=buys").text
     assert "Прошедшие закупки" in buys and "/a/900" in buys
@@ -573,3 +574,16 @@ def test_saved_filters_load_into_search(client, conn):
     # Гость — без «Моих фильтров».
     client.post("/logout", headers=ORIGIN)
     assert "Мои фильтры" not in client.get("/lots").text
+
+
+
+def test_supplier_discount_and_bids_need_tariff(client, conn):
+    from zakup import orgs
+    customer, supplier, person = _org_data(conn)
+    orgs.refresh_directory(conn)
+    guest = client.get(f"/org/{supplier}").text
+    assert "Снижает цену, когда выигрывает" not in guest
+    assert "1 900 000.00" not in client.get(f"/org/{person}?tab=history").text
+    _login(client)
+    assert "Снижает цену, когда выигрывает" in client.get(f"/org/{supplier}").text
+    assert "1 900 000.00" in client.get(f"/org/{person}?tab=history").text

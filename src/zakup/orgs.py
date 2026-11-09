@@ -75,7 +75,7 @@ def _offered_sql() -> str:
 
 
 def profile(conn: psycopg.Connection, bin_: str, tab: str = "overview", args: dict | None = None,
-            now: datetime | None = None) -> dict[str, Any] | None:
+            now: datetime | None = None, paid: bool = True) -> dict[str, Any] | None:
     """Страница организации: шапка и цифры — всегда, данные — только открытой вкладки.
     None — такой организации у нас нет."""
     if not has_page(bin_):
@@ -101,8 +101,10 @@ def profile(conn: psycopg.Connection, bin_: str, tab: str = "overview", args: di
     tabs = [key for key, _ in TABS if key == "overview" or (key == "wins" and seller["wins"])
             or (key == "history" and offered) or (key == "where" and has_codes) or (key == "buys" and buyer["total"])]
     tab = tab if tab in tabs else "overview"
+    # paid — снижение цены поставщиком и суммы его заявок только по тарифу (как на странице лота);
+    # отрезается здесь, а не скрывается в вёрстке.
     data = {"bin": bin_, "name_ru": name_ru, "name_kz": name_kz, "card": subjects.card(conn, bin_),
-            "buyer": buyer, "seller": seller, "offered": offered, "tabs": tabs, "tab": tab}
+            "buyer": buyer, "seller": seller, "offered": offered, "tabs": tabs, "tab": tab, "paid": paid}
     data["discount"] = conn.execute(
         """SELECT avg(1 - r.winner_total / l.amount) FROM lot_results r JOIN lots l ON l.id = r.lot_id
            WHERE l.customer_bin = %s AND r.outcome = 'winner' AND l.amount > 0
@@ -110,7 +112,7 @@ def profile(conn: psycopg.Connection, bin_: str, tab: str = "overview", args: di
     data["seller_discount"] = conn.execute(
         """SELECT avg(1 - r.winner_total / l.amount) FROM lot_results r JOIN lots l ON l.id = r.lot_id
            WHERE r.winner_bin = %s AND r.outcome = 'winner' AND l.amount > 0
-             AND r.winner_total BETWEEN 0 AND l.amount""", (bin_,)).fetchone()[0] if seller["wins"] else None
+             AND r.winner_total BETWEEN 0 AND l.amount""", (bin_,)).fetchone()[0] if seller["wins"] and paid else None
     data.update({"overview": _overview, "wins": _wins, "history": _history, "where": _where,
                  "buys": _buys}[tab](conn, params, data, args, now))
     return data
@@ -199,7 +201,7 @@ def _wins(conn, params, data, args, now) -> dict[str, Any]:
         FROM lot_results r JOIN lots l ON l.id = r.lot_id LEFT JOIN announcements a ON a.id = l.trd_buy_id
         WHERE {where} ORDER BY {WIN_SORTS[sort]}
         LIMIT {TAB_PAGE} OFFSET {(page - 1) * TAB_PAGE}""", query)
-    return {"rows": rows, "total": total, "page": page, "pages": (total + TAB_PAGE - 1) // TAB_PAGE,
+    return {"rows": rows, "total": total, "page": page, "pages": min((total + TAB_PAGE - 1) // TAB_PAGE, MAX_PAGE),
             "sort": sort, "customer": customer, "customers": customers}
 
 
@@ -222,7 +224,10 @@ def _history(conn, params, data, args, now) -> dict[str, Any]:
         FROM lot_results r JOIN lots l ON l.id = r.lot_id LEFT JOIN announcements a ON a.id = l.trd_buy_id
         WHERE {where} ORDER BY a.end_date DESC NULLS LAST, l.id
         LIMIT {TAB_PAGE} OFFSET {(page - 1) * TAB_PAGE}""", query)
-    return {"rows": rows, "total": total, "page": page, "pages": (total + TAB_PAGE - 1) // TAB_PAGE,
+    if not data["paid"]:
+        for row in rows:
+            row["offer"] = None
+    return {"rows": rows, "total": total, "page": page, "pages": min((total + TAB_PAGE - 1) // TAB_PAGE, MAX_PAGE),
             "result": result, "counts": counts}
 
 

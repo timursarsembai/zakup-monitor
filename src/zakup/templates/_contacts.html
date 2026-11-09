@@ -22,6 +22,7 @@
   .org-contacts { margin-top: 4px; font-size: 14px; }
   .org-row { margin: 3px 0; display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
   .org-phone { display: inline-flex; align-items: center; gap: 4px; }
-  a.org-call { padding: 2px 8px; border: 1px solid var(--line); border-radius: 6px; white-space: nowrap; }
+  a.org-call { padding: 2px 8px; border: 1px solid var(--line); border-radius: 6px; white-space: nowrap; max-width: 100%; overflow-wrap: anywhere; }
+  @media (max-width: 760px) { a.org-call { white-space: normal; } }
   a.org-wa { display: inline-flex; padding: 3px; border-radius: 6px; color: #fff; background: #25d366; }
 {% endmacro %}

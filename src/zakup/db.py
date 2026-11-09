@@ -166,7 +166,12 @@ def upsert_announcement(conn: psycopg.Connection, item: dict[str, Any]) -> None:
     )
 
 
-def upsert_lot(conn: psycopg.Connection, item: dict[str, Any]) -> None:
+def upsert_lot(conn: psycopg.Connection, item: dict[str, Any], overwrite: bool = True) -> None:
+    """overwrite=False — только завести отсутствующий лот (из карточки объявления): её
+    сокращённый ответ не должен затирать полный из REST — они бы переписывали друг друга."""
+    if not overwrite:
+        if conn.execute("SELECT 1 FROM lots WHERE id = %s", (int(item["id"]),)).fetchone():
+            return
     conn.execute(
         """INSERT INTO lots (
                id, trd_buy_id, number_anno, lot_number, name_ru, name_kz, description_ru,

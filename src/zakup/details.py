@@ -139,7 +139,7 @@ def save(conn: psycopg.Connection, item: dict[str, Any]) -> None:
     for lot in lots:
         raw = {k: v for k, v in raw_lots[lot["id"]].items() if not k[:1].isupper()}
         # Лот мог ещё не дойти через REST: заводим его отсюда, REST потом дополнит.
-        db.upsert_lot(conn, normalize(raw))
+        db.upsert_lot(conn, normalize(raw), overwrite=False)
         conn.execute(
             """UPDATE lots SET prepayment = %(prepayment)s, kato = %(kato)s, price = %(price)s,
                    unit_name = %(unit_name)s, extra_desc = %(extra_desc)s,

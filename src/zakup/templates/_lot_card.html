@@ -29,6 +29,7 @@
   .lot { border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin-bottom: 12px; }
   .lot-head { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
   .lot-head .name { font-weight: 600; font-size: 16px; }
+  .lot-head h1.name { margin: 0; font-size: 20px; line-height: 1.3; }
   .lot-sum { text-align: right; font-variant-numeric: tabular-nums; }
   .lot-sum b { font-size: 17px; }
   .lot dl.facts { margin-top: 10px; font-size: 14px; }
@@ -70,7 +71,7 @@
   <div class="lot" id="lot-{{ lot.id }}">
     <div class="lot-head">
       <div>
-        {% if link %}<a class="name" href="/lots/{{ lot.id }}">{{ loc(lot) }}</a>{% else %}<div class="name">{{ loc(lot) }}</div>{% endif %}
+        {% if link %}<a class="name" href="/lots/{{ lot.id }}">{{ loc(lot) }}</a>{% else %}<h1 class="name">{{ loc(lot) }}</h1>{% endif %}
         {% if loc(lot, "descriptionRu") %}<div class="muted">{{ loc(lot, "descriptionRu") }}</div>{% endif %}
         <div style="margin-top:6px; display:flex; gap:6px; flex-wrap:wrap">
           {% if i.prepayment %}<span class="badge {% if i.prepayment >= 30 %}hot{% endif %}">{{ _("аванс") }} {{ '%g'|format(i.prepayment) }}%</span>{% endif %}

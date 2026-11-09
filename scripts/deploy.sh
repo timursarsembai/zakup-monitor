@@ -60,6 +60,8 @@ docker compose up -d --no-deps web-2
 wait_healthy zakup-web-2 web-2
 docker compose up -d --no-deps web
 wait_healthy zakup-web-1 web
+# Конфигурация шлюза — проверить до перезапуска (ошибка в ней положила бы сайт).
+docker run --rm -v "$PWD/deploy/gateway/default.conf:/etc/nginx/conf.d/default.conf:ro" nginx:1.27-alpine nginx -t -q
 docker compose up -d --no-deps gateway
 docker compose exec -T gateway nginx -s reload >/dev/null 2>&1
 
@@ -72,3 +74,6 @@ if [ -z "${ZAKUP_AUTOFIX:-}" ] && [ "$working" = "0" ]; then
   systemctl --user try-restart zakup-autofix || true
 fi
 echo "Готово: $(git log --oneline -1)"
+
+# Сайт уже выложен; проверка в браузере только предупреждает (откат — вручную).
+scripts/smoke.sh || echo "ВНИМАНИЕ: проверка в браузере не прошла — смотрите вывод выше"

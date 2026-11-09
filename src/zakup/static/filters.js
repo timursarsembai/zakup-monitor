@@ -1,6 +1,13 @@
 // Панель фильтров поиска: на телефоне — на весь экран, подписка, аванс, срок.
 // Подписи — из data-labels у блока аванса.
 (() => {
+  // Safari до 16 (iOS 15) не знает requestSubmit.
+  if (!HTMLFormElement.prototype.requestSubmit) {
+    HTMLFormElement.prototype.requestSubmit = function () {
+      const button = Object.assign(document.createElement("button"), { type: "submit", hidden: true });
+      this.append(button); button.click(); button.remove();
+    };
+  }
   // На телефоне фильтр открывается на весь экран.
   const sheet = document.getElementById("filters");
   const backdrop = document.querySelector("[data-filter-backdrop]");
@@ -8,7 +15,20 @@
   const fullTitle = title.textContent;
   // Панель условий (телефон): условие открывает этот же фильтр снизу, но только своё поле;
   // «Фильтры» — весь фильтр; «Сохранить» — только подписку; «Сортировка» — список.
-  const closeSheet = () => {
+  // Шторку условия закрыли без «Применить» — выбранное в ней откатить, иначе оно тихо
+  // применилось бы со следующим поиском.
+  let snapshot = null;
+  const takeSnapshot = () => [...sheet.querySelectorAll("input, select")].map((f) => [f, f.type === "checkbox" ? f.checked : f.value]);
+  const restoreSnapshot = () => {
+    for (const [field, value] of snapshot || []) {
+      if (field.type === "checkbox") field.checked = value; else field.value = value;
+      if (field.type === "range") field.dispatchEvent(new Event("input"));
+    }
+    snapshot = null;
+  };
+  const closeSheet = (applied = false) => {
+    if (!applied && sheet.classList.contains("single")) restoreSnapshot();
+    snapshot = null;
     sheet.classList.remove("open", "single");
     delete sheet.dataset.mode;
     for (const group of sheet.querySelectorAll(".shown")) group.classList.remove("shown");
@@ -30,6 +50,7 @@
     if (mode === "all") return;
     sheet.classList.add("single");
     sheet.dataset.mode = mode;
+    snapshot = takeSnapshot();
     title.textContent = label;
     for (const group of sheet.querySelectorAll(`[data-chip="${mode}"]`)) group.classList.add("shown");
     // Списки (регионы, категории…) — сразу раскрыты; после этого же клика, иначе его
@@ -105,7 +126,7 @@
         }
       }
       if (url !== location.pathname + location.search) history.pushState({ soft: true }, "", url);
-      closeSheet();
+      closeSheet(true);
       window.initSortbar?.();
       window.applyRView?.();
     } catch (e) {
@@ -158,7 +179,7 @@
       sheet.requestSubmit();
     }
   });
-  backdrop?.addEventListener("click", closeSheet);
+  backdrop?.addEventListener("click", () => closeSheet());
   // «Сбросить» и «Мои фильтры» (тот же вид поиска) — без перезагрузки; блоки внутри
   // формы перерисовываются, поэтому — делегирование.
   sheet.addEventListener("click", (event) => {
@@ -215,7 +236,7 @@
     // «Подписаться» — сразу к блоку подписки внизу панели.
     if (opener.hasAttribute("data-filter-subscribe")) sheet.querySelector(".subscribe")?.scrollIntoView({ block: "start" });
   });
-  document.querySelector("[data-filter-close]").addEventListener("click", closeSheet);
+  document.querySelector("[data-filter-close]").addEventListener("click", () => closeSheet());
   // Поля подписки живут в той же форме, что и поиск: в обычный поиск их не отправляем,
   // а Enter в названии подписки — подписывает, а не ищет.
   // При редактировании подписки обычный поиск сохраняет режим правки (поле edit).

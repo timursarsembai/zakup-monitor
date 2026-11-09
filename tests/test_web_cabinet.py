@@ -107,3 +107,11 @@ def test_unpaid_client_gets_paywall_until_access_granted(client, conn):
     client.post("/login", data={"email": "87011112233", "password": "client-password-1"}, headers=ORIGIN)
     assert client.post("/lots/5001/mark", data={"status": "interested"}, headers=ORIGIN,
                        follow_redirects=False).status_code == 303
+
+
+def test_subscription_drops_published_today(client, conn):
+    _login(client)
+    data = {"applied": "1", "deadline_mode": "", "scope": "lots", "today_only": "1", "open_now": "1", "name": "Новые"}
+    client.post("/subscriptions/filter", data=data, headers=ORIGIN)
+    filters = conn.execute("SELECT filters FROM subscriptions").fetchone()[0]
+    assert filters["published_from"] == "" and filters["end_from"] == "today"

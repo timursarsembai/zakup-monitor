@@ -257,7 +257,9 @@ class Filters:
             or (DEADLINE_RULE if one("deadline_mode") == "rule" else ""),
             # «Только с открытым приёмом заявок» — окончание с сегодня, каждый день заново.
             # Своя дата в поле «с» важнее галочки.
-            end_from=_date(one("end_from")) or (TODAY if one("open_now") == "1" or one("end_from") == TODAY else ""),
+            # Старые ссылки: сегодняшняя дата в «Окончание с» значила «с сегодня».
+            end_from=TODAY if one("end_from") in (TODAY, _today().isoformat())
+            else (_date(one("end_from")) or (TODAY if one("open_now") == "1" else "")),
             start_from=_date(one("start_from")),
             start_to=_date(one("start_to")),
             # «Только опубликованные сегодня» — каждый день заново.
@@ -573,7 +575,10 @@ def _percent(value: str, default: int) -> int:
 
 
 def last_workday(today: date) -> date:
-    """Сегодня, а в субботу и воскресенье — пятница."""
+    """С какого дня «опубликованные сегодня»: сегодня; в субботу и воскресенье — с пятницы;
+    в понедельник — с субботы (публикации выходных тоже новые для того, кто пришёл в пн)."""
+    if today.weekday() == 0:
+        return today - timedelta(days=2)
     return today - timedelta(days=max(0, today.weekday() - 4))
 
 

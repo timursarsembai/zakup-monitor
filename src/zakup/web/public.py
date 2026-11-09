@@ -231,7 +231,7 @@ def org_page(request: Request, user: Viewer, bin_: str, background: BackgroundTa
     участвовать, закупки (заказчика)."""
     args = {key: request.query_params.get(key, "")[:20] for key in ("sort", "customer", "result", "page")}
     with core.pool.connection() as conn:
-        profile = orgs.profile(conn, bin_, tab, args)
+        profile = orgs.profile(conn, bin_, tab, args, paid=bool(request.state.paid))
     if profile is None:
         raise HTTPException(404, "Такой организации нет в базе")
     # Карточки нет или она устарела — подтянуть с портала после ответа (контакты появятся

@@ -37,7 +37,8 @@ def test_defaults_match_the_owner_request():
     assert Filters.from_form({}, staff=True).sort == "advance"
     from zakup.filters import last_workday
     assert last_workday(date(2026, 11, 7)) == last_workday(date(2026, 11, 8)) == date(2026, 11, 6)
-    assert last_workday(date(2026, 11, 9)) == date(2026, 11, 9)
+    assert last_workday(date(2026, 11, 9)) == date(2026, 11, 7)  # пн — с субботы, выходные тоже новые
+    assert last_workday(date(2026, 11, 10)) == date(2026, 11, 10)
 
 
 def test_form_parsing():
@@ -392,3 +393,19 @@ def test_today_only_checkbox_published_today(conn):
     where, params = replace(current, statuses=[], disable_person="", regions=[], min_sum=None,
                             deadline="", advance_min=0).where(NOW, "announcements")
     assert [r[0] for r in conn.execute(f"SELECT a.id FROM announcements a WHERE {where}", params)] == [2]
+
+
+
+def test_unchanged_portal_rows_are_not_rewritten(conn):
+    item = {"id": 77, "name_ru": "Стулья", "end_date": "2099-01-01 09:00:00"}
+    db.upsert_announcement(conn, item)
+    first = conn.execute("SELECT xmin::text FROM announcements WHERE id = 77").fetchone()[0]
+    conn.commit()
+    db.upsert_announcement(conn, item)
+    assert conn.execute("SELECT xmin::text FROM announcements WHERE id = 77").fetchone()[0] == first
+    db.upsert_announcement(conn, {**item, "name_ru": "Стулья офисные"})
+    assert conn.execute("SELECT name_ru FROM announcements WHERE id = 77").fetchone()[0] == "Стулья офисные"
+    # Карточка объявления не затирает полный ответ REST по лоту.
+    db.upsert_lot(conn, {"id": 770, "trd_buy_id": 77, "name_ru": "Стул", "description_ru": "полный"})
+    db.upsert_lot(conn, {"id": 770, "trd_buy_id": 77, "name_ru": "Стул"}, overwrite=False)
+    assert conn.execute("SELECT description_ru FROM lots WHERE id = 770").fetchone()[0] == "полный"

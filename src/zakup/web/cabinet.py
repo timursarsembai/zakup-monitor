@@ -1,6 +1,7 @@
 """Кабинет клиента: избранное, мои лоты, подписки, лента совпадений, выгрузка в Excel."""
 
 import io
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Annotated
 from urllib.parse import parse_qs
@@ -15,6 +16,7 @@ from zakup import (
     matcher,
 )
 from zakup.filters import (
+    TODAY,
     Filters,
 )
 from zakup.goszakup import PORTAL_TZ
@@ -155,6 +157,10 @@ async def create_filter_subscription(request: Request, user: Paid):
     form = await request.form()
     data = {key: form.getlist(key) for key in form.keys()}
     current = Filters.from_form(data)
+    # «Опубликованные сегодня» подписке не нужно (она и так шлёт только новое) и вредно:
+    # лот, опубликованный в 23:58 и дошедший до нас после полуночи, отсеялся бы.
+    if current.published_from == TODAY:
+        current = replace(current, published_from="")
     if not current.relative():
         raise HTTPException(
             422, "Подписка работает только без конкретных дат: срок — «в течение 2 рабочих дней» "
@@ -194,6 +200,10 @@ async def update_subscription(request: Request, user: Paid, sub_id: int):
     form = await request.form()
     data = {key: form.getlist(key) for key in form.keys()}
     current = Filters.from_form(data)
+    # «Опубликованные сегодня» подписке не нужно (она и так шлёт только новое) и вредно:
+    # лот, опубликованный в 23:58 и дошедший до нас после полуночи, отсеялся бы.
+    if current.published_from == TODAY:
+        current = replace(current, published_from="")
     if not current.relative():
         raise HTTPException(
             422, "Подписка работает только без конкретных дат: срок — «в течение 2 рабочих дней» "
