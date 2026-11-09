@@ -60,6 +60,11 @@ def stop(conn: psycopg.Connection) -> bool:
 
 
 def _finish(conn: psycopg.Connection, run: int, status: str, error: str | None = None) -> None:
+    if status != "failed":
+        # Справочник организаций — сразу с догруженным, не дожидаясь круга archive.
+        from zakup import orgs
+
+        orgs.refresh_directory(conn)
     conn.execute(
         """UPDATE backfill_runs SET status = %s, finished_at = now(), after = %s, error = %s
            WHERE id = %s""", (status, Jsonb(counts(conn)), error, run))
