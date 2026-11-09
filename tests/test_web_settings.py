@@ -171,7 +171,9 @@ def test_guest_settings_only_interface_and_header_order(client):
     assert page.status_code == 200 and "Интерфейс" in page.text and "Высокий контраст" in page.text
     assert "Уведомления в Telegram" not in page.text and "Мой пароль" not in page.text
     header = page.text.split("<header>", 1)[1].split("</header>", 1)[0]
-    assert header.index(">Регистрация<") < header.index(">Вход<") < header.index("data-side-collapse")
+    side = header.split('class="logout"', 1)[1]  # левая панель компьютера; в нижней панели телефона — свои
+    assert side.index(">Регистрация<") < side.index(">Вход<") < side.index("data-side-collapse")
+    assert 'class="nav-auth"' in header and "guest-hide" in header
     assert 'href="/settings"' in header and 'href="/regions"' in header and "data-burger" not in header
 
 

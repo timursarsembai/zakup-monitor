@@ -174,8 +174,8 @@
                display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   @media (max-width: 340px) { .brand-tag { display: none; } }
   @media (max-width: 760px) {
-    /* Телефон: в шапке — логотип, описание и «Вход»; «Регистрация» — в шторке «Ещё». */
-    header .logout > a.primary-link { display: none; }
+    /* Телефон: в шапке — логотип и описание; гостю «Вход» и «Регистрация» — в нижней панели. */
+    header .logout > a.primary-link, header .logout > a[href^="/login"] { display: none; }
     header .brand-tag { font-size: 10.5px; line-height: 1.25; -webkit-line-clamp: 3; }
     header .brand img { height: 24px; width: auto; }
     header .logout > a.icon-button:not(.searches) { padding: 6px 10px; font-size: 14px; }
@@ -245,8 +245,12 @@
     :root[data-side=mini] .main-nav a, :root[data-side=mini] header .tool-row, :root[data-side=mini] header .tools .tool-row button { justify-content: center; }
   }
   /* «Ещё» и шторка — только на телефоне; там же верхнее меню ☰ не нужно. */
-  .nav-more, .more-sheet, .more-backdrop, .main-nav a.nav-sub { display: none; }
+  .nav-more, .more-sheet, .more-backdrop, .main-nav a.nav-sub, .main-nav a.nav-auth, .more-tile.guest-only { display: none; }
   @media (max-width: 760px) {
+    /* Гость на телефоне: в панели «Вход» и «Регистрация», а «Мои лоты», «ИИ-подбор», «Лента» — в «Ещё». */
+    .main-nav a.guest-hide { display: none; }
+    .main-nav a.nav-auth { display: inline-flex; }
+    .more-tile.guest-only { display: flex; }
     .burger, .tools { display: none !important; }
     .main-nav .nav-wide { display: none; }
     .nav-more { display: inline-flex; flex: 1 1 0; min-width: 0; flex-direction: column; align-items: center; gap: 3px; font-size: 11px; line-height: 1.15; color: var(--muted); padding: 2px 1px; background: none; border: 0; }
@@ -271,7 +275,7 @@
     .more-grid.two .more-tile { padding: 16px 4px; font-size: 14px; }
     .more-tile .more-swatch { display: block; width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--line); }
     .more-sheet.open .more-tile { opacity: 1; transform: none; }
-    {% for g in range(3) %}{% for i in range(6) %}.more-sheet.open .more-grid.g{{ g }} > :nth-child({{ i + 1 }}), .more-sheet.open .more-grid.g{{ g }} > :nth-child({{ i + 1 }}) .more-tile { transition-delay: {{ 30 + (g * 4 + i) * 22 }}ms; }
+    {% for g in range(3) %}{% for i in range(10) %}.more-sheet.open .more-grid.g{{ g }} > :nth-child({{ i + 1 }}), .more-sheet.open .more-grid.g{{ g }} > :nth-child({{ i + 1 }}) .more-tile { transition-delay: {{ 30 + (g * 4 + i) * 22 }}ms; }
     {% endfor %}{% endfor %}
   }
   @media (max-width: 760px) and (prefers-reduced-motion: reduce) {
@@ -305,10 +309,12 @@
     <a href="/announcements" data-search-open aria-controls="search-sheet" class="{{ 'on' if path in ('/', '/lots', '/announcements') or path.startswith('/lots/') or path.startswith('/a/') }}"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span>{{ _("nav:Закупки") }}</span></a>
     <a href="/announcements" class="nav-sub {{ 'on' if path in ('/', '/announcements') or path.startswith('/a/') }}"><span>{{ _("Объявления") }}</span></a>
     <a href="/lots" class="nav-sub {{ 'on' if path == '/lots' or path.startswith('/lots/') }}"><span>{{ _("Лоты") }}</span></a>
-    <a href="/my" {% if not request.state.paid %}data-paid {% endif %}class="{{ 'on' if path == '/my' }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-6-4-6 4z"/></svg><span>{{ _("nav:Мои лоты") }}</span></a>
-    <a href="/research" {% if not request.state.paid %}data-paid {% endif %}class="{{ 'on' if path == '/research' }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg><span>{{ _("nav:ИИ-подбор") }}</span></a>
+    <a href="/my" {% if not request.state.paid %}data-paid {% endif %}class="{{ 'guest-hide ' if not request.state.user_id }}{{ 'on' if path == '/my' }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-6-4-6 4z"/></svg><span>{{ _("nav:Мои лоты") }}</span></a>
+    <a href="/research" {% if not request.state.paid %}data-paid {% endif %}class="{{ 'guest-hide ' if not request.state.user_id }}{{ 'on' if path == '/research' }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg><span>{{ _("nav:ИИ-подбор") }}</span></a>
     <a href="/subscriptions" {% if not request.state.paid %}data-paid {% endif %}class="nav-wide {{ 'on' if path == '/subscriptions' }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg><span>{{ _("nav:Подписки") }}</span></a>
-    <a href="/matches" {% if not request.state.paid %}data-paid {% endif %}class="{{ 'on' if path == '/matches' }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg><span>{{ _("nav:Лента") }}</span></a>
+    <a href="/matches" {% if not request.state.paid %}data-paid {% endif %}class="{{ 'guest-hide ' if not request.state.user_id }}{{ 'on' if path == '/matches' }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg><span>{{ _("nav:Лента") }}</span></a>
+    {% if not request.state.user_id %}<a href="/login?next={{ path | urlencode }}" class="nav-auth"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3"/></svg><span>{{ _("Вход") }}</span></a>
+    <a href="/register" class="nav-auth"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="4"/><path d="M2 21a7 7 0 0 1 14 0M19 8v6M16 11h6"/></svg><span>{{ _("Регистрация") }}</span></a>{% endif %}
     <button type="button" class="nav-more {{ 'on' if path.startswith('/orgs') or path in ('/subscriptions', '/categories', '/regions', '/analytics', '/settings', '/pricing', '/balance', '/dashboard') or path.startswith(('/org/', '/category/', '/region/')) }}" data-more aria-expanded="false" aria-controls="more-sheet"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg><span>{{ _("nav:Ещё") }}</span></button>
   </nav>
   <div class="logout">
@@ -355,7 +361,7 @@
   </div>
 </header>
 {# Телефон: «Ещё» в нижней панели — шторка с остальными разделами, по 4 в ряд. #}
-{% macro tile(href, label, icon, on=false, paid_only=false) %}<a href="{{ href }}" class="more-tile {{ 'on' if on }}"{% if paid_only and not request.state.paid %} data-paid{% endif %}><svg viewBox="0 0 24 24" aria-hidden="true">{{ icon | safe }}</svg><span>{{ label }}</span></a>{% endmacro %}
+{% macro tile(href, label, icon, on=false, paid_only=false, cls="") %}<a href="{{ href }}" class="more-tile {{ 'on' if on }} {{ cls }}"{% if paid_only and not request.state.paid %} data-paid{% endif %}><svg viewBox="0 0 24 24" aria-hidden="true">{{ icon | safe }}</svg><span>{{ label }}</span></a>{% endmacro %}
 <div class="more-backdrop" data-more-backdrop hidden></div>
 <div class="more-sheet" id="search-sheet" data-search-sheet hidden role="dialog" aria-modal="true" aria-label="{{ _("nav:Закупки") }}">
   <div class="more-grip" aria-hidden="true"></div>
@@ -369,6 +375,11 @@
   {# Группы: разделы сайта, аккаунт, вид. #}
   <div class="more-head">{{ _("Разделы") }}</div>
   <div class="more-grid g0">
+    {% if not request.state.user_id %}
+    {{ tile("/my", _("nav:Мои лоты"), '<path d="M6 3h12v18l-6-4-6 4z"/>', path == "/my", true, "guest-only") }}
+    {{ tile("/research", _("nav:ИИ-подбор"), '<path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/>', path == "/research", true, "guest-only") }}
+    {{ tile("/matches", _("nav:Лента"), '<path d="M3 12h4l3 8 4-16 3 8h4"/>', path == "/matches", true, "guest-only") }}
+    {% endif %}
     {{ tile("/subscriptions", _("nav:Подписки"), '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/>', path == "/subscriptions", true) }}
     {{ tile("/categories", _("Категории"), '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>', path == "/categories" or path.startswith("/category/")) }}
     {{ tile("/regions", _("Регионы"), '<path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/>', path == "/regions" or path.startswith("/region/")) }}
@@ -382,10 +393,7 @@
     {% if request.state.user_id and not request.state.staff %}{{ tile("/balance", _("Поиски:") ~ " " ~ request.state.searches, '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>', path == "/balance") }}{% endif %}
     {{ tile("/pricing", _("Тариф"), '<path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/>', path == "/pricing") }}
     {{ tile("/settings", _("Настройки"), '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1 7 17M17 7l2.1-2.1"/>', path == "/settings") }}
-    {% if not request.state.user_id %}
-    {{ tile("/login?next=" ~ (path | urlencode), _("Вход"), '<path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3"/>') }}
-    {{ tile("/register", _("Регистрация"), '<circle cx="9" cy="8" r="4"/><path d="M2 21a7 7 0 0 1 14 0M19 8v6M16 11h6"/>') }}
-    {% else %}
+    {% if request.state.user_id %}
     <form method="post" action="/logout" data-confirm="{{ _("Выйти из аккаунта?") }}" class="more-form"><button class="more-tile more-out"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg><span>{{ _("Выйти") }}</span></button></form>
     {% endif %}
   </div>
