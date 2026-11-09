@@ -117,7 +117,8 @@
   };
   sheet.addEventListener("submit", (event) => {
     // Подписка и выгрузка в Excel — обычной отправкой; поиск («Найти», «Применить», условия) — без перезагрузки.
-    if (event.submitter === subscribeButtonRef() || event.submitter?.hasAttribute("formaction")) return;
+    const subscribe = subscribeButtonRef();
+    if ((subscribe && event.submitter === subscribe) || event.submitter?.hasAttribute("formaction")) return;
     event.preventDefault();
     // Обработчик ниже отключил бы поля подписки — здесь они и так не уходят в запрос.
     event.stopImmediatePropagation();
@@ -231,8 +232,10 @@
     }
     draw(low);
   }
+  // Срок (только в поиске закупок; в справочнике организаций этих полей нет).
   const mode = document.querySelector("[name=deadline_mode]");
   const until = document.querySelector("[name=deadline_date]");
+  if (!mode || !until) return;
   mode.addEventListener("change", () => { if (mode.value !== "date") until.value = ""; else until.focus(); });
   until.addEventListener("change", () => { if (until.value) mode.value = "date"; });
 })();

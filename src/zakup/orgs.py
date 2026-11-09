@@ -289,7 +289,16 @@ FORMS = {"ip": "ИП", "too": "ТОО", "ao": "АО", "gu": "Госучрежд�
 ROLES = {"": "Все", "buyer": "Заказчики", "seller": "Поставщики"}
 SORTS = {"amount": "По сумме закупок и побед", "buys": "Больше закупок", "wins": "Больше побед",
          "open": "Больше открытых закупок", "name": "По названию"}
+# Отдельные страницы заказчиков и поставщиков — свои сортировки (первая — по умолчанию).
+ROLE_SORTS = {
+    "buyer": {"buy_amount": "Сумма закупок — больше", "buys": "Больше закупок", "open": "Больше открытых закупок",
+              "name": "По названию"},
+    "seller": {"win_amount": "Сумма побед — больше", "wins": "Больше побед", "offers": "Больше заявок",
+               "name": "По названию"},
+}
 _ORDER = {"amount": "greatest(buy_amount, win_amount) DESC", "buys": "buys DESC, buy_amount DESC",
+          "buy_amount": "buy_amount DESC", "win_amount": "win_amount DESC, wins DESC",
+          "offers": "offers DESC, wins DESC",
           "wins": "wins DESC, win_amount DESC", "open": "open_now DESC, buy_amount DESC",
           "name": "name_ru"}
 PAGE_SIZE = 50

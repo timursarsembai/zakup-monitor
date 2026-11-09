@@ -187,7 +187,12 @@
     .main-nav a.nav-sub { padding: 6px 10px 6px 42px; font-size: 13px; color: var(--muted); }
     .main-nav a.nav-sub.on { color: var(--accent); background: none; }
     .main-nav a.nav-sub::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; margin-left: -18px; margin-right: 8px; }
-    :root[data-side=mini] .main-nav a.nav-sub { display: none; }
+    :root[data-side=mini] .main-nav a.nav-sub, :root[data-side=mini] header .tool-row.sub { display: none; }
+    header .tools .tool-row.sub { padding: 6px 10px 6px 42px; font-size: 13px; }
+    header .tools .tool-row.sub .tool-label { font-size: 13px; color: var(--muted); }
+    header .tools .tool-row.sub.on { background: none; }
+    header .tools .tool-row.sub.on .tool-label { color: var(--accent); }
+    header .tools .tool-row.sub::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; margin-left: -18px; margin-right: 1px; color: var(--muted); }
     header .sec { order: 2; }
     .side-gap { display: block; order: 3; flex: 1 1 auto; min-height: 18px; }
     header .who { order: 4; display: block; padding: 6px 10px 2px; font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
@@ -289,7 +294,9 @@
     {# Телефон: всё ниже — в шторке «Ещё». Компьютер: шапка — левая панель (стили ниже). #}
     <div class="tools {{ 'signed' if request.state.user_id }}" id="tools" data-tools>
       <span class="side-head">{{ _("Разделы") }}</span>
-      <a href="/orgs" class="icon-button tool-row sec {{ 'on' if path == '/orgs' or path.startswith('/org/') }}" title="{{ _("Организации") }}" aria-label="{{ _("Организации") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-5h6v5M9 10h.01M15 10h.01M9 13h.01M15 13h.01"/></svg><span class="tool-label">{{ _("Организации") }}</span></a>
+      <a href="/orgs/customers" class="icon-button tool-row sec {{ 'on' if path.startswith('/orgs') or path.startswith('/org/') }}" title="{{ _("Организации") }}" aria-label="{{ _("Организации") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-5h6v5M9 10h.01M15 10h.01M9 13h.01M15 13h.01"/></svg><span class="tool-label">{{ _("Организации") }}</span></a>
+      <a href="/orgs/customers" class="tool-row sec sub {{ 'on' if path == '/orgs/customers' }}"><span class="tool-label">{{ _("Заказчики") }}</span></a>
+      <a href="/orgs/suppliers" class="tool-row sec sub {{ 'on' if path == '/orgs/suppliers' }}"><span class="tool-label">{{ _("Поставщики") }}</span></a>
       <a href="/categories" class="icon-button tool-row sec {{ 'on' if path == '/categories' or path.startswith('/category/') }}" title="{{ _("Категории") }}" aria-label="{{ _("Категории") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg><span class="tool-label">{{ _("Категории") }}</span></a>
       <a href="/regions" class="icon-button tool-row sec {{ 'on' if path == '/regions' or path.startswith('/region/') }}" title="{{ _("Регионы") }}" aria-label="{{ _("Регионы") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg><span class="tool-label">{{ _("Регионы") }}</span></a>
       <a href="/analytics" class="icon-button tool-row sec {{ 'on' if path == '/analytics' }}" title="{{ _("Аналитика рынка") }}" aria-label="{{ _("Аналитика рынка") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><span class="tool-label">{{ _("Аналитика рынка") }}</span></a>
@@ -340,7 +347,8 @@
     {{ tile("/subscriptions", _("nav:Подписки"), '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/>', path == "/subscriptions", true) }}
     {{ tile("/categories", _("Категории"), '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>', path == "/categories" or path.startswith("/category/")) }}
     {{ tile("/regions", _("Регионы"), '<path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/>', path == "/regions" or path.startswith("/region/")) }}
-    {{ tile("/orgs", _("Организации"), '<path d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-5h6v5M9 10h.01M15 10h.01M9 13h.01M15 13h.01"/>', path == "/orgs" or path.startswith("/org/")) }}
+    {{ tile("/orgs/customers", _("Заказчики"), '<path d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-5h6v5M9 10h.01M15 10h.01M9 13h.01M15 13h.01"/>', path == "/orgs/customers") }}
+    {{ tile("/orgs/suppliers", _("Поставщики"), '<rect x="2" y="7" width="13" height="10" rx="1.5"/><path d="M15 10h4l3 3v4h-7M6.5 19.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zM18 19.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z"/>', path == "/orgs/suppliers") }}
     {{ tile("/analytics", _("Аналитика"), '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>', path == "/analytics") }}
     {% if request.state.staff %}{{ tile("/dashboard", _("Дашборд"), '<rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>', path == "/dashboard") }}{% endif %}
   </div>
@@ -365,7 +373,7 @@
 </div>
 {% endblock %}
 <main{% block main_class %}{% endblock %}>{% block main %}{% endblock %}</main>
-<footer class="site-foot"><a href="/categories">{{ _("Категории") }}</a> · <a href="/regions">{{ _("Регионы") }}</a> · <a href="/orgs">{{ _("Организации") }}</a> · <a href="/offer">{{ _("Публичная оферта") }}</a> · <a href="/privacy">{{ _("Политика конфиденциальности") }}</a> · <a href="/contacts">{{ _("Контакты") }}</a> · <a href="/pricing">{{ _("Тариф") }}</a></footer>
+<footer class="site-foot"><a href="/categories">{{ _("Категории") }}</a> · <a href="/regions">{{ _("Регионы") }}</a> · <a href="/orgs/customers">{{ _("Заказчики") }}</a> · <a href="/orgs/suppliers">{{ _("Поставщики") }}</a> · <a href="/offer">{{ _("Публичная оферта") }}</a> · <a href="/privacy">{{ _("Политика конфиденциальности") }}</a> · <a href="/contacts">{{ _("Контакты") }}</a> · <a href="/pricing">{{ _("Тариф") }}</a></footer>
 <button type="button" class="to-top" data-to-top aria-label="{{ _("Наверх") }}" title="{{ _("Наверх") }}">↑</button>
 {# Платные функции: кнопки видны всем, без доступа открывают это окно. #}
 <dialog class="paywall" id="paywall" aria-labelledby="paywall-title">

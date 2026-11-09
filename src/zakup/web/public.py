@@ -191,13 +191,27 @@ LLMS_TXT = """# Tenderim
 """
 
 
+ORG_PAGES = {"customers": "buyer", "suppliers": "seller"}
+
+
 @router.get("/orgs")
-def orgs_page(request: Request, user: Viewer, role: str = "", form: str = "", region: str = "", q: str = "",
-              sort: str = "amount", page: int = 1):
-    """Справочник организаций: заказчики и поставщики с фильтрами по роли, форме, региону."""
-    role = role if role in orgs.ROLES else ""
+def orgs_root(request: Request, role: str = ""):
+    """Прежний общий справочник — теперь две страницы: заказчики и поставщики."""
+    target = "/orgs/suppliers" if role == "seller" else "/orgs/customers"
+    query = urlencode([(k, v) for k, v in request.query_params.multi_items() if k != "role"])
+    return RedirectResponse(target + (f"?{query}" if query else ""), status_code=301)
+
+
+@router.get("/orgs/{kind}")
+def orgs_page(request: Request, user: Viewer, kind: str, form: str = "", region: str = "", q: str = "",
+              sort: str = "", page: int = 1):
+    """Справочник: заказчики или поставщики, с фильтрами по форме, региону и названию/БИН."""
+    if kind not in ORG_PAGES:
+        raise HTTPException(404, "Нет такой страницы")
+    role = ORG_PAGES[kind]
+    sorts = orgs.ROLE_SORTS[role]
     region = region if region in REGIONS else ""
-    sort = sort if sort in orgs.SORTS else "amount"
+    sort = sort if sort in sorts else next(iter(sorts))
     with core.pool.connection() as conn:
         forms = orgs.form_counts(conn, role)
         form = form if form in forms else ""
@@ -205,9 +219,9 @@ def orgs_page(request: Request, user: Viewer, role: str = "", form: str = "", re
     page = min(max(page, 1), orgs.MAX_PAGE)
     pages = min((total + orgs.PAGE_SIZE - 1) // orgs.PAGE_SIZE, orgs.MAX_PAGE)
     return templates.TemplateResponse(request, "orgs.html", {
-        "rows": rows, "total": total, "page": page, "pages": pages,
-        "f": {"role": role, "form": form, "region": region, "q": q, "sort": sort},
-        "roles": orgs.ROLES, "forms": orgs.FORMS, "form_counts": forms, "sorts": orgs.SORTS, "regions": REGIONS})
+        "rows": rows, "total": total, "page": page, "pages": pages, "kind": kind, "role": role,
+        "f": {"form": form, "region": region, "q": q, "sort": sort},
+        "forms": orgs.FORMS, "form_counts": forms, "sorts": sorts, "regions": REGIONS})
 
 
 @router.get("/org/{bin_}")
@@ -360,7 +374,7 @@ def sitemap_part(kind: str) -> Response:
         with core.pool.connection() as conn:
             catalog_paths = catalog.sitemap_paths(conn)
         urls = [(f"{SITE_URL}{path}", None) for path in (
-            "/", "/announcements", "/lots", "/orgs", "/analytics", "/pricing", "/offer", "/privacy", "/contacts",
+            "/", "/announcements", "/lots", "/orgs/customers", "/orgs/suppliers", "/analytics", "/pricing", "/offer", "/privacy", "/contacts",
             *catalog_paths)]
     else:
         prefix, _, index = kind.partition("-")

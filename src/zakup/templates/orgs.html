@@ -1,50 +1,111 @@
 {% extends "base.html" %}
-{% block title %}{{ _("Организации в госзакупках Казахстана") }}{% endblock %}
-{% block description %}{{ _("Справочник заказчиков и поставщиков госзакупок: БИН, контакты, сколько закупают и выигрывают. Фильтры по региону и форме: ИП, ТОО, АО, госучреждения.") }}{% endblock %}
+{% from "_filters.html" import filter_styles with context %}
+{% set buyers = role == "buyer" %}
+{% set heading = _("Заказчики госзакупок") if buyers else _("Поставщики госзакупок") %}
+{% block title %}{{ heading }} — {{ _("Казахстан") }}{% endblock %}
+{% block description %}{% if buyers %}{{ _("Справочник заказчиков госзакупок Казахстана: БИН, контакты, сколько закупают и на какую сумму. Фильтры по региону и форме.") }}{% else %}{{ _("Справочник поставщиков госзакупок Казахстана: БИН/ИИН, контакты, победы и заявки. Фильтры по региону и форме: ИП, ТОО, АО.") }}{% endif %}{% endblock %}
 {% block style %}
-  .org-filter { border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin: 12px 0 16px;
-                display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px 20px; align-items: end; }
-  .org-filter label { display: flex; flex-direction: column; gap: 5px; font-size: 13px; color: var(--muted); min-width: 0; }
-  .org-filter input, .org-filter select { width: 100%; padding: 9px 10px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); font: inherit; font-size: 15px; }
-  .org-filter .wide { grid-column: 1 / -1; }
-  .org-filter button { padding: 10px 18px; background: var(--accent); color: var(--on-accent); border: 0; font-weight: 600; font-size: 15px; }
-  @media (max-width: 760px) { .org-filter { grid-template-columns: minmax(0, 1fr); gap: 14px; } .org-filter button { width: 100%; } }
-  .roles { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
-  .roles a { padding: 5px 12px; border: 1px solid var(--line); border-radius: 999px; color: var(--fg); }
-  .roles a.on { border-color: var(--accent); color: var(--accent); font-weight: 600; }
-  .pager { display: flex; gap: 10px; align-items: center; margin: 14px 0; }
+{{ filter_styles() }}
   .form-tag { font-size: 12px; color: var(--muted); }
+  .pager { display: flex; gap: 10px; align-items: center; margin: 14px 0; }
+  .org-panel .fgrid { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+  .org-panel .fgrid .wide { grid-column: 1 / -1; }
+  .org-panel input, .org-panel select { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); font: inherit; }
+  .found-row { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; margin: 12px 0 8px; }
+  .view-switch { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .view-switch button { display: inline-flex; align-items: center; gap: 6px; border: 0; border-radius: 0; padding: 5px 10px; color: var(--muted); background: none; }
+  .view-switch button[aria-pressed=true] { background: var(--accent); color: var(--on-accent); }
+  .view-switch svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; }
+  @media (max-width: 760px) { .org-panel .desk-sort { display: none; } }
+  /* Плитка: строки — карточки, подписи столбцов — над значениями. */
+  [data-rview=cards] { overflow: visible; }
+  [data-rview=cards] table.dir-table, [data-rview=cards] table.dir-table tbody { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; min-width: 0 !important; }
+  [data-rview=cards] table.dir-table tbody { grid-column: 1 / -1; }
+  [data-rview=cards] table.dir-table tr:first-child:has(th) { display: none; }
+  [data-rview=cards] table.dir-table tr { display: flex; flex-wrap: wrap; gap: 8px 16px; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+  [data-rview=cards] table.dir-table td { display: block; border: 0; padding: 0; min-width: 0 !important; text-align: left; }
+  [data-rview=cards] table.dir-table td[data-label]::before { content: attr(data-label); display: block; font-size: 12px; color: var(--muted); }
+  [data-rview=cards] table.dir-table td.wide { flex: 1 1 100%; }
 {% endblock %}
+{% macro link() %}{% set params = dict(f) %}{% set __ = params.update({"page": 1}) %}{% set __ = params.update(kwargs) %}/orgs/{{ kind }}?{{ params | urlencode }}{% endmacro %}
 {% block main %}
-<h1>{{ _("Организации") }}</h1>
-<p class="muted">{{ _("Заказчики и поставщики госзакупок по данным goszakup.gov.kz. Цифры — за всё время, что Tenderim собирает закупки.") }} <a href="/categories">{{ _("Категории") }}</a> · <a href="/regions">{{ _("Регионы") }}</a></p>
-{% macro link() %}{% set params = dict(f) %}{% set __ = params.update({"page": 1}) %}{% set __ = params.update(kwargs) %}/orgs?{{ params | urlencode }}{% endmacro %}
-<div class="roles">{% for key, label in roles.items() %}<a href="{{ link(role=key, form="") }}" class="{{ 'on' if f.role == key }}">{{ _(label) }}</a>{% endfor %}</div>
-<form class="org-filter" method="get" action="/orgs">
-  <input type="hidden" name="role" value="{{ f.role }}">
-  <label class="wide">{{ _("Название или БИН/ИИН") }}<input type="search" name="q" value="{{ f.q }}" placeholder="{{ _("например, Аягоз") }}"></label>
-  <label>{{ _("Форма") }}<select name="form"><option value="">{{ _("Все") }}</option>{% for key, label in forms.items() if key in form_counts %}<option value="{{ key }}" {% if f.form == key %}selected{% endif %}>{{ _(label) }} · {{ form_counts[key] }}</option>{% endfor %}</select></label>
-  <label>{{ _("Регион") }}<select name="region"><option value="">{{ _("Весь Казахстан") }}</option>{% for key, label in regions.items() %}<option value="{{ key }}" {% if f.region == key %}selected{% endif %}>{{ _(label) }}</option>{% endfor %}</select></label>
-  <label>{{ _("Сортировка") }}<select name="sort">{% for key, label in sorts.items() %}<option value="{{ key }}" {% if f.sort == key %}selected{% endif %}>{{ _(label) }}</option>{% endfor %}</select></label>
-  <button>{{ _("Показать") }}</button>
+<h1>{{ heading }}</h1>
+<p class="muted">{{ _("По данным goszakup.gov.kz. Цифры — за всё время, что Tenderim собирает закупки.") }} <a href="/orgs/{{ 'suppliers' if buyers else 'customers' }}">{{ _("Поставщики →") if buyers else _("Заказчики →") }}</a></p>
+
+{# Телефон: панель как в поиске закупок — сортировка, весь фильтр; условия по одному. #}
+{% set chips = [("q", _("Название, БИН"), ("«" ~ f.q[:16] ~ "»") if f.q else ""),
+                ("form", _("Форма"), _(forms[f.form]) if f.form else ""),
+                ("region", _("Регион"), region_name(f.region) if f.region else "")] %}
+<div class="chipbar" data-chipbar>
+  <div class="chip-fixed">
+    <button type="button" class="chip-icon" data-chip-open="sort" aria-label="{{ _("Сортировка") }}" title="{{ _("Сортировка") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4v16M3 8l4-4 4 4M17 20V4M13 16l4 4 4-4"/></svg></button>
+    <button type="button" class="chip-icon" data-chip-open="all" aria-label="{{ _("Фильтры") }}" title="{{ _("Фильтры") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>{% set n = chips | map(attribute=2) | select | list | length %}{% if n %}<span class="count">{{ n }}</span>{% endif %}</button>
+  </div>
+  <div class="chip-scroll">
+    {% for key, label, value in chips %}<button type="button" class="chip {{ 'set' if value }}" data-chip-open="{{ key }}" data-title="{{ label }}">{{ value or label }}<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>{% endfor %}
+  </div>
+</div>
+<div class="filter-backdrop" data-filter-backdrop hidden></div>
+
+<form method="get" action="/orgs/{{ kind }}" class="filters-panel org-panel" id="filters" aria-label="{{ _("Фильтр") }}">
+  <div class="sheet-head"><b>{{ _("Фильтр") }}</b><button type="button" data-filter-close aria-label="{{ _("Закрыть") }}">✕</button></div>
+  <div class="fgrid">
+    <div class="wide" data-chip="q"><label class="fl" for="o-q">{{ _("Название или БИН/ИИН") }}</label><input id="o-q" type="search" name="q" value="{{ f.q }}" placeholder="{{ _("например, Аягоз") }}"></div>
+    <div data-chip="form"><label class="fl" for="o-form">{{ _("Форма") }}</label><select id="o-form" name="form"><option value="">{{ _("Все") }}</option>{% for key, label in forms.items() if key in form_counts %}<option value="{{ key }}" {% if f.form == key %}selected{% endif %}>{{ _(label) }} · {{ form_counts[key] }}</option>{% endfor %}</select></div>
+    <div data-chip="region"><label class="fl" for="o-region">{{ _("Регион") }}</label><select id="o-region" name="region"><option value="">{{ _("Весь Казахстан") }}</option>{% for key, label in regions.items() %}<option value="{{ key }}" {% if f.region == key %}selected{% endif %}>{{ _(label) }}</option>{% endfor %}</select></div>
+    <div class="desk-sort"><label class="fl" for="o-sort">{{ _("Сортировка") }}</label><select id="o-sort" name="sort" data-sort-field>{% for key, label in sorts.items() %}<option value="{{ key }}" {% if f.sort == key %}selected{% endif %}>{{ _(label) }}</option>{% endfor %}</select></div>
+  </div>
+  <div class="sort-pick" data-chip="sort">
+    <span class="fl">{{ _("Сортировка") }}</span>
+    {% for key, label in sorts.items() %}<button type="button" class="sort-option {{ 'on' if f.sort == key }}" data-sort-value="{{ key }}">{{ _(label) }}</button>{% endfor %}
+  </div>
+  <div class="single-actions">
+    <button type="button" data-chip-reset>{{ _("Сбросить") }}</button>
+    <button class="primary">{{ _("Применить") }}</button>
+  </div>
+  <div class="panel-actions">
+    <button class="primary">{{ _("Найти") }}</button>
+    <a href="/orgs/{{ kind }}" data-reset-all>{{ _("Сбросить") }}</a>
+  </div>
 </form>
-<p class="muted">{{ _("Найдено:") }} {{ total }}</p>
+
+<div data-results>
+<div class="found-row">
+  <span class="muted">{{ _("Найдено:") }} {{ total }}</span>
+  <div class="view-switch" role="group" aria-label="{{ _("Вид отображения") }}">
+    <button type="button" data-rview="table"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18M3 12h18M3 19h18"/></svg><span>{{ _("Таблица") }}</span></button>
+    <button type="button" data-rview="cards"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5"/></svg><span>{{ _("Плитка") }}</span></button>
+  </div>
+</div>
 {% if rows %}
-<div class="table-wrap"><table>
-  <tr><th>{{ _("Организация") }}</th><th>{{ _("Регион") }}</th><th>{{ _("Закупок") }}</th><th>{{ _("На сумму, ₸") }}</th><th>{{ _("Открыто") }}</th><th>{{ _("Побед") }}</th><th>{{ _("На сумму, ₸") }}</th><th>{{ _("Заявок") }}</th></tr>
+<div class="table-wrap" data-rview-box><table class="dir-table">
+  {% if buyers %}
+  <tr><th>{{ _("Организация") }}</th><th>{{ _("Регион") }}</th><th>{{ _("Закупок") }}</th><th>{{ _("На сумму, ₸") }}</th><th>{{ _("Открыто") }}</th></tr>
   {% for r in rows %}
   <tr>
-    <td><a href="/org/{{ r.bin }}">{{ pick(r.name_ru, r.name_kz) }}</a><div class="form-tag">{{ _(forms[r.form]) }} · {{ id_label(r.bin) }} {{ r.bin }}</div></td>
-    <td>{{ region_name(r.region) }}</td>
-    <td class="num">{{ r.buys or "" }}</td>
-    <td class="num">{{ r.buy_amount | money if r.buys else "" }}</td>
-    <td class="num">{{ r.open_now or "" }}</td>
-    <td class="num">{{ r.wins or "" }}</td>
-    <td class="num">{{ r.win_amount | money if r.wins else "" }}</td>
-    <td class="num">{{ r.offers or "" }}</td>
+    <td class="wide"><a href="/org/{{ r.bin }}">{{ pick(r.name_ru, r.name_kz) }}</a><div class="form-tag">{{ _(forms[r.form]) }} · {{ id_label(r.bin) }} {{ r.bin }}</div></td>
+    <td data-label="{{ _("Регион") }}">{{ region_name(r.region) or "—" }}</td>
+    <td class="num" data-label="{{ _("Закупок") }}">{{ r.buys }}</td>
+    <td class="num" data-label="{{ _("На сумму, ₸") }}">{{ r.buy_amount | money }}</td>
+    <td class="num" data-label="{{ _("Открыто") }}">{{ r.open_now or "" }}</td>
   </tr>
   {% endfor %}
+  {% else %}
+  <tr><th>{{ _("Организация") }}</th><th>{{ _("Регион") }}</th><th>{{ _("Побед") }}</th><th>{{ _("На сумму, ₸") }}</th><th>{{ _("Заявок") }}</th><th>{{ _("Доля побед") }}</th></tr>
+  {% for r in rows %}
+  <tr>
+    <td class="wide"><a href="/org/{{ r.bin }}">{{ pick(r.name_ru, r.name_kz) }}</a><div class="form-tag">{{ _(forms[r.form]) }} · {{ id_label(r.bin) }} {{ r.bin }}</div></td>
+    <td data-label="{{ _("Регион") }}">{{ region_name(r.region) or "—" }}</td>
+    <td class="num" data-label="{{ _("Побед") }}">{{ r.wins }}</td>
+    <td class="num" data-label="{{ _("На сумму, ₸") }}">{{ r.win_amount | money if r.wins else "" }}</td>
+    <td class="num" data-label="{{ _("Заявок") }}">{{ r.offers }}</td>
+    <td class="num" data-label="{{ _("Доля побед") }}">{% if r.offers %}{{ (r.wins / r.offers * 100) | round | int }}%{% endif %}</td>
+  </tr>
+  {% endfor %}
+  {% endif %}
 </table></div>
 {% if pages > 1 %}<div class="pager">{% if page > 1 %}<a href="{{ link(page=page - 1) }}">← {{ _("Назад") }}</a>{% endif %}<span class="muted">{{ _("стр.") }} {{ page }} {{ _("из") }} {{ pages }}</span>{% if page < pages %}<a href="{{ link(page=page + 1) }}">{{ _("Дальше") }} →</a>{% endif %}</div>{% endif %}
 {% else %}<p class="muted">{{ _("Ничего не найдено — попробуйте убрать часть фильтров.") }}</p>{% endif %}
+</div>
+<script src="/static/filters.js?v={{ asset_v }}"></script>
 {% endblock %}
