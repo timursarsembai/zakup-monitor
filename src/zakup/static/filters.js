@@ -16,8 +16,15 @@
     title.textContent = fullTitle;
     document.body.classList.remove("sheet-open");
   };
+  // Для нижней панели (app.js): закрыть шторку фильтра; true — если она была открыта.
+  window.closeFilterSheet = () => {
+    if (!sheet.classList.contains("open")) return false;
+    closeSheet();
+    return true;
+  };
   const openSheet = (mode, label) => {
     closeSheet();
+    window.closeNavSheets?.();  // шторки «Ещё» / «Закупки» — закрыть: одна шторка за раз
     sheet.classList.add("open");
     document.body.classList.add("sheet-open");
     if (mode === "all") return;

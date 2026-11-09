@@ -146,6 +146,8 @@
       trigger.addEventListener("click", (e) => {
         if (trigger.tagName === "A" && !phone.matches) return;  // на компьютере — обычная ссылка
         e.preventDefault();
+        // Открыта шторка фильтра — нажатие в нижней панели её закрывает, и только.
+        if (window.closeFilterSheet?.()) return;
         set(trigger.getAttribute("aria-expanded") !== "true");
       });
       let startY = null;
@@ -155,6 +157,7 @@
         startY = null;
       }, { passive: true });
     };
+    window.closeNavSheets = () => sheets.forEach((o) => o.set(false));
     bind(document.querySelector("[data-more]"), document.querySelector("[data-more-sheet]"));
     bind(document.querySelector("[data-search-open]"), document.querySelector("[data-search-sheet]"));
     backdrop.addEventListener("click", () => sheets.forEach((o) => o.set(false)));
