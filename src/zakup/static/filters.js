@@ -138,6 +138,7 @@
         chipbar.innerHTML = freshBar.innerHTML;
         const strip = chipbar.querySelector(".chip-scroll");
         if (strip) strip.scrollLeft = scrolled;
+        syncArrows();
       }
       const freshForm = doc.getElementById("filters");
       if (freshForm) {
@@ -202,6 +203,25 @@
       sheet.requestSubmit();
     }
   });
+  // Стрелки по краям строки условий (компьютер): листают на ширину строки, у края гаснут.
+  const syncArrows = () => {
+    const strip = chipbar?.querySelector(".chip-scroll");
+    if (!strip) return;
+    const max = strip.scrollWidth - strip.clientWidth;
+    const [back, forward] = chipbar.querySelectorAll("[data-chip-arrow]");
+    if (back) back.disabled = strip.scrollLeft <= 2;
+    if (forward) forward.disabled = strip.scrollLeft >= max - 2;
+  };
+  window.syncChipArrows = syncArrows;
+  chipbar?.addEventListener("click", (event) => {
+    const arrow = event.target.closest("[data-chip-arrow]");
+    if (!arrow) return;
+    const strip = chipbar.querySelector(".chip-scroll");
+    strip.scrollLeft += Number(arrow.dataset.chipArrow) * strip.clientWidth * 0.8;
+  });
+  chipbar?.addEventListener("scroll", syncArrows, true);
+  addEventListener("resize", syncArrows);
+  syncArrows();
   // Колесо мыши над строкой условий — прокрутка вбок (полосы прокрутки нет).
   chipbar?.addEventListener("wheel", (event) => {
     const strip = event.target.closest(".chip-scroll");

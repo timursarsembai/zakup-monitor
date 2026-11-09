@@ -41,9 +41,11 @@
     <button type="button" class="chip-icon" data-chip-open="sort" aria-label="{{ _("Сортировка") }}" title="{{ _("Сортировка") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4v16M3 8l4-4 4 4M17 20V4M13 16l4 4 4-4"/></svg></button>
     <button type="button" class="chip-icon" data-chip-open="all" aria-label="{{ _("Фильтры") }}" title="{{ _("Фильтры") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>{% set n = chips | map(attribute=2) | select | list | length %}{% if n %}<span class="count">{{ n }}</span>{% endif %}</button>
   </div>
+  <button type="button" class="chip-arrow" data-chip-arrow="-1" aria-label="{{ _("Назад") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg></button>
   <div class="chip-scroll">
     {% for key, label, value in chips %}<button type="button" class="chip {{ 'set' if value }}" data-chip-open="{{ key }}" data-title="{{ label }}">{{ value or label }}<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>{% endfor %}
   </div>
+  <button type="button" class="chip-arrow" data-chip-arrow="1" aria-label="{{ _("Дальше") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></button>
 </div>
 <div class="filter-backdrop" data-filter-backdrop hidden></div>
 

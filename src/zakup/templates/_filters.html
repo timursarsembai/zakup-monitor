@@ -61,6 +61,7 @@
     .subscribe { padding: 14px 0 0; border-left: 0; border-top: 1px solid var(--line); }
   }
   [data-results].loading { opacity: .45; transition: opacity .15s; pointer-events: none; }
+  .chip-arrow { display: none; }
   .filter-bar, .filter-open, .sheet-head, .chipbar, .sort-pick, .single-actions, .filter-backdrop { display: none; }
   /* Компьютер, строка условий (DESKTOP_CHIPS в web/core.py): закреплена сверху над результатами,
      условие раскрывает шторку вниз прямо из-под своей кнопки; «Фильтры» — весь фильтр вниз. */
@@ -70,6 +71,11 @@
     :root[data-chips=desktop] .chip-fixed { display: flex; gap: 6px; flex: none; padding-right: 8px; border-right: 1px solid var(--line); }
     :root[data-chips=desktop] .chip-scroll { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
     :root[data-chips=desktop] .chip-scroll::-webkit-scrollbar { display: none; }
+    :root[data-chips=desktop] .chip-scroll { flex: 1 1 auto; min-width: 0; scroll-behavior: smooth; }
+    :root[data-chips=desktop] .chip-arrow { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 30px; height: 30px;
+               border: 1px solid var(--line); border-radius: 50%; background: var(--bg); color: var(--fg); cursor: pointer; }
+    :root[data-chips=desktop] .chip-arrow svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2.4; }
+    :root[data-chips=desktop] .chip-arrow:disabled { opacity: .3; cursor: default; }
     :root[data-chips=desktop] .chip, :root[data-chips=desktop] .chip-icon { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap;
                border: 1px solid var(--line); background: color-mix(in srgb, var(--fg) 4%, var(--bg)); color: var(--fg); font-size: 14px; cursor: pointer; }
     :root[data-chips=desktop] .chip { padding: 6px 12px; border-radius: 999px; }
@@ -274,6 +280,7 @@
     <button type="button" class="chip-icon" data-chip-open="all" aria-label="{{ _("Фильтры") }}" title="{{ f.describe() }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>{% set n = f.active_count() %}{% if n %}<span class="count">{{ n }}</span>{% endif %}</button>
     <button type="button" class="chip-icon" data-chip-open="subscribe" {% if not request.state.paid %}data-paid data-feature="subscription"{% endif %} aria-label="{{ _("Сохранить фильтр — подписка") }}" title="{{ _("Сохранить фильтр — подписка") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg></button>
   </div>
+  <button type="button" class="chip-arrow" data-chip-arrow="-1" aria-label="{{ _("Назад") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg></button>
   <div class="chip-scroll">
     {% if saved %}<button type="button" class="chip {{ 'set' if editing }}" data-chip-open="saved" data-title="★ {{ _("Мои фильтры") }}">★ {{ editing.name[:18] if editing else _("Мои фильтры") }}<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>{% endif %}
     {% for key, label in chip_names %}
@@ -282,6 +289,7 @@
     {% elif key != "number" or lots or f.number %}{% set value = chip_values[key] %}<button type="button" class="chip {{ 'set' if value }}" data-chip-open="{{ key }}" data-title="{{ label }}">{{ value or label }}<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>{% endif %}
     {% endfor %}
   </div>
+  <button type="button" class="chip-arrow" data-chip-arrow="1" aria-label="{{ _("Дальше") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></button>
 </div>
 <div class="filter-backdrop" data-filter-backdrop hidden></div>
 <script src="/static/sortbar.js?v={{ asset_v }}" defer></script>
