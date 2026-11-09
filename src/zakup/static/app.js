@@ -77,6 +77,21 @@
     document.addEventListener("click", (e) => { if (!tools.contains(e.target) && e.target !== burger) set(false); });
     document.addEventListener("keydown", (e) => { if (e.key === "Escape") set(false); });
   })();
+  // Вид таблиц с переключателем «Таблица / Плитка» (data-rview-box): один выбор на весь сайт,
+  // запоминается; на телефоне по умолчанию плитка.
+  window.applyRView = () => {
+    let view = matchMedia("(max-width: 760px)").matches ? "cards" : "table";
+    try { view = localStorage.getItem("zakup-rview") || view; } catch (e) {}
+    for (const box of document.querySelectorAll("[data-rview-box]")) box.dataset.rview = view;
+    for (const b of document.querySelectorAll("[data-rview]:not([data-rview-box])")) b.setAttribute("aria-pressed", String(b.dataset.rview === view));
+  };
+  document.addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-rview]");
+    if (!button) return;
+    try { localStorage.setItem("zakup-rview", button.dataset.rview); } catch (e) {}
+    window.applyRView();
+  });
+  window.applyRView();
   // Компьютер: свернуть / развернуть левую панель (запоминается).
   for (const button of document.querySelectorAll("[data-side-collapse]")) {
     button.addEventListener("click", () => {

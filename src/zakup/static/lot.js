@@ -69,19 +69,8 @@ const PAGE = document.querySelector("[data-lot-page]");
     catch { qCopy.textContent = CONFIG.t.copy_failed; }
     setTimeout(() => { qCopy.textContent = "📋 " + CONFIG.t.copy_questions; }, 2000);
   });
-  // Вид результатов подбора: таблица или плитка (запоминается); фрагмент обновляется — применяем заново.
-  const applyRView = () => {
-    let view = matchMedia("(max-width: 760px)").matches ? "cards" : "table";
-    try { view = localStorage.getItem("zakup-rview") || view; } catch (e) {}
-    for (const box of document.querySelectorAll("[data-rview-box]")) box.dataset.rview = view;
-    for (const b of document.querySelectorAll("[data-rview]:not([data-rview-box])")) b.setAttribute("aria-pressed", String(b.dataset.rview === view));
-  };
-  document.addEventListener("click", (event) => {
-    const button = event.target.closest("button[data-rview]");
-    if (!button) return;
-    try { localStorage.setItem("zakup-rview", button.dataset.rview); } catch (e) {}
-    applyRView();
-  });
+  // Вид «таблица / плитка» — в app.js (общий для всех страниц); фрагмент обновился — применить заново.
+  const applyRView = () => window.applyRView && window.applyRView();
   applyRView();
   // Пока поиск идёт — обновляем результат раз в 10 секунд.
   const research = document.querySelector("[data-research]");

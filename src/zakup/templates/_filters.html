@@ -212,7 +212,9 @@
         <option value="" {% if not f.deadline %}selected{% endif %}>{{ _("без ограничения") }}</option>
       </select></div>
     <div><label class="check open-now"><input type="checkbox" name="open_now" value="1" {% if f.end_from == 'today' %}checked{% endif %}> {{ _("Только с открытым приёмом заявок") }}</label>
-      <span class="muted hint">{{ _("Срок подачи заявок ещё не прошёл — проверяется каждый день заново.") }}</span></div>
+      <span class="muted hint">{{ _("Срок подачи заявок ещё не прошёл — проверяется каждый день заново.") }}</span>
+      <label class="check open-now"><input type="checkbox" name="today_only" value="1" {% if f.published_from == 'today' %}checked{% endif %}> {{ _("Только опубликованные сегодня") }}</label>
+      <span class="muted hint">{{ _("Без закупок, опубликованных раньше. Дата «сегодня» сдвигается сама каждый день.") }}</span></div>
     <div><span class="fl">{{ _("Окончание приема заявок с — по") }}</span>
       <div class="pair">
         <input type="date" name="end_from" value="{{ '' if f.end_from == 'today' else f.end_from }}" aria-label="{{ _("Окончание с") }}">
@@ -237,7 +239,7 @@
     <div><span class="fl">{{ _("Протокол итогов с — по") }}</span>
       <div class="pair"><input type="date" name="itogi_from" value="{{ f.itogi_from }}" aria-label="{{ _("Протокол итогов с") }}"><input type="date" name="itogi_to" value="{{ f.itogi_to }}" aria-label="{{ _("Протокол итогов по") }}"></div></div>
     <div><span class="fl">{{ _("Дата публикации с — по") }}</span>
-      <div class="pair"><input type="date" name="published_from" value="{{ f.published_from }}" aria-label="{{ _("Публикация с") }}"><input type="date" name="published_to" value="{{ f.published_to }}" aria-label="{{ _("Публикация по") }}"></div></div>
+      <div class="pair"><input type="date" name="published_from" value="{{ '' if f.published_from == 'today' else f.published_from }}" aria-label="{{ _("Публикация с") }}"><input type="date" name="published_to" value="{{ f.published_to }}" aria-label="{{ _("Публикация по") }}"></div></div>
     <div><span class="fl">{{ _("Финансовый год") }}</span>
       {% set year_labels = {} %}{% for y in years %}{% set __ = year_labels.update({y: y|string}) %}{% endfor %}
       {{ multi("year", year_labels, f.years, _("Любой")) }}</div>
@@ -261,6 +263,7 @@
       {% for chat_id, title in groups %}<option value="{{ chat_id }}" {% if editing.chat_id == chat_id %}selected{% endif %}>{{ _("в группу «") }}{{ title }}»</option>{% endfor %}
     </select>
     {% if f.relative() %}
+    <label class="check"><input type="checkbox" name="send_open" value="1"> {{ _("Сразу прислать то, что уже открыто (одним сообщением)") }}</label>
     <button data-paid data-feature="subscription" formmethod="post" formaction="/subscriptions/{{ editing.id }}/update" class="primary">{{ _("Сохранить изменения") }}</button>
     {% else %}
     <span class="muted">{{ _("Подписаться можно, когда в фильтре нет конкретных дат: окончание «в течение 2 рабочих дней» или без ограничения — тогда условия сами сдвигаются каждый день.") }}</span>
@@ -275,8 +278,9 @@
       <option value="">{{ _("в мой Telegram") }}</option>
       {% for chat_id, title in groups %}<option value="{{ chat_id }}">{{ _("в группу «") }}{{ title }}»</option>{% endfor %}
     </select>
+    <label class="check"><input type="checkbox" name="send_open" value="1"> {{ _("Сразу прислать то, что уже открыто (одним сообщением)") }}</label>
     <button data-paid data-feature="subscription" formmethod="post" formaction="/subscriptions/filter" class="primary">{{ _("Подписаться на этот поиск") }}</button>
-    <span class="muted">{{ _("Новые") }} {{ _("лоты") if lots else _("объявления") }} {{ _("по этим условиям придут в Telegram. Подписок может быть несколько —") }} <a href="/subscriptions">{{ _("мои подписки") }}</a>.</span>
+    <span class="muted">{{ _("Новые") }} {{ _("лоты") if lots else _("объявления") }} {{ _("по этим условиям придут в Telegram, как только появятся на портале. Подписок может быть несколько —") }} <a href="/subscriptions">{{ _("мои подписки") }}</a>.</span>
     {% else %}
     <span class="muted">{{ _("Подписаться можно, когда в фильтре нет конкретных дат: окончание «в течение 2 рабочих дней» или без ограничения — тогда условия сами сдвигаются каждый день.") }}</span>
     {% endif %}

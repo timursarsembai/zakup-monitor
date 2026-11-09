@@ -254,7 +254,9 @@ class Filters:
             end_from=_date(one("end_from")) or (TODAY if one("open_now") == "1" or one("end_from") == TODAY else ""),
             start_from=_date(one("start_from")),
             start_to=_date(one("start_to")),
-            published_from=_date(one("published_from")),
+            # «Только опубликованные сегодня» — каждый день заново.
+            published_from=_date(one("published_from"))
+            or (TODAY if one("today_only") == "1" or one("published_from") == TODAY else ""),
             published_to=_date(one("published_to")),
             itogi_from=_date(one("itogi_from")),
             itogi_to=_date(one("itogi_to")),
@@ -394,12 +396,12 @@ class Filters:
             params["deadline_end"] = datetime.combine(
                 deadline + timedelta(days=1), time.min, PORTAL_TZ
             )
-        end_from = (
-            now.astimezone(PORTAL_TZ).date().isoformat() if self.end_from == TODAY else self.end_from
-        )
+        today = now.astimezone(PORTAL_TZ).date().isoformat()
+        end_from = today if self.end_from == TODAY else self.end_from
+        published_from = today if self.published_from == TODAY else self.published_from
         for column, start, end in (("end_date", end_from, ""),
                                    ("start_date", self.start_from, self.start_to),
-                                   ("publish_date", self.published_from, self.published_to),
+                                   ("publish_date", published_from, self.published_to),
                                    ("itogi_date", self.itogi_from, self.itogi_to)):
             if start:
                 clauses.append(f"a.{column} >= %({column}_from)s")
@@ -441,7 +443,7 @@ class Filters:
         return not (
             (self.deadline and self.deadline != DEADLINE_RULE)
             or self.end_from not in ("", TODAY)
-            or self.start_from or self.start_to or self.published_from or self.published_to
+            or self.start_from or self.start_to or self.published_from not in ("", TODAY) or self.published_to
             or self.itogi_from or self.itogi_to
         )
 
@@ -453,6 +455,8 @@ class Filters:
         for key, value in self.to_json().items():
             if key == "end_from" and value == TODAY:
                 pairs.append(("open_now", 1))
+            elif key == "published_from" and value == TODAY:
+                pairs.append(("today_only", 1))
             elif key == "deadline":
                 pairs.append(("deadline_mode", "rule" if value == DEADLINE_RULE else ""))
                 if value and value != DEADLINE_RULE:
@@ -516,9 +520,12 @@ class Filters:
             parts.append(_("окончание по {date}", date=self.deadline))
         if self.end_from == TODAY:
             parts.append(_("только с открытым приёмом заявок"))
+        if self.published_from == TODAY:
+            parts.append(_("только опубликованные сегодня"))
         for label, start, end in (("окончание", "" if self.end_from == TODAY else self.end_from, ""),
                                   ("начало приёма", self.start_from, self.start_to),
-                                  ("опубликовано", self.published_from, self.published_to),
+                                  ("опубликовано", "" if self.published_from == TODAY else self.published_from,
+                                   self.published_to),
                                   ("протокол итогов", self.itogi_from, self.itogi_to)):
             if start or end:
                 parts.append(f"{_(label)} {start or '…'} — {end or '…'}")

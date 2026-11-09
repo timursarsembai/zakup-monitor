@@ -104,8 +104,9 @@ PAGE_LOTS_LIMIT = 200
 
 
 def seed(conn: psycopg.Connection, sub_id: int, current: Filters, scope: str,
-         now: datetime | None = None) -> None:
-    """Подходящее сейчас — сразу «увиденным», а список — в первую выборку для листания."""
+         now: datetime | None = None, send_open: bool = False) -> None:
+    """Подходящее сейчас — сразу «увиденным»: подписка присылает только новое. send_open —
+    по просьбе при создании ещё и одним сообщением всё, что уже открыто (с листанием)."""
     now = now or datetime.now(UTC)
     where, params = current.where(now, scope, subscription=True)
     source = ("lots l, announcements a" if scope == "lots"
@@ -116,7 +117,7 @@ def seed(conn: psycopg.Connection, sub_id: int, current: Filters, scope: str,
             ON CONFLICT DO NOTHING RETURNING lot_id""",
         {**params, "sub_id": sub_id},
     ).fetchall()
-    if rows:
+    if rows and send_open:
         ordered = conn.execute(
             """SELECT l.id, l.trd_buy_id FROM lots l LEFT JOIN announcements a ON a.id = l.trd_buy_id
                WHERE l.id = ANY(%s)

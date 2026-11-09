@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
@@ -256,7 +257,7 @@ def test_first_batch_comes_as_one_message_with_pages(conn, monkeypatch):
         """INSERT INTO subscriptions (user_id, name, query, kind, filters)
            VALUES (%s, 'Мебель', '', 'announcements', %s) RETURNING id""",
         (user, db.Jsonb(Filters(deadline="").to_json()))).fetchone()[0]
-    matcher.seed(conn, sub, Filters(deadline=""), "lots", NOW)
+    matcher.seed(conn, sub, Filters(deadline=""), "lots", NOW, send_open=True)
     sent, calls = [], []
     monkeypatch.setattr(matcher.telegram, "send_message",
                         lambda chat, text, buttons=None: sent.append((chat, text, buttons)) or {"message_id": 7})
@@ -294,7 +295,7 @@ def test_first_batch_keeps_nearest_lots_up_to_limit(conn, monkeypatch):
         """INSERT INTO subscriptions (user_id, name, query, kind, filters)
            VALUES (%s, 'Мебель', '', 'announcements', %s) RETURNING id""",
         (user, db.Jsonb(Filters(deadline="").to_json()))).fetchone()[0]
-    matcher.seed(conn, sub, Filters(deadline=""), "lots", NOW)
+    matcher.seed(conn, sub, Filters(deadline=""), "lots", NOW, send_open=True)
     lot_ids, total = conn.execute("SELECT lot_ids, total FROM match_pages").fetchone()
     assert total == 7 and len(lot_ids) == 4
     nearest = [r[0] for r in conn.execute(
@@ -340,7 +341,7 @@ def test_first_batch_limit_keeps_whole_announcement(conn, monkeypatch):
         """INSERT INTO subscriptions (user_id, name, query, kind, filters)
            VALUES (%s, 'Все', '', 'announcements', %s) RETURNING id""",
         (user, db.Jsonb(Filters(deadline="").to_json()))).fetchone()[0]
-    matcher.seed(conn, sub, Filters(deadline=""), "lots", NOW)
+    matcher.seed(conn, sub, Filters(deadline=""), "lots", NOW, send_open=True)
     lot_ids, total = conn.execute("SELECT lot_ids, total FROM match_pages").fetchone()
     assert sorted(lot_ids) == [11, 12] and total == 3
 
@@ -356,3 +357,31 @@ def test_open_now_checkbox():
     assert Filters.from_form(parse_qs(urlsplit(query).query)).end_from == "today"
     assert Filters.from_form({"applied": ["1"], "end_from": ["today"]}).end_from == "today"  # старые ссылки
     assert today
+
+
+def test_new_subscription_sends_only_new_lots_by_default(conn, monkeypatch):
+    _announcement(conn, 1)
+    user = _paid_user(conn)
+    sub = conn.execute(
+        """INSERT INTO subscriptions (user_id, name, query, kind, filters)
+           VALUES (%s, 'Только новые', '', 'announcements', %s) RETURNING id""",
+        (user, db.Jsonb(Filters(deadline="").to_json()))).fetchone()[0]
+    matcher.seed(conn, sub, Filters(deadline=""), "lots", NOW)
+    sent = []
+    monkeypatch.setattr(matcher.telegram, "send_message", lambda chat, text, buttons=None: sent.append(text) or {"message_id": 1})
+    assert matcher.deliver(conn, pause=0) == 0 and sent == []
+    assert conn.execute("SELECT count(*) FROM match_pages").fetchone()[0] == 0
+    # Уже открытое — «увиденное»: потом не придёт.
+    assert conn.execute("SELECT count(*) FROM matches WHERE notified_at IS NULL").fetchone()[0] == 0
+
+
+def test_today_only_checkbox_published_today(conn):
+    current = Filters.from_form({"applied": ["1"], "today_only": ["1"], "open_now": ["1"]})
+    assert current.published_from == "today" and current.relative()
+    assert "today_only=1" in current.to_query("lots")
+    for ident, published in ((1, NOW - timedelta(days=1)), (2, NOW)):
+        _announcement(conn, ident)
+        conn.execute("UPDATE announcements SET publish_date = %s WHERE id = %s", (published, ident))
+    where, params = replace(current, statuses=[], disable_person="", regions=[], min_sum=None,
+                            deadline="", advance_min=0).where(NOW, "announcements")
+    assert [r[0] for r in conn.execute(f"SELECT a.id FROM announcements a WHERE {where}", params)] == [2]
