@@ -171,8 +171,8 @@ def test_guest_settings_only_interface_and_header_order(client):
     assert page.status_code == 200 and "Интерфейс" in page.text and "Высокий контраст" in page.text
     assert "Уведомления в Telegram" not in page.text and "Мой пароль" not in page.text
     header = page.text.split("<header>", 1)[1].split("</header>", 1)[0]
-    assert header.index(">Регистрация<") < header.index(">Вход<") < header.index("data-burger")
-    assert 'href="/settings"' in header
+    assert header.index(">Регистрация<") < header.index(">Вход<") < header.index("data-side-collapse")
+    assert 'href="/settings"' in header and 'href="/regions"' in header and "data-burger" not in header
 
 
 def test_client_settings_and_group_button(client, conn, monkeypatch):

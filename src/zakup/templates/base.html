@@ -52,6 +52,10 @@
     } catch (e) {}
     var root = document.documentElement;
     root.dataset.theme = theme;
+    // Левая панель на компьютере: свёрнута, если так выбрали, или сама на узком экране.
+    var side = "";
+    try { side = localStorage.getItem("zakup-side") || ""; } catch (e) {}
+    if (side === "mini" || (!side && window.innerWidth < 1100)) root.dataset.side = "mini";
     // Режим для слабовидящих: масштаб всей страницы и высокий контраст.
     if (zoom !== 1) root.style.zoom = zoom;
     if (contrast) root.dataset.contrast = contrast;
@@ -91,7 +95,6 @@
   :root[data-theme=dark] .logo-dark-bg, :root[data-theme=navy] .logo-dark-bg { display: block !important; }
   .main-nav { display: flex; gap: 22px; }
   .main-nav a { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
-  @media (min-width: 761px) and (max-width: 1180px) { .main-nav { gap: 12px; } .main-nav svg { display: none; } header { gap: 12px; } }
   .main-nav a.on { color: var(--fg); font-weight: 600; }
   .main-nav svg, .icon-button svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
   .icon-button { display: inline-flex; align-items: center; justify-content: center; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; color: inherit; }
@@ -149,21 +152,57 @@
   .burger { display: none; font-size: 20px; line-height: 1; padding: 4px 10px; }
   .tools { display: flex; gap: 10px; align-items: center; }
   .tool-label { display: none; }
-  @media (max-width: 1180px) {
-    .burger { display: inline-flex; }
-    .tools { display: none; position: fixed; top: 52px; right: 8px; z-index: 70; flex-direction: column; align-items: stretch; gap: 6px; min-width: 230px; padding: 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 10px 30px rgb(0 0 0 / 30%); }
-    .tools.open { display: flex; }
-    header .logout > a.icon-button { padding: 4px 8px; font-size: 14px; white-space: nowrap; }
-    .brand img { height: 26px; }
-    .tools .tool-row { display: flex; align-items: center; gap: 10px; justify-content: flex-start; padding: 6px 8px; border: 0; border-radius: 8px; color: var(--fg); }
-    .tools .tool-label { display: inline; font-size: 15px; font-weight: 400; }
-    .tools form.tool-row { padding: 0; margin-top: 4px; }
-    .tools form.tool-row button { width: 100%; text-align: center; padding: 10px; font-size: 16px; font-weight: 600; color: var(--bad); border: 1.5px solid var(--bad); border-radius: 10px; }
-    .tools .primary-link { justify-content: center; }
-  }
   @media (max-width: 760px) {
     /* Тема, язык и режим для слабовидящих на телефоне — в «Настройки» → «Интерфейс». */
     .tools .ui-ctl { display: none !important; }
+  }
+  /* Компьютер: шапка — левая панель у края экрана; узкая (значки) — по кнопке «Свернуть»
+     или сама на экране уже 1100 px. Телефон — нижняя панель и шторка «Ещё» (ниже). */
+  .side-head, .side-gap, .side-view, .side-collapse, .brand-mark { display: none; }
+  @media (min-width: 761px) {
+    :root { --side: 240px; }
+    :root[data-side=mini] { --side: 68px; }
+    body { padding-left: var(--side); }
+    header { position: fixed; top: 0; bottom: 0; left: 0; width: var(--side); max-width: none; margin: 0;
+             flex-direction: column; align-items: stretch; gap: 2px; padding: 16px 12px 12px; border-bottom: 0;
+             border-right: 1px solid var(--line); overflow-y: auto; overflow-x: hidden; }
+    header .logout, header .tools { display: contents; }
+    header .burger { display: none; }
+    .brand { order: 0; padding: 0 8px 14px; }
+    .main-nav { order: 1; flex-direction: column; gap: 2px; }
+    .main-nav::before, .side-head { content: attr(data-head); display: block; font-size: 11px; text-transform: uppercase;
+             letter-spacing: .05em; color: var(--muted); padding: 10px 10px 4px; }
+    .side-head { order: 2; }
+    .main-nav a, header .tool-row, header .tools .tool-row button, header .searches {
+             display: flex; align-items: center; gap: 12px; padding: 8px 10px; border: 0; border-radius: 8px;
+             color: var(--fg); background: none; font-size: 14px; font-weight: 400; white-space: nowrap; width: 100%; text-align: left; }
+    .main-nav a:hover, header .tool-row:hover, header .searches:hover { background: color-mix(in srgb, var(--fg) 6%, transparent); }
+    .main-nav a.on, header .tool-row.on, header .searches.on { color: var(--accent); font-weight: 600;
+             background: color-mix(in srgb, var(--accent) 12%, transparent); }
+    .main-nav svg, header .tool-row svg { width: 20px; height: 20px; flex: none; }
+    header .tool-label { display: inline; }
+    header .sec { order: 2; }
+    .side-gap { display: block; order: 3; flex: 1 1 auto; min-height: 18px; }
+    header .who { order: 4; display: block; padding: 6px 10px 2px; font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
+    header .searches { order: 4; }
+    header .acc { order: 4; }
+    header .tools form.side-out { padding: 0; }
+    header .tools form.side-out button { color: var(--bad); }
+    header .logout > a.icon-button:not(.searches) { order: 4; justify-content: center; margin-top: 6px; padding: 8px 10px; }
+    .side-view { order: 5; display: flex; gap: 4px; padding: 10px 4px 4px; border-top: 1px solid var(--line); margin-top: 8px; }
+    .side-view .tool-row { width: auto; padding: 6px 8px; }
+    .side-view .tool-label { display: none; }
+    .side-view .a11y-panel { left: 0; right: auto; top: auto; bottom: calc(100% + 6px); }
+    .side-collapse { order: 6; display: flex; align-items: center; gap: 12px; padding: 8px 10px; border: 0; background: none; color: var(--muted); font-size: 13px; }
+    .side-collapse svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; }
+    /* Узкая панель: только значки, подписи — во всплывающей подсказке (title). */
+    :root[data-side=mini] .brand img:not(.brand-mark), :root[data-side=mini] .main-nav span, :root[data-side=mini] header .tool-label,
+    :root[data-side=mini] .main-nav::before, :root[data-side=mini] .side-head, :root[data-side=mini] header .who { display: none; }
+    :root[data-side=mini] .brand-mark { display: block; }
+    :root[data-side=mini] .side-view { flex-direction: column; }
+    :root[data-side=mini] .side-collapse svg { transform: rotate(180deg); }
+    :root[data-side=mini] header .searches { font-size: 12px; padding: 8px 4px; }
+    :root[data-side=mini] .main-nav a, :root[data-side=mini] header .tool-row, :root[data-side=mini] header .tools .tool-row button { justify-content: center; }
   }
   /* «Ещё» и шторка — только на телефоне; там же верхнее меню ☰ не нужно. */
   .nav-more, .more-sheet, .more-backdrop { display: none; }
@@ -217,9 +256,9 @@
 {% endif %}
 {% block header %}
 <header>
-  <a href="{{ '/dashboard' if request.state.staff else '/' }}" class="brand" aria-label="{{ _("Tenderim — на главную") }}"><img class="logo-light-bg" src="/static/logo-tenderim.png" alt="Tenderim" width="173" height="30"><img class="logo-dark-bg" src="/static/logo-tenderim-light.png" alt="Tenderim" width="173" height="30"></a>
+  <a href="{{ '/dashboard' if request.state.staff else '/' }}" class="brand" aria-label="{{ _("Tenderim — на главную") }}"><img class="logo-light-bg" src="/static/logo-tenderim.png" alt="Tenderim" width="173" height="30"><img class="logo-dark-bg" src="/static/logo-tenderim-light.png" alt="Tenderim" width="173" height="30"><img class="brand-mark" src="/static/logo-mark.png" alt="" width="30" height="30"></a>
   {% set path = request.url.path %}
-  <nav class="main-nav" aria-label="{{ _("Разделы") }}">
+  <nav class="main-nav" aria-label="{{ _("Разделы") }}" data-head="{{ _("Закупки") }}">
     <a href="/announcements" class="{{ 'on' if path in ('/', '/lots', '/announcements') or path.startswith('/lots/') or path.startswith('/a/') }}"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span>{{ _("nav:Закупки") }}</span></a>
     <a href="/my" {% if not request.state.paid %}data-paid {% endif %}class="{{ 'on' if path == '/my' }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-6-4-6 4z"/></svg><span>{{ _("nav:Мои лоты") }}</span></a>
     <a href="/research" {% if not request.state.paid %}data-paid {% endif %}class="{{ 'on' if path == '/research' }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg><span>{{ _("nav:ИИ-подбор") }}</span></a>
@@ -232,9 +271,22 @@
     {% if request.state.user_id and not request.state.staff %}<a href="/balance" class="icon-button searches {{ 'on' if path == '/balance' }}" title="{{ _("Осталось поисков товаров с ИИ — история") }}">🔍 {{ request.state.searches }}</a>{% endif %}
     {% if not request.state.user_id %}<a class="icon-button primary-link" href="/register">{{ _("Регистрация") }}</a>
     <a class="icon-button" href="/login?next={{ request.url.path | urlencode }}">{{ _("Вход") }}</a>{% endif %}
-    {# На телефоне всё ниже — в меню ☰, на компьютере — в строку. #}
-    <button type="button" class="burger" data-burger aria-label="{{ _("Меню") }}" aria-expanded="false" aria-controls="tools">☰</button>
+    {# Телефон: всё ниже — в шторке «Ещё». Компьютер: шапка — левая панель (стили ниже). #}
     <div class="tools {{ 'signed' if request.state.user_id }}" id="tools" data-tools>
+      <span class="side-head">{{ _("Разделы") }}</span>
+      <a href="/orgs" class="icon-button tool-row sec {{ 'on' if path == '/orgs' or path.startswith('/org/') }}" title="{{ _("Организации") }}" aria-label="{{ _("Организации") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-5h6v5M9 10h.01M15 10h.01M9 13h.01M15 13h.01"/></svg><span class="tool-label">{{ _("Организации") }}</span></a>
+      <a href="/categories" class="icon-button tool-row sec {{ 'on' if path == '/categories' or path.startswith('/category/') }}" title="{{ _("Категории") }}" aria-label="{{ _("Категории") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg><span class="tool-label">{{ _("Категории") }}</span></a>
+      <a href="/regions" class="icon-button tool-row sec {{ 'on' if path == '/regions' or path.startswith('/region/') }}" title="{{ _("Регионы") }}" aria-label="{{ _("Регионы") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg><span class="tool-label">{{ _("Регионы") }}</span></a>
+      <a href="/analytics" class="icon-button tool-row sec {{ 'on' if path == '/analytics' }}" title="{{ _("Аналитика рынка") }}" aria-label="{{ _("Аналитика рынка") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><span class="tool-label">{{ _("Аналитика рынка") }}</span></a>
+      {% if request.state.staff %}<a href="/dashboard" class="icon-button tool-row sec {{ 'on' if path == '/dashboard' }}" title="{{ _("Дашборд") }}" aria-label="{{ _("Дашборд") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg><span class="tool-label">{{ _("Дашборд") }}</span></a>{% endif %}
+      <span class="side-gap"></span>
+      <a href="/pricing" class="icon-button tool-row acc {{ 'on' if path == '/pricing' }}" title="{{ _("Тариф") }}" aria-label="{{ _("Тариф") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/></svg><span class="tool-label">{{ _("Тариф") }}</span></a>
+      <a href="/settings" class="icon-button tool-row acc {{ 'on' if path == '/settings' }}" title="{{ _("Настройки") }}" aria-label="{{ _("Настройки") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg><span class="tool-label">{{ _("Настройки") }}</span></a>
+      {% if request.state.user_id %}
+      <form method="post" action="/logout" class="tool-row acc side-out" data-confirm="{{ _("Выйти из аккаунта?") }}"><button><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg><span class="tool-label">{{ _("Выйти") }}</span></button></form>
+      {% endif %}
+      <div class="side-view">
+      {% set other = "ru" if lang() == "kk" else "kk" %}
       <span class="a11y tool-row ui-ctl">
       <button type="button" class="a11y-toggle" data-a11y-toggle title="{{ _("Режим для слабовидящих") }}" aria-label="{{ _("Режим для слабовидящих") }}" aria-expanded="false">Aa</button><span class="tool-label" data-a11y-label>{{ _("Для слабовидящих") }}</span>
       <div class="a11y-panel" data-a11y-panel hidden>
@@ -248,17 +300,10 @@
         <button type="button" data-a11y-reset>{{ _("Как было") }}</button>
       </div>
     </span>
-      {% set other = "ru" if lang() == "kk" else "kk" %}
       <a class="icon-button lang-switch tool-row ui-ctl" href="/lang/{{ other }}" hreflang="{{ other }}" title="{{ 'Русский' if other == 'ru' else 'Қазақша' }}">{{ languages[other] }}<span class="tool-label">{{ 'Русский язык' if other == 'ru' else 'Қазақ тілі' }}</span></a>
       <span class="tool-row ui-ctl"><button type="button" class="theme-toggle" data-theme-toggle title="{{ _("Сменить тему") }}" aria-label="{{ _("Сменить тему") }}"></button><span class="tool-label" data-theme-label>{{ _("Сменить тему") }}</span></span>
-      {% if request.state.staff %}<a href="/dashboard" class="icon-button tool-row {{ 'on' if path == '/dashboard' }}" title="{{ _("Дашборд") }}" aria-label="{{ _("Дашборд") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg><span class="tool-label">{{ _("Дашборд") }}</span></a>{% endif %}
-      <a href="/analytics" class="icon-button tool-row {{ 'on' if path == '/analytics' }}" title="{{ _("Аналитика рынка") }}" aria-label="{{ _("Аналитика рынка") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><span class="tool-label">{{ _("Аналитика рынка") }}</span></a>
-      <a href="/orgs" class="icon-button tool-row {{ 'on' if path == '/orgs' or path.startswith('/org/') }}" title="{{ _("Организации") }}" aria-label="{{ _("Организации") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-5h6v5M9 10h.01M15 10h.01M9 13h.01M15 13h.01"/></svg><span class="tool-label">{{ _("Организации") }}</span></a>
-      <a href="/categories" class="icon-button tool-row {{ 'on' if path in ('/categories', '/regions') or path.startswith(('/category/', '/region/')) }}" title="{{ _("Категории и регионы") }}" aria-label="{{ _("Категории и регионы") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg><span class="tool-label">{{ _("Категории и регионы") }}</span></a>
-      <a href="/settings" class="icon-button tool-row {{ 'on' if path == '/settings' }}" title="{{ _("Настройки") }}" aria-label="{{ _("Настройки") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg><span class="tool-label">{{ _("Настройки") }}</span></a>
-      {% if request.state.user_id %}
-      <form method="post" action="/logout" class="tool-row" data-confirm="{{ _("Выйти из аккаунта?") }}"><button>{{ _("Выйти") }}</button></form>
-      {% endif %}
+      </div>
+      <button type="button" class="side-collapse" data-side-collapse aria-label="{{ _("Свернуть меню") }}" title="{{ _("Свернуть меню") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg><span class="tool-label">{{ _("Свернуть") }}</span></button>
     </div>
   </div>
 </header>

@@ -77,6 +77,15 @@
     document.addEventListener("click", (e) => { if (!tools.contains(e.target) && e.target !== burger) set(false); });
     document.addEventListener("keydown", (e) => { if (e.key === "Escape") set(false); });
   })();
+  // Компьютер: свернуть / развернуть левую панель (запоминается).
+  for (const button of document.querySelectorAll("[data-side-collapse]")) {
+    button.addEventListener("click", () => {
+      const root = document.documentElement;
+      const mini = root.dataset.side !== "mini";
+      if (mini) root.dataset.side = "mini"; else delete root.dataset.side;
+      try { localStorage.setItem("zakup-side", mini ? "mini" : "full"); } catch (e) {}
+    });
+  }
   // Телефон: «Ещё» в нижней панели — шторка снизу. Закрывается повторным нажатием,
   // по фону, Esc и свайпом вниз.
   (() => {
