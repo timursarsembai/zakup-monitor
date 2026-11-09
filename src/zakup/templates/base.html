@@ -163,6 +163,12 @@
   .brand-tag { font-size: 11px; line-height: 1.3; color: var(--muted); min-width: 0; flex: 1 1 auto;
                display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   @media (max-width: 340px) { .brand-tag { display: none; } }
+  @media (max-width: 760px) {
+    /* Телефон: в шапке — логотип, описание и «Вход»; «Регистрация» — в шторке «Ещё». */
+    header .logout > a.primary-link { display: none; }
+    header .brand img { height: 24px; width: auto; }
+    header .logout > a.icon-button:not(.searches) { padding: 6px 10px; font-size: 14px; }
+  }
   @media (min-width: 761px) {
     header .main-nav a.nav-sub { display: flex; }
     :root { --side: 240px; }
