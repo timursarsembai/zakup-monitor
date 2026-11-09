@@ -1,0 +1,59 @@
+{# Настройки → вкладка «data»: что в базе и догрузка истории. Подключается из settings.html. #}
+{% set d = data %}
+{% set run = d.last_run %}
+{% set labels = {"announcements": _("Объявления"), "lots": _("Лоты"), "customers": _("Заказчики"),
+                 "suppliers": _("Поставщики"), "results": _("Итоги лотов")} %}
+{% set statuses = {"queued": _("ждёт запуска"), "running": _("идёт"), "stopped": _("остановлена"),
+                   "done": _("завершена"), "failed": _("ошибка")} %}
+<div data-tab-panel="data" hidden>
+<section class="panel wide">
+  <h2>{{ _("Данные в базе") }}</h2>
+  <p>{% if d.first %}{{ _("Объявления опубликованы с") }} <b>{{ (d.first | local).strftime("%d.%m.%Y") }}</b> {{ _("по") }} <b>{{ (d.last | local).strftime("%d.%m.%Y %H:%M") }}</b>{% else %}{{ _("Объявлений пока нет.") }}{% endif %}</p>
+  <p>{{ _("Размер базы:") }} <b>{{ d.size }}</b>
+    <span class="muted">· {% for name, size in d.tables %}{{ name }} {{ size }}{{ ", " if not loop.last }}{% endfor %}</span></p>
+  <div class="table-wrap"><table>
+    <tr><th></th><th class="num">{{ _("Сейчас") }}</th>{% if run and run[7] %}<th class="num">{{ _("До догрузки") }}</th><th class="num">{{ _("Прибавилось") }}</th>{% endif %}</tr>
+    {% for key, label in labels.items() %}
+    <tr><td>{{ label }}</td><td class="num">{{ d.counts[key] | money }}</td>
+      {% if run and run[7] %}{% set was = run[7].get(key, 0) %}<td class="num">{{ was | money }}</td><td class="num">{% if d.counts[key] > was %}+{{ (d.counts[key] - was) | money }}{% else %}0{% endif %}</td>{% endif %}</tr>
+    {% endfor %}
+  </table></div>
+  <p class="muted note">{{ _("Заказчики и поставщики пересчитываются каждые 15 минут. Подробности (лоты, итоги) догружаются после объявлений; без подробностей сейчас:") }} {{ d.pending_details | money }}.</p>
+</section>
+
+<section class="panel wide">
+  <h2>{{ _("Догрузка истории") }}</h2>
+  <p class="muted">{{ _("Собирает старые объявления и лоты с портала в фоне, не мешая сбору новых. Заказчики, поставщики и итоги подтягиваются следом. Техспецификации старых лотов не скачиваются — только когда лот открыли на сайте. Догруженное не рассылается подписчикам.") }}</p>
+  {% if run and run[2] in ("queued", "running") %}
+  <p class="status"><span class="dot on"></span>{{ _("Идёт догрузка с") }} {{ run[1].strftime("%d.%m.%Y") }} · {{ statuses[run[2]] }}</p>
+  {% if d.progress %}<p>{% for entity in ("announcements", "lots") %}{{ labels[entity] }}: <b>{% if d.progress[entity] is none %}{{ _("ждут") }}{% else %}{{ d.progress[entity] }}%{% endif %}</b>{{ " · " if loop.first }}{% endfor %}</p>{% endif %}
+  <form method="post" action="/settings/history/stop" class="actions"><button class="danger">{{ _("Остановить") }}</button><a href="/settings#data">{{ _("Обновить") }}</a></form>
+  {% else %}
+  <form method="post" action="/settings/history/start" class="actions">
+    <label class="field" style="margin:0"><span>{{ _("Догрузить с даты") }}</span><input type="date" name="since" required min="2018-01-01" value="{{ run[1].isoformat() if run else '' }}"></label>
+    <button class="primary">{{ _("Запустить") }}</button>
+  </form>
+  <p class="muted note">{{ _("Если часть уже загружена, догрузка продолжится с самых старых записей в базе.") }}</p>
+  {% endif %}
+
+  {% if d.runs %}
+  <h2 style="margin-top:18px">{{ _("Запуски") }}</h2>
+  <div class="table-wrap"><table>
+    <tr><th>{{ _("Период данных") }}</th><th>{{ _("Статус") }}</th><th>{{ _("Запущена") }}</th><th>{{ _("Закончена") }}</th><th>{{ _("Прибавилось") }}</th></tr>
+    {% for r in d.runs %}
+    <tr><td>{{ _("с") }} {{ r[1].strftime("%d.%m.%Y") }} {% if r[10] %}{{ _("по") }} {{ r[10].strftime("%d.%m.%Y") }}{% elif r[11] %}{{ _("и далее — постоянно") }}{% endif %}{% if r[11] %}<div class="muted">{{ _(r[11]) }}</div>{% endif %}</td>
+      <td>{{ statuses[r[2]] }}{% if r[9] %}<div class="muted">{{ r[9] }}</div>{% endif %}</td>
+      <td>{{ ((r[4] or r[3]) | local).strftime("%d.%m.%Y %H:%M") }}</td>
+      <td>{{ (r[5] | local).strftime("%d.%m.%Y %H:%M") if r[5] else "—" }}</td>
+      <td>{% if r[7] and r[8] %}{% for key in ("announcements", "lots", "customers", "suppliers") %}{{ labels[key] | lower }} +{{ ((r[8][key] or 0) - (r[7][key] or 0)) | money }}{{ ", " if not loop.last }}{% endfor %}{% else %}—{% endif %}</td></tr>
+    {% endfor %}
+  </table></div>
+  {% endif %}
+</section>
+{% if run and run[2] in ("queued", "running") %}
+<script>
+  // Пока идёт догрузка — обновлять цифры раз в 30 секунд, если открыта эта вкладка.
+  setTimeout(() => { if (location.hash === "#data" && !document.hidden) location.reload(); }, 30000);
+</script>
+{% endif %}
+</div>

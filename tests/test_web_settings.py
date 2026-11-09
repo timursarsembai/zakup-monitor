@@ -218,3 +218,16 @@ def test_reminder_schedule_and_language_settings(client, conn):
     assert client.post("/settings/notify-lang", data={"lang": "de"}, headers=ORIGIN).status_code == 422
     client.get("/lang/kk", headers={"referer": "https://testserver/lots"})
     assert conn.execute("SELECT ui_lang FROM users WHERE email = 'owner@mail.kz'").fetchone()[0] == "kk"
+
+
+def test_admin_data_tab_starts_and_stops_history(client, conn):
+    _login(client)
+    page = client.get("/settings").text
+    assert "Догрузка истории" in page and "Размер базы" in page
+    assert client.post("/settings/history/start", data={"since": "2099-01-01"},
+                       headers=ORIGIN).status_code == 422
+    client.post("/settings/history/start", data={"since": "2026-10-01"}, headers=ORIGIN)
+    assert conn.execute("SELECT since::text, status FROM backfill_runs").fetchall() == [("2026-10-01", "queued")]
+    assert "Остановить" in client.get("/settings").text
+    client.post("/settings/history/stop", headers=ORIGIN)
+    assert conn.execute("SELECT status FROM backfill_runs").fetchone()[0] == "stopped"

@@ -98,3 +98,33 @@ def test_backfill_walks_down_to_the_floor(conn, fake_client):
     assert conn.execute("SELECT min(id) FROM announcements").fetchone()[0] == 36
     assert sync.backfill(conn, client, "announcements", max_pages=1) is None
 
+
+
+def test_history_run_from_queue_to_done(conn, fake_client):
+    from datetime import date
+
+    from zakup import history
+
+    items = [{"id": i, "publish_date": f"2026-10-{i:02d} 09:00:00", "name_ru": f"З {i}"} for i in range(1, 21)]
+    lots = [{"id": 100 + i, "trd_buy_id": i, "name_ru": f"Лот {i}"} for i in range(1, 21)]
+    client = fake_client({"announcements": items, "lots": lots})
+    for item in items[15:]:
+        db.upsert_announcement(conn, item)
+    for lot in lots[15:]:
+        db.upsert_lot(conn, lot)
+    conn.commit()
+    run = history.start(conn, date(2026, 10, 5))
+    assert history.start(conn, date(2026, 10, 1)) is None  # один запуск за раз
+    assert history.step(conn, client, max_pages=10).startswith("announcements")
+    row = conn.execute("SELECT status, upto, before FROM backfill_runs WHERE id = %s", (run,)).fetchone()
+    assert row[0] == "running" and row[1] == date(2026, 10, 16) and row[2]["announcements"] == 5
+    while history.step(conn, client, max_pages=10) != "done":
+        pass
+    status, after = conn.execute("SELECT status, after FROM backfill_runs WHERE id = %s", (run,)).fetchone()
+    assert status == "done" and after["announcements"] == 16 and after["lots"] == 16
+    assert history.step(conn, client, max_pages=10) == "idle"
+    # Остановка: следующий шаг ничего не качает.
+    history.start(conn, date(2026, 10, 1))
+    assert history.stop(conn)
+    assert history.step(conn, client, max_pages=10) == "idle"
+    assert conn.execute("SELECT count(*) FROM announcements").fetchone()[0] == 16

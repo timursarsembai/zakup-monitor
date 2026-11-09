@@ -3,7 +3,7 @@
 """
 
 import time
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Annotated
 
 import httpx
@@ -15,6 +15,7 @@ from zakup import (
     bot,
     client_bot,
     credits,
+    history,
     kaspi,
     legal,
     marks,
@@ -73,6 +74,7 @@ def _settings_page(request: Request, user: int, *, sent: str = "", saved: str = 
             **_ai_tab(conn, user, is_admin),
             **_users_tab(conn, user, is_admin, is_staff),
             "groups": _user_groups(conn, user),
+            "data": history.overview(conn) if is_admin else None,
         }
     # Имя бота может спрашиваться у Telegram по сети — уже без соединения с базой.
     context.update(_telegram_bot(is_staff))
@@ -86,7 +88,7 @@ def _settings_page(request: Request, user: int, *, sent: str = "", saved: str = 
         "error": error,
         "company_bin": company_bin,
         "tab": tab or {"ai": "ai", "bin": "company", "tariff": "tariff", "notify": "notify",
-                       "requisites": "requisites"}.get(saved),
+                       "requisites": "requisites", "data": "data"}.get(saved),
         "requisite_fields": legal.FIELDS,
         "me": user,
         "now": datetime.now(UTC),
@@ -449,6 +451,33 @@ def save_tariff(request: Request, admin: Admin, name_ru: Annotated[str, Form()],
         tariff.save(conn, data)
     _audit(request, admin, "settings_tariff", data["name_ru"], price=data["price"])
     return RedirectResponse("/settings?saved=tariff#tariff", status_code=303)
+
+
+@router.post("/settings/history/start", dependencies=[Depends(same_origin)])
+def start_history(request: Request, admin: Admin, since: Annotated[str, Form()]):
+    try:
+        day = date.fromisoformat(since)
+    except ValueError:
+        day = None
+    if day is None or not date(2018, 1, 1) <= day < datetime.now(PORTAL_TZ).date():
+        return _settings_page(request, admin, error="Укажите дату в прошлом, не раньше 2018 года.",
+                              status_code=422, tab="data")
+    with core.pool.connection() as conn:
+        run = history.start(conn, day, admin)
+    if run is None:
+        return _settings_page(request, admin, error="Догрузка уже идёт — сначала остановите её.",
+                              status_code=409, tab="data")
+    _audit(request, admin, "history_start", day.isoformat())
+    return RedirectResponse("/settings?saved=data#data", status_code=303)
+
+
+@router.post("/settings/history/stop", dependencies=[Depends(same_origin)])
+def stop_history(request: Request, admin: Admin):
+    with core.pool.connection() as conn:
+        stopped = history.stop(conn)
+    if stopped:
+        _audit(request, admin, "history_stop", "")
+    return RedirectResponse("/settings?saved=data#data", status_code=303)
 
 
 @router.post("/settings/requisites", dependencies=[Depends(same_origin)])

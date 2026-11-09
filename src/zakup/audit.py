@@ -46,6 +46,8 @@ ACTIONS = {
     "settings_company": "Настройки организации",
     "settings_proxy": "Настройки прокси",
     "settings_tariff": "Изменил тариф",
+    "history_start": "Запустил догрузку истории с даты",
+    "history_stop": "Остановил догрузку истории",
     "settings_requisites": "Изменил реквизиты",
     "settings_registration": "Регистрация открыта/закрыта",
     "user_add": "Добавил пользователя",

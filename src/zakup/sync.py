@@ -133,12 +133,14 @@ def rescan(
 def backfill(
     conn: psycopg.Connection, client: Client, entity: str, max_pages: int,
     on_page: Callable[[list[int]], None] | None = None,
+    keep_going: Callable[[], bool] | None = None,
 ) -> int | None:
     """Догружает историю вниз, до id из sync_state backfill:<entity> (`zakup backfill-from`).
 
     Состояние: last_id — нижняя граница, resume_after — курсор (None — догружено).
     on_page получает id сохранённых записей до коммита страницы. Возвращает число
-    сохранённых записей или None, если догружать нечего.
+    сохранённых записей или None, если догружать нечего. keep_going — проверка перед
+    каждой страницей (кнопка «Остановить»).
     """
     key = f"backfill:{entity}"
     state = db.get_state(conn, key)
@@ -148,6 +150,8 @@ def backfill(
     upsert = db.UPSERT[entity]
     saved = 0
     for _ in range(max_pages):
+        if keep_going and not keep_going():
+            break
         page = client.page(entity, after=after)
         items = [item for item in page.items if int(item["id"]) >= floor_id]
         for item in items:

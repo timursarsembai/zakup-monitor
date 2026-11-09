@@ -66,6 +66,7 @@
   <a href="#company" role="tab" data-tab="company">{{ _("Организация") }}</a>
   <a href="#tariff" role="tab" data-tab="tariff">{{ _("Тариф") }}</a>
   <a href="#requisites" role="tab" data-tab="requisites">{{ _("Реквизиты") }}</a>
+  <a href="#data" role="tab" data-tab="data">{{ _("Данные") }}</a>
   {% endif %}
   {% if is_staff %}
   <a href="#users" role="tab" data-tab="users">{{ _("Пользователи") }}</a>
@@ -91,6 +92,8 @@
 {% include "settings/requisites.html" %}
 
 {% include "settings/company.html" %}
+
+{% include "settings/data.html" %}
 
 {% endif %}
 {% if is_staff %}
