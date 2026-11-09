@@ -75,7 +75,8 @@ def save(conn: psycopg.Connection, bin_: str, subject: dict[str, Any] | None) ->
         (bin_, subject.get("nameRu"), subject.get("nameKz"), subject.get("phone") or "",
          subject.get("email") or "", subject.get("website") or "", Jsonb(addresses),
          subject.get("fullNameRu"), subject.get("fullNameKz"), _date(subject.get("regdate")),
-         subject.get("refKopfCode") or None, kato or None,
+         # У ИП портал пишет форму «ИНД».
+         {"ИНД": "ИП"}.get(subject.get("refKopfCode"), subject.get("refKopfCode")) or None, kato or None,
          bool(subject.get("customer") or subject.get("organizer")) if subject else None,
          bool(subject.get("supplier")) if subject else None,
          subject.get("okedList") if isinstance(subject.get("okedList"), int) else None),
@@ -116,9 +117,11 @@ def refresh(conn: psycopg.Connection, client: Client, limit: int = 300) -> int:
 
 
 def ensure(conn: psycopg.Connection, client: Client, *bins: str | None) -> None:
-    """Для страницы объявления: подгрузить недостающих сразу."""
+    """Для страниц объявления и организации: подгрузить недостающие и устаревшие карточки сразу."""
     for bin_ in dict.fromkeys(b for b in bins if b and _BIN.match(b)):
-        if not conn.execute("SELECT 1 FROM subjects WHERE bin = %s", (bin_,)).fetchone():
+        if not conn.execute(
+                f"SELECT 1 FROM subjects WHERE bin = %s AND fetched_at > now() - interval '{REFRESH_AFTER}'",
+                (bin_,)).fetchone():
             try:
                 save(conn, bin_, fetch(client, bin_))
             except GoszakupError as error:
@@ -129,6 +132,9 @@ def _contact(raw: str, label: str = "") -> dict[str, str] | None:
     raw = (raw or "").strip()
     if not raw:
         return None
+    # В карточке портала номер бывает без 8 и +7: «7075060312» — это 8 707 506 03 12.
+    if re.fullmatch(r"[1-9]\d{9}", re.sub(r"[\s()-]", "", raw)):
+        raw = "8" + re.sub(r"[\s()-]", "", raw)
     number = normalize(raw)
     digits = re.sub(r"[^\d+]", "", number or raw)
     mobile = bool(number) and number[5] in "04567"

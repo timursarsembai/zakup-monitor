@@ -209,12 +209,15 @@ def orgs_page(request: Request, user: Viewer, role: str = "", form: str = "", re
 
 
 @router.get("/org/{bin_}")
-def org_page(request: Request, user: Viewer, bin_: str):
+def org_page(request: Request, user: Viewer, bin_: str, background: BackgroundTasks):
     """Открытая страница организации: закупки заказчика, победы и участие поставщика."""
     with core.pool.connection() as conn:
         profile = orgs.profile(conn, bin_)
     if profile is None:
         raise HTTPException(404, "Такой организации нет в базе")
+    # Карточки нет или она устарела — подтянуть с портала после ответа (контакты появятся
+    # при следующем открытии), не дожидаясь очереди сборщика.
+    background.add_task(_subjects_in_background, [bin_])
     return templates.TemplateResponse(request, "org.html", {"o": profile})
 
 

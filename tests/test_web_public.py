@@ -460,3 +460,14 @@ def test_directory_forms_follow_role_and_mobile_more_sheet(client, conn):
     assert "Найдено: 1" in client.get("/orgs?role=buyer&form=ip").text  # чужая форма сбрасывается
     home = client.get("/").text
     assert "data-more-sheet" in home and 'href="/orgs" class="more-tile' in home and "nav-wide" in home
+
+
+def test_portal_card_phone_without_prefix_and_individual_form(conn):
+    from zakup import subjects
+    subjects.save(conn, "060312501523", {"nameRu": "ИП ҚАСЫНБЕК", "refKopfCode": "ИНД",
+                                         "phone": "+7 (701) 175-21-91, 7075060312", "email": "a@mail.ru",
+                                         "Address": [{"addressType": 1, "address": "г.Шу, дом 62", "katoCode": "314630100"}]})
+    card = subjects.card(conn, "060312501523")
+    assert [p["tel"] for p in card["phones"]] == ["+77011752191", "+77075060312"]
+    assert card["phones"][1]["wa"] and card["kopf"] == "ИП" and card["id_label"] == "ИИН"
+    assert card["addresses"] == ["г.Шу, дом 62"]

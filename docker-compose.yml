@@ -85,7 +85,9 @@ services:
         condition: service_started
     entrypoint: ["sh", "-c"]
     command:
-      - while true; do zakup rescan; zakup details --part finished; zakup subjects; zakup tidy; sleep 900; done
+      # Карточки организаций — первыми (не больше 300 за круг): долгие шаги ниже не должны
+      # откладывать их при каждом перезапуске.
+      - while true; do zakup subjects; zakup rescan; zakup details --part finished; zakup tidy; sleep 900; done
     environment:
       <<: [*db-env, *telegram-env, *portal-env]
     mem_limit: 256m
