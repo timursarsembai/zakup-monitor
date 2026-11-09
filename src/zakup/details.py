@@ -131,6 +131,8 @@ def save(conn: psycopg.Connection, item: dict[str, Any]) -> None:
                customer_bin = coalesce(%(customer_bin)s, customer_bin),
                customer_name_ru = coalesce(%(customer_name_ru)s, customer_name_ru),
                detail = %(detail)s, details_fetched_at = now(), lots_ready = %(lots_ready)s,
+               -- Когда лоты пришли впервые (справа — прежнее значение lots_ready): замер задержки.
+               lots_ready_at = CASE WHEN %(lots_ready)s AND NOT lots_ready THEN now() ELSE lots_ready_at END,
                details_update_date = coalesce(%(last_update_date)s, last_update_date)
            WHERE id = %(id)s""",
         {**fields, "detail": Jsonb(item), "lots_ready": bool(lots)},

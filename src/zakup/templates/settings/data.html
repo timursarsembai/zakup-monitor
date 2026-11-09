@@ -33,6 +33,18 @@
   </table></div>
 </section>
 
+{% set dl = d.delay %}
+{% macro mins(v) %}{% if v is none %}—{% elif v < 1 %}{{ _("меньше минуты") }}{% else %}{{ v | round | int }} {{ _("мин") }}{% endif %}{% endmacro %}
+<section class="panel wide">
+  <h2>{{ _("Задержка лотов") }}</h2>
+  <p class="muted">{{ _("Через сколько минут к нам приходят лоты новых объявлений: портал отдаёт их через API позже, чем показывает на сайте. За последние сутки, объявлений:") }} {{ dl["count"] | count }}.</p>
+  <div class="table-wrap"><table>
+    <tr><th></th><th class="num">{{ _("Обычно (медиана)") }}</th><th class="num">{{ _("9 из 10 — не дольше") }}</th><th class="num">{{ _("Дольше всего") }}</th></tr>
+    <tr><td>{{ _("После начала приёма заявок") }}</td><td class="num">{{ mins(dl.start_median) }}</td><td class="num">{{ mins(dl.start_p90) }}</td><td class="num">{{ mins(dl.start_max) }}</td></tr>
+    <tr><td>{{ _("После появления объявления у нас") }}</td><td class="num">{{ mins(dl.seen_median) }}</td><td class="num">{{ mins(dl.seen_p90) }}</td><td class="num">{{ mins(dl.seen_max) }}</td></tr>
+  </table></div>
+</section>
+
 <section class="panel wide">
   <h2>{{ _("Догрузка истории") }}</h2>
   <p class="muted">{{ _("Собирает старые объявления и лоты с портала в фоне, не мешая сбору новых. Заказчики, поставщики и итоги подтягиваются следом. Техспецификации старых лотов не скачиваются — только когда лот открыли на сайте. Догруженное не рассылается подписчикам.") }}</p>

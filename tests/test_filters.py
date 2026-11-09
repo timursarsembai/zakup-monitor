@@ -493,3 +493,17 @@ def test_result_date_follows_announcement_itogi_date(conn):
     details.save(conn, {"id": 1, "itogiDatePublic": "2026-10-15 10:00:00", "Lots": []})
     date = conn.execute("SELECT result_date FROM lot_results WHERE lot_id = 10").fetchone()[0]
     assert date.astimezone(PORTAL_TZ).strftime("%Y-%m-%d %H:%M") == "2026-10-15 10:00"
+
+
+def test_lots_ready_at_set_once_when_lots_arrive(conn):
+    from zakup import details, history
+
+    db.upsert_announcement(conn, {"id": 7, "name_ru": "Без лотов", "end_date": "2099-01-01 09:00:00"})
+    details.save(conn, {"id": 7, "Lots": []})
+    assert conn.execute("SELECT lots_ready_at FROM announcements WHERE id = 7").fetchone() == (None,)
+    _announcement(conn, 7)  # подробности пришли уже с лотом
+    first = conn.execute("SELECT lots_ready_at FROM announcements WHERE id = 7").fetchone()[0]
+    assert first is not None
+    _announcement(conn, 7)
+    assert conn.execute("SELECT lots_ready_at FROM announcements WHERE id = 7").fetchone()[0] == first
+    assert history.lots_delay(conn)["count"] >= 0

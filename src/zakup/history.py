@@ -10,6 +10,7 @@
 
 from datetime import date, datetime
 from datetime import time as day_time
+from typing import Any
 
 import psycopg
 from psycopg.types.json import Jsonb
@@ -176,6 +177,25 @@ def fresh(conn: psycopg.Connection, total: dict[str, int]) -> list[dict]:
     return rows
 
 
+def lots_delay(conn: psycopg.Connection) -> dict[str, Any]:
+    """Через сколько минут после начала приёма заявок и после появления объявления в базе
+    к нам приходят лоты (за сутки): медиана, 90% и худший случай."""
+    row = conn.execute(
+        """WITH d AS (
+               SELECT extract(epoch FROM lots_ready_at - greatest(start_date, publish_date)) / 60 AS after_start,
+                      extract(epoch FROM lots_ready_at - first_seen_at) / 60 AS after_seen
+               FROM announcements
+               WHERE lots_ready_at > now() - interval '1 day' AND first_seen_at > now() - interval '2 days')
+           SELECT count(*),
+                  percentile_cont(0.5) WITHIN GROUP (ORDER BY after_start),
+                  percentile_cont(0.9) WITHIN GROUP (ORDER BY after_start), max(after_start),
+                  percentile_cont(0.5) WITHIN GROUP (ORDER BY after_seen),
+                  percentile_cont(0.9) WITHIN GROUP (ORDER BY after_seen), max(after_seen)
+           FROM d""").fetchone()
+    keys = ("count", "start_median", "start_p90", "start_max", "seen_median", "seen_p90", "seen_max")
+    return dict(zip(keys, row, strict=True))
+
+
 def overview(conn: psycopg.Connection) -> dict:
     """Для вкладки «Данные» в настройках."""
     # Начало — без единичных выбросов (у портала бывают объявления со старой датой публикации).
@@ -198,6 +218,7 @@ def overview(conn: psycopg.Connection) -> dict:
     last_run = runs[0] if runs else None
     return {
         "first": first, "last": last, "size": size, "tables": tables, "counts": now_counts,
-        "pending_details": pending_details, "runs": runs, "fresh": fresh(conn, now_counts), "last_run": last_run,
+        "pending_details": pending_details, "runs": runs, "delay": lots_delay(conn),
+        "fresh": fresh(conn, now_counts), "last_run": last_run,
         "progress": progress(conn, last_run[6]) if last_run and last_run[2] in ACTIVE else None,
     }
