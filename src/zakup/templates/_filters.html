@@ -73,8 +73,8 @@
     :root[data-chips=desktop] .chip-scroll::-webkit-scrollbar { display: none; }
     :root[data-chips=desktop] .chip-scroll { flex: 1 1 auto; min-width: 0; scroll-behavior: smooth; }
     :root[data-chips=desktop] .chip-arrow { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 30px; height: 30px;
-               border: 1px solid var(--line); border-radius: 50%; background: var(--bg); color: var(--fg); cursor: pointer; }
-    :root[data-chips=desktop] .chip-arrow svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2.4; }
+               padding: 0; border: 1px solid var(--line); border-radius: 50%; background: var(--bg); color: var(--fg); cursor: pointer; }
+    :root[data-chips=desktop] .chip-arrow svg { flex: none; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2.4; }
     :root[data-chips=desktop] .chip-arrow:disabled { opacity: .3; cursor: default; }
     :root[data-chips=desktop] .chip, :root[data-chips=desktop] .chip-icon { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap;
                border: 1px solid var(--line); background: color-mix(in srgb, var(--fg) 4%, var(--bg)); color: var(--fg); font-size: 14px; cursor: pointer; }
