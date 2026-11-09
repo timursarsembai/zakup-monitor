@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_filters.html" import filter_styles with context %}
+{% from "_filters.html" import filter_styles, multi with context %}
 {% from "_seo.html" import seo_block with context %}
 {% set buyers = role == "buyer" %}
 {% set heading = _("Заказчики госзакупок") if buyers else _("Поставщики госзакупок") %}
@@ -30,12 +30,12 @@
   [data-rview=cards] table.dir-table td[data-label]::before { content: attr(data-label); display: block; font-size: 12px; color: var(--muted); }
   [data-rview=cards] table.dir-table td.wide { flex: 1 1 100%; }
 {% endblock %}
-{% macro link() %}{% set params = dict(f) %}{% set __ = params.update({"page": 1}) %}{% set __ = params.update(kwargs) %}/orgs/{{ kind }}?{{ params | urlencode }}{% endmacro %}
+{% macro link(page) %}/orgs/{{ kind }}?{{ query }}&page={{ page }}{% endmacro %}
 {% block main %}
 {# Телефон: панель как в поиске закупок — сортировка, весь фильтр; условия по одному. #}
 {% set chips = [("q", _("Название, БИН"), ("«" ~ f.q[:16] ~ "»") if f.q else ""),
-                ("form", _("Форма"), _(forms[f.form]) if f.form else ""),
-                ("region", _("Регион"), region_name(f.region) if f.region else "")] %}
+                ("form", _("Форма"), (_(forms[f.form[0]]) ~ (" +" ~ (f.form | length - 1) if f.form | length > 1 else "")) if f.form else ""),
+                ("region", _("Регион"), (region_name(f.region[0]) ~ (" +" ~ (f.region | length - 1) if f.region | length > 1 else "")) if f.region else "")] %}
 <div class="chipbar" data-chipbar>
   <div class="chip-fixed">
     <button type="button" class="chip-icon" data-chip-open="sort" aria-label="{{ _("Сортировка") }}" title="{{ _("Сортировка") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4v16M3 8l4-4 4 4M17 20V4M13 16l4 4 4-4"/></svg></button>
@@ -53,8 +53,9 @@
   <div class="sheet-head"><b>{{ _("Фильтр") }}</b><button type="button" data-filter-close aria-label="{{ _("Закрыть") }}">✕</button></div>
   <div class="fgrid">
     <div class="wide" data-chip="q"><label class="fl" for="o-q">{{ _("Название или БИН/ИИН") }}</label><input id="o-q" type="search" name="q" value="{{ f.q }}" placeholder="{{ _("например, Аягоз") }}"></div>
-    <div data-chip="form"><label class="fl" for="o-form">{{ _("Форма") }}</label><select id="o-form" name="form"><option value="">{{ _("Все") }}</option>{% for key, label in forms.items() if key in form_counts %}<option value="{{ key }}" {% if f.form == key %}selected{% endif %}>{{ _(label) }} · {{ form_counts[key] }}</option>{% endfor %}</select></div>
-    <div data-chip="region"><label class="fl" for="o-region">{{ _("Регион") }}</label><select id="o-region" name="region"><option value="">{{ _("Весь Казахстан") }}</option>{% for key, label in regions.items() %}<option value="{{ key }}" {% if f.region == key %}selected{% endif %}>{{ _(label) }}</option>{% endfor %}</select></div>
+    {% set form_options = {} %}{% for key, label in forms.items() if key in form_counts %}{% set __ = form_options.update({key: _(label) ~ " · " ~ form_counts[key]}) %}{% endfor %}
+    <div data-chip="form"><span class="fl">{{ _("Форма") }}</span>{{ multi("form", form_options, f.form, _("Все формы")) }}</div>
+    <div data-chip="region"><span class="fl">{{ _("Регион") }}</span>{{ multi("region", regions, f.region, _("Весь Казахстан")) }}</div>
     <div class="desk-sort"><label class="fl" for="o-sort">{{ _("Сортировка") }}</label><select id="o-sort" name="sort" data-sort-field>{% for key, label in sorts.items() %}<option value="{{ key }}" {% if f.sort == key %}selected{% endif %}>{{ _(label) }}</option>{% endfor %}</select></div>
   </div>
   <div class="sort-pick" data-chip="sort">

@@ -328,16 +328,19 @@ def form_counts(conn: psycopg.Connection, role: str = "") -> dict[str, int]:
     return {form: n for form, n in rows if n}
 
 
-def directory(conn: psycopg.Connection, *, role: str = "", form: str = "", region: str = "", q: str = "",
-              sort: str = "amount", page: int = 1) -> tuple[list[dict[str, Any]], int]:
-    """Страница справочника и сколько всего подходит. Неизвестные значения фильтров — без фильтра."""
+def directory(conn: psycopg.Connection, *, role: str = "", forms: list[str] | None = None,
+              regions: list[str] | None = None, q: str = "", sort: str = "amount",
+              page: int = 1) -> tuple[list[dict[str, Any]], int]:
+    """Страница справочника и сколько всего подходит. Формы и регионы — любой из выбранных;
+    неизвестные значения форм отбрасываются."""
     clauses, params = ["name_ru IS NOT NULL", _ROLE_SQL.get(role, "true")], {}
-    if form in FORMS:
-        clauses.append("form = %(form)s")
-        params["form"] = form
-    if region:
-        clauses.append("region = %(region)s")
-        params["region"] = region
+    forms = [f for f in forms or [] if f in FORMS]
+    if forms:
+        clauses.append("form = ANY(%(forms)s)")
+        params["forms"] = forms
+    if regions:
+        clauses.append("region = ANY(%(regions)s)")
+        params["regions"] = list(regions)
     q = " ".join(q.split())[:100]
     if q.isdigit():
         clauses.append("bin LIKE %(bin)s")

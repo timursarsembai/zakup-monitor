@@ -381,6 +381,8 @@ def test_organization_directory_filters(client, conn):
     assert "ТОО Кровля" in sellers and "ИП Иванов" in sellers and "ГУ Школа №9" not in sellers and "Доля побед" in sellers
     only_ip = client.get("/orgs/suppliers?form=ip").text
     assert "ИП Иванов" in only_ip and "ТОО Кровля" not in only_ip
+    both = client.get("/orgs/suppliers?form=ip&form=too").text  # несколько форм — галочками
+    assert "ИП Иванов" in both and "ТОО Кровля" in both and 'name="form" value="too" checked' in both
     assert "ТОО Кровля" in client.get("/orgs/suppliers?q=кровля").text
     assert "Найдено поставщиков: <b>1</b>" in client.get("/orgs/suppliers?q=0505").text
     assert "Найдено поставщиков: <b>0</b>" in client.get("/orgs/suppliers?q=%25_").text

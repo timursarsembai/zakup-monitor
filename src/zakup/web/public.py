@@ -7,12 +7,12 @@ import threading
 import time
 from datetime import UTC, datetime, timedelta
 from importlib.resources import files
-from typing import Any
+from typing import Annotated, Any
 from urllib.parse import parse_qs, parse_qsl, urlencode, urlsplit
 
 import httpx
 import psycopg
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse, Response
 
 from zakup import (
@@ -219,24 +219,25 @@ def orgs_root(request: Request, role: str = ""):
 
 
 @router.get("/orgs/{kind}")
-def orgs_page(request: Request, user: Viewer, kind: str, form: str = "", region: str = "", q: str = "",
-              sort: str = "", page: int = 1):
+def orgs_page(request: Request, user: Viewer, kind: str, q: str = "", sort: str = "", page: int = 1,
+              form: Annotated[list[str], Query()] = [], region: Annotated[list[str], Query()] = []):  # noqa: B006
     """Справочник: заказчики или поставщики, с фильтрами по форме, региону и названию/БИН."""
     if kind not in ORG_PAGES:
         raise HTTPException(404, "Нет такой страницы")
     role = ORG_PAGES[kind]
     sorts = orgs.ROLE_SORTS[role]
-    region = region if region in REGIONS else ""
+    region = [r for r in dict.fromkeys(region) if r in REGIONS]
     sort = sort if sort in sorts else next(iter(sorts))
     with core.pool.connection() as conn:
         forms = orgs.form_counts(conn, role)
-        form = form if form in forms else ""
-        rows, total = orgs.directory(conn, role=role, form=form, region=region, q=q, sort=sort, page=page)
+        form = [x for x in dict.fromkeys(form) if x in forms]
+        rows, total = orgs.directory(conn, role=role, forms=form, regions=region, q=q, sort=sort, page=page)
     page = min(max(page, 1), orgs.MAX_PAGE)
     pages = min((total + orgs.PAGE_SIZE - 1) // orgs.PAGE_SIZE, orgs.MAX_PAGE)
     return templates.TemplateResponse(request, "orgs.html", {
         "rows": rows, "total": total, "page": page, "pages": pages, "kind": kind, "role": role,
         "f": {"form": form, "region": region, "q": q, "sort": sort},
+        "query": urlencode({"q": q, "sort": sort, "form": form, "region": region}, doseq=True),
         "forms": orgs.FORMS, "form_counts": forms, "sorts": sorts, "regions": REGIONS})
 
 
