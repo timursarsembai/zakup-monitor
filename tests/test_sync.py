@@ -81,3 +81,20 @@ def test_list_upsert_keeps_customer_from_the_card(conn):
     assert conn.execute(
         "SELECT customer_bin, customer_name_ru, name_ru FROM announcements"
     ).fetchone() == ("123", "Акимат", "из списка")
+
+
+def test_backfill_walks_down_to_the_floor(conn, fake_client):
+    items = _announcements(20)  # ids 1..134
+    client = fake_client({"announcements": items})
+    for item in items[10:]:  # в базе — только новые, с id 71
+        db.upsert_announcement(conn, item)
+    db.save_state(conn, "backfill:announcements", db.SyncState(30, None, items[10]["id"]))
+    client.page = lambda entity, after=None, limit=3: type(client).page(client, entity, after, limit)
+    assert sync.backfill(conn, client, "announcements", max_pages=1) == 3
+    seen = []
+    sync.backfill(conn, client, "announcements", max_pages=10, on_page=seen.extend)
+    assert sorted(seen) == [36, 43]  # 64, 57, 50 — в первом вызове
+    assert db.get_state(conn, "backfill:announcements").resume_after is None
+    assert conn.execute("SELECT min(id) FROM announcements").fetchone()[0] == 36
+    assert sync.backfill(conn, client, "announcements", max_pages=1) is None
+

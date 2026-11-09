@@ -21,6 +21,10 @@ def _parser() -> argparse.ArgumentParser:
     sub.add_parser("probe", help="проверить токен и показать по одной записи каждой сущности")
     start = sub.add_parser("start-from", help="начать синхронизацию с даты, без старой истории")
     start.add_argument("since", type=date.fromisoformat, help="ГГГГ-ММ-ДД")
+    past = sub.add_parser("backfill-from", help="догрузить историю в прошлое до даты (по кругу — backfill)")
+    past.add_argument("since", type=date.fromisoformat, help="ГГГГ-ММ-ДД")
+    back = sub.add_parser("backfill", help="продолжить догрузку истории, начатую backfill-from")
+    back.add_argument("--max-pages", type=int, default=100)
     run = sub.add_parser("sync", help="догрузить новое, сопоставить подписки, разослать")
     run.add_argument("--max-pages", type=int, default=50)
     again = sub.add_parser("rescan", help="перечитать последние дни: поздние публикации, статусы")
@@ -159,6 +163,10 @@ def _with_portal(args) -> int:
         with db.connect(config.database_url()) as conn:
             if args.command == "start-from":
                 return _start_from(conn, client, args.since)
+            if args.command == "backfill-from":
+                return _backfill_from(conn, client, args.since)
+            if args.command == "backfill":
+                return _backfill(conn, client, args.max_pages)
             if args.command == "rescan":
                 return _rescan(conn, client, args.days, args.max_pages)
             if args.command == "subjects":
@@ -232,6 +240,48 @@ def _start_from(conn, client: Client, since: date) -> int:
     db.save_state(conn, "lots", db.SyncState(first_lot - 1, None, None))
     conn.commit()
     print(f"start: announcement {first_announcement}, lot {first_lot}")
+    return 0
+
+
+def _backfill_from(conn, client: Client, since: date) -> int:
+    """Граница — первые объявление и лот после даты; догружать — от самых старых в базе вниз."""
+    since_at = datetime.combine(since, day_time.min, PORTAL_TZ)
+    first_announcement = sync.find_start(client, "announcements", sync.published_since(since_at))
+    first_lot = first_announcement and sync.find_start(
+        client, "lots", sync.lot_of_announcement_from(first_announcement))
+    if first_lot is None:
+        print("Объявлений после этой даты нет.", file=sys.stderr)
+        return 1
+    for entity, floor in (("announcements", first_announcement), ("lots", first_lot)):
+        oldest = conn.execute(f"SELECT min(id) FROM {entity}").fetchone()[0]
+        # search_after=x отдаёт записи с id меньше x — то, чего в базе ещё нет.
+        cursor = oldest if oldest is not None and oldest > floor else None
+        db.save_state(conn, f"backfill:{entity}", db.SyncState(floor, None, cursor))
+        print(f"backfill {entity}: from {cursor} down to {floor}")
+    conn.commit()
+    return 0
+
+
+BACKFILL_LOCK = 7_402
+
+
+def _backfill(conn, client: Client, max_pages: int) -> int:
+    # Сначала объявления: фильтры подписок сверяют лот с его объявлением.
+    if not conn.execute("SELECT pg_try_advisory_lock(%s)", (BACKFILL_LOCK,)).fetchone()[0]:
+        print("backfill: уже идёт в другом процессе")
+        return 0
+    try:
+        saved = sync.backfill(conn, client, "announcements", max_pages)
+        if saved is None:
+            saved = sync.backfill(conn, client, "lots", max_pages,
+                                  on_page=lambda ids: matcher.mark_seen(conn, ids))
+            print(f"backfill lots: {saved}")
+        else:
+            print(f"backfill announcements: {saved}")
+    except Exception as error:
+        conn.rollback()
+        incidents.failed("догрузка истории", error)
+        raise
     return 0
 
 

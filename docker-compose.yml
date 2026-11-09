@@ -114,6 +114,25 @@ services:
     mem_limit: 256m
     logging: *logging
 
+  # Догрузка истории в прошлое (`zakup backfill-from ГГГГ-ММ-ДД` задаёт дату): своим
+  # кругом, не мешая свежему сбору. Техспецификации старых лотов — только по запросу.
+  history:
+    <<: *hardening
+    image: zakup
+    container_name: zakup-history
+    restart: unless-stopped
+    init: true
+    depends_on:
+      worker:
+        condition: service_started
+    entrypoint: ["sh", "-c"]
+    command:
+      - while true; do zakup backfill --max-pages 20; sleep 60; done
+    environment:
+      <<: [*db-env, *telegram-env, *portal-env]
+    mem_limit: 256m
+    logging: *logging
+
   # Заранее разбирает техспецификации открытых лотов в текст: страницы лотов
   # открываются без обращения к порталу.
   specs:

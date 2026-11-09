@@ -409,3 +409,19 @@ def test_unchanged_portal_rows_are_not_rewritten(conn):
     db.upsert_lot(conn, {"id": 770, "trd_buy_id": 77, "name_ru": "Стул", "description_ru": "полный"})
     db.upsert_lot(conn, {"id": 770, "trd_buy_id": 77, "name_ru": "Стул"}, overwrite=False)
     assert conn.execute("SELECT description_ru FROM lots WHERE id = 770").fetchone()[0] == "полный"
+
+
+def test_backfilled_lots_are_marked_seen_not_sent(conn):
+    # Старый, но ещё открытый лот, догруженный из прошлого, подходит под фильтр — не рассылаем.
+    user = conn.execute("INSERT INTO users (email) VALUES ('a@b.kz') RETURNING id").fetchone()[0]
+    conn.execute(
+        """INSERT INTO subscriptions (user_id, name, query, kind, filters)
+           VALUES (%s, 'Все', '', 'announcements', %s)""",
+        (user, db.Jsonb(Filters(advance_min=0).to_json())),
+    )
+    _announcement(conn, 1)
+    _announcement(conn, 2)
+    matcher.mark_seen(conn, [10], NOW)
+    assert matcher.run_filters(conn, NOW) == 1  # только 20: 10 уже «увиден»
+    assert conn.execute(
+        "SELECT lot_id FROM matches WHERE notified_at IS NULL").fetchall() == [(20,)]

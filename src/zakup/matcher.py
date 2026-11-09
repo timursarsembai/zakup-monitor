@@ -80,8 +80,11 @@ def run_filters(conn: psycopg.Connection, now: datetime | None = None) -> int:
 
 
 def insert_matches(conn: psycopg.Connection, sub_id: int, current: Filters, scope: str,
-                   now: datetime, notified: bool = False) -> int:
+                   now: datetime, notified: bool = False, lot_ids: list[int] | None = None) -> int:
     where, params = current.where(now, scope, subscription=True)
+    if lot_ids is not None:
+        where += " AND l.id = ANY(%(lot_ids)s)"
+        params = {**params, "lot_ids": lot_ids}
     # Подписка с поиска объявлений присылает объявление целиком — со всеми лотами.
     source = (
         "lots l, announcements a" if scope == "lots"
@@ -93,6 +96,31 @@ def insert_matches(conn: psycopg.Connection, sub_id: int, current: Filters, scop
             ON CONFLICT DO NOTHING""",
         {**params, "sub_id": sub_id},
     ).rowcount
+
+
+def mark_seen(conn: psycopg.Connection, lot_ids: list[int], now: datetime | None = None) -> None:
+    """Догруженные из прошлого лоты — сразу «увиденными» для всех подписок, в той же
+    транзакции, что и сами лоты: иначе рассылка приняла бы старое за новое."""
+    now = now or datetime.now(UTC)
+    conn.execute(
+        """INSERT INTO matches (subscription_id, lot_id, notified_at)
+           SELECT s.id, l.id, now() FROM subscriptions s JOIN lots l ON l.id = ANY(%(ids)s)
+           WHERE s.active AND s.kind = 'lots'
+             AND l.tsv @@ websearch_to_tsquery(
+                 'russian', regexp_replace(s.query, '\\s+или\\s+', ' or ', 'gi'))
+             AND (s.min_amount IS NULL OR l.amount >= s.min_amount)
+             AND (s.max_amount IS NULL OR l.amount <= s.max_amount)
+             AND (s.customer_bins IS NULL OR l.customer_bin = ANY (s.customer_bins))
+           ON CONFLICT DO NOTHING""",
+        {"ids": lot_ids},
+    )
+    for sub_id, data, scope in conn.execute(
+        "SELECT id, filters, scope FROM subscriptions WHERE active AND kind = 'announcements'"
+    ).fetchall():
+        try:
+            insert_matches(conn, sub_id, Filters.from_json(data), scope, now, notified=True, lot_ids=lot_ids)
+        except (KeyError, ValueError) as error:
+            logger.warning("subscription %s skipped: %s", sub_id, error)
 
 
 # Новая (или изменённая) подписка присылает всё, что подходит сейчас, одним сообщением
