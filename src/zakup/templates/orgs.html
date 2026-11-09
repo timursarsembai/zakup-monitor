@@ -2,11 +2,13 @@
 {% block title %}{{ _("Организации в госзакупках Казахстана") }}{% endblock %}
 {% block description %}{{ _("Справочник заказчиков и поставщиков госзакупок: БИН, контакты, сколько закупают и выигрывают. Фильтры по региону и форме: ИП, ТОО, АО, госучреждения.") }}{% endblock %}
 {% block style %}
-  .org-filter { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; margin: 12px 0 16px; }
-  .org-filter label { display: flex; flex-direction: column; gap: 3px; font-size: 13px; color: var(--muted); }
-  .org-filter input, .org-filter select { padding: 7px 9px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); font: inherit; min-width: 150px; }
-  .org-filter input[name=q] { min-width: 240px; }
-  .org-filter button { padding: 8px 16px; background: var(--accent); color: var(--on-accent); border: 0; font-weight: 600; }
+  .org-filter { border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin: 12px 0 16px;
+                display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px 20px; align-items: end; }
+  .org-filter label { display: flex; flex-direction: column; gap: 5px; font-size: 13px; color: var(--muted); min-width: 0; }
+  .org-filter input, .org-filter select { width: 100%; padding: 9px 10px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); font: inherit; font-size: 15px; }
+  .org-filter .wide { grid-column: 1 / -1; }
+  .org-filter button { padding: 10px 18px; background: var(--accent); color: var(--on-accent); border: 0; font-weight: 600; font-size: 15px; }
+  @media (max-width: 760px) { .org-filter { grid-template-columns: minmax(0, 1fr); gap: 14px; } .org-filter button { width: 100%; } }
   .roles { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
   .roles a { padding: 5px 12px; border: 1px solid var(--line); border-radius: 999px; color: var(--fg); }
   .roles a.on { border-color: var(--accent); color: var(--accent); font-weight: 600; }
@@ -20,7 +22,7 @@
 <div class="roles">{% for key, label in roles.items() %}<a href="{{ link(role=key, form="") }}" class="{{ 'on' if f.role == key }}">{{ _(label) }}</a>{% endfor %}</div>
 <form class="org-filter" method="get" action="/orgs">
   <input type="hidden" name="role" value="{{ f.role }}">
-  <label>{{ _("Название или БИН/ИИН") }}<input name="q" value="{{ f.q }}" placeholder="{{ _("например, Аягоз") }}"></label>
+  <label class="wide">{{ _("Название или БИН/ИИН") }}<input type="search" name="q" value="{{ f.q }}" placeholder="{{ _("например, Аягоз") }}"></label>
   <label>{{ _("Форма") }}<select name="form"><option value="">{{ _("Все") }}</option>{% for key, label in forms.items() if key in form_counts %}<option value="{{ key }}" {% if f.form == key %}selected{% endif %}>{{ _(label) }} · {{ form_counts[key] }}</option>{% endfor %}</select></label>
   <label>{{ _("Регион") }}<select name="region"><option value="">{{ _("Весь Казахстан") }}</option>{% for key, label in regions.items() %}<option value="{{ key }}" {% if f.region == key %}selected{% endif %}>{{ _(label) }}</option>{% endfor %}</select></label>
   <label>{{ _("Сортировка") }}<select name="sort">{% for key, label in sorts.items() %}<option value="{{ key }}" {% if f.sort == key %}selected{% endif %}>{{ _(label) }}</option>{% endfor %}</select></label>

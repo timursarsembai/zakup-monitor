@@ -1,22 +1,37 @@
 {# Блок «Конкуренты и поставщики» на странице лота (zakup.suppliers). Названия — ссылки на
    страницы организаций, контакты там. Без тарифа — по SHOWN в группе и без снижения цены. #}
-{% macro supplier_rows(rows, total, here, paid, shown) %}
-<ul class="sup-list">
+{% macro supplier_rows(rows, total, here, paid, shown, region) %}
+<div class="table-wrap" data-rview-box><table class="sup-table">
+  <tr>
+    <th>{{ _("Организация") }}</th>
+    {% if here %}
+    <th title="{{ _("Победы и заявки в закупках с поставкой в этот регион") }}">{{ _("Побед в регионе") }}</th>
+    <th>{{ _("Заявок в регионе") }}</th>
+    {% endif %}
+    <th>{{ _("Побед всего") }}</th>
+    <th>{{ _("Заявок всего") }}</th>
+    <th>{{ _("Последняя закупка") }}</th>
+    {% if paid %}<th title="{{ _("Насколько в среднем снижал цену от плановой суммы, когда выигрывал") }}">{{ _("Снижение цены") }}</th>{% endif %}
+    {% if not here %}<th>{{ _("Регионы поставки") }}</th>{% endif %}
+    <th></th>
+  </tr>
   {% for r in rows %}
-  <li>
-    <a href="/org/{{ r.bin }}">{{ pick(r.name_ru, r.name_kz) }}</a>
-    {% set parts = [] %}
-    {% if here %}{% set __ = parts.append(_("побед здесь:") ~ " " ~ (r.here_wins or 0) ~ ", " ~ _("заявок:") ~ " " ~ (r.here_offers or 0)) %}{% endif %}
-    {% set __ = parts.append(_("всего побед:") ~ " " ~ (r.wins or 0) ~ ", " ~ _("заявок:") ~ " " ~ (r.offers or 0)) %}
-    {% if r.last_at %}{% set __ = parts.append(_("последняя закупка") ~ " " ~ (r.last_at|local).strftime("%d.%m.%Y")) %}{% endif %}
-    {% if paid and r.discount is not none %}{% set __ = parts.append(_("снижает цену в среднем на") ~ " " ~ '%.1f'|format(r.discount * 100) ~ "%") %}{% endif %}
-    {% if not here and r.regions %}{% set names = r.regions | map("region_name_filter") | select | list %}
-      {% set __ = parts.append(names[:3] | join(", ") ~ (" " ~ _("и ещё") ~ " " ~ (names|length - 3) if names|length > 3 else "")) %}{% endif %}
-    <span class="muted">{{ parts | join(" · ") }}</span>
-    <a class="sup-contacts" href="/org/{{ r.bin }}">{{ _("Контакты →") }}</a>
-  </li>
+  <tr>
+    <td class="s-name"><a href="/org/{{ r.bin }}">{{ pick(r.name_ru, r.name_kz) }}</a></td>
+    {% if here %}
+    <td class="num" data-label="{{ _("Побед в регионе") }}">{{ r.here_wins or 0 }}</td>
+    <td class="num" data-label="{{ _("Заявок в регионе") }}">{{ r.here_offers or 0 }}</td>
+    {% endif %}
+    <td class="num" data-label="{{ _("Побед всего") }}">{{ r.wins or 0 }}</td>
+    <td class="num" data-label="{{ _("Заявок всего") }}">{{ r.offers or 0 }}</td>
+    <td class="when" data-label="{{ _("Последняя закупка") }}">{{ (r.last_at|local).strftime("%d.%m.%Y") if r.last_at else "—" }}</td>
+    {% if paid %}<td class="num" data-label="{{ _("Снижение цены") }}">{{ ('%.1f'|format(r.discount * 100)) ~ "%" if r.discount is not none else "—" }}</td>{% endif %}
+    {% if not here %}{% set names = (r.regions or []) | map("region_name_filter") | select | list %}
+    <td class="s-regions" data-label="{{ _("Регионы поставки") }}">{{ names[:3] | join(", ") }}{% if names|length > 3 %} {{ _("и ещё") }} {{ names|length - 3 }}{% endif %}</td>{% endif %}
+    <td class="s-link"><a href="/org/{{ r.bin }}">{{ _("Контакты →") }}</a></td>
+  </tr>
   {% endfor %}
-</ul>
+</table></div>
 {% if paid and total > rows|length %}<p class="muted">{{ _("И ещё") }} {{ total - rows|length }}.</p>{% endif %}
 {% if not paid and total > shown %}<p class="muted"><button type="button" data-paid class="link-button">{{ _("Показать всех") }} ({{ total }}) 🔒</button></p>{% endif %}
 {% endmacro %}
@@ -25,19 +40,24 @@
 <section class="sup-box" id="suppliers">
   <h2>{{ _("Конкуренты и поставщики") }}</h2>
   <p class="muted">{{ _("Кто уже участвовал в госзакупках такого товара и поставлял его. Это ваши вероятные конкуренты по этому лоту — и возможные поставщики или партнёры. Сначала — кто работал в регионе поставки лота.") }}</p>
+  <p class="muted">{{ _("Победы и заявки считаются по закупкам товаров выбранного уровня сходства:") }}</p>
   <div class="sup-levels">
     {% set labels = {"code": _("такой же товар"), "class": _("похожие товары"), "division": s.class_name or _("весь раздел")} %}
     {% for level in ("code", "class", "division") %}{% if s.available[level] %}
     <a href="/lots/{{ lot_id }}?sup={{ level }}#suppliers" rel="nofollow" class="{{ 'on' if s.level == level }}">{{ labels[level] }} · {{ s.available[level] }}</a>
     {% endif %}{% endfor %}
   </div>
+  <div class="view-switch r-switch" role="group" aria-label="{{ _("Вид отображения") }}">
+    <button type="button" data-rview="table"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18M3 12h18M3 19h18"/></svg><span>{{ _("Таблица") }}</span></button>
+    <button type="button" data-rview="cards"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5"/></svg><span>{{ _("Плитка") }}</span></button>
+  </div>
   {% if s.here %}
   <h3>{{ _("В регионе поставки:") }} {{ region_name(s.region) }}</h3>
-  {{ supplier_rows(s.here, s.here_total, true, paid, shown) }}
+  {{ supplier_rows(s.here, s.here_total, true, paid, shown, s.region) }}
   {% endif %}
   {% if s.rest %}
   <h3>{{ _("По всему Казахстану") if s.here else _("По Казахстану") }}</h3>
-  {{ supplier_rows(s.rest, s.rest_total, false, paid, shown) }}
+  {{ supplier_rows(s.rest, s.rest_total, false, paid, shown, s.region) }}
   {% endif %}
   {% if not s.here and not s.rest %}<p class="muted">{{ _("На этом уровне пока никого нет.") }}</p>{% endif %}
 </section>
@@ -47,12 +67,28 @@
   .sup-box { border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin-top: 16px; }
   .sup-box h2 { margin-top: 0; }
   .sup-box h3 { font-size: 15px; margin: 16px 0 6px; }
-  .sup-levels { display: flex; flex-wrap: wrap; gap: 6px 8px; margin: 8px 0 4px; }
+  .sup-levels { display: flex; flex-wrap: wrap; gap: 6px 8px; margin: 4px 0 10px; }
   .sup-levels a { padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px; font-size: 14px; }
   .sup-levels a.on { border-color: var(--accent); color: var(--accent); font-weight: 600; }
-  .sup-list { list-style: none; margin: 0; padding: 0; }
-  .sup-list li { padding: 7px 0; border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
-  .sup-list li:first-child { border-top: 0; }
-  .sup-list .sup-contacts { margin-left: auto; white-space: nowrap; font-size: 14px; }
+  table.sup-table th { white-space: nowrap; }
+  table.sup-table td.s-name { min-width: 220px; }
+  table.sup-table td.s-regions { min-width: 200px; font-size: 13px; color: var(--muted); }
+  table.sup-table td.s-link { white-space: nowrap; text-align: right; }
+  table.sup-table td.when { white-space: nowrap; }
+  .sup-box .view-switch { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; margin: 4px 0 6px; }
+  .sup-box .view-switch button { display: inline-flex; align-items: center; gap: 6px; border: 0; border-radius: 0; padding: 5px 10px; color: var(--muted); background: none; }
+  .sup-box .view-switch button[aria-pressed=true] { background: var(--accent); color: var(--on-accent); }
+  .sup-box .view-switch svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; }
   .link-button { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font: inherit; }
+  /* Плитка: строки — карточки, подписи столбцов — над значениями. */
+  [data-rview=cards] { overflow: visible; }
+  [data-rview=cards] table.sup-table, [data-rview=cards] table.sup-table tbody { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; min-width: 0 !important; }
+  [data-rview=cards] table.sup-table tbody { grid-column: 1 / -1; }
+  [data-rview=cards] table.sup-table tr:first-child:has(th) { display: none; }
+  [data-rview=cards] table.sup-table tr { display: flex; flex-wrap: wrap; gap: 8px 14px; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+  [data-rview=cards] table.sup-table td { display: block; border: 0; padding: 0; min-width: 0 !important; text-align: left; }
+  [data-rview=cards] table.sup-table td[data-label]::before { content: attr(data-label); display: block; font-size: 12px; color: var(--muted); }
+  [data-rview=cards] table.sup-table td.s-name, [data-rview=cards] table.sup-table td.s-regions { flex: 1 1 100%; font-weight: 600; }
+  [data-rview=cards] table.sup-table td.s-regions { font-weight: 400; }
+  [data-rview=cards] table.sup-table td.s-link { flex: 1 1 100%; text-align: right; }
 {% endmacro %}

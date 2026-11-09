@@ -440,13 +440,13 @@ def test_lot_page_shows_competitors_and_suppliers(client, conn):
     here, rest = page.split("В регионе поставки:", 1)[1].split("По всему Казахстану", 1)
     assert 'href="/org/050540002222"' in here and 'href="/org/651114400549"' in here
     assert 'href="/org/060640003333"' in rest and "г. Алматы" in rest
-    assert "снижает цену" not in page  # без тарифа — без процентов
-    assert "<span class=\"muted\"> ·" not in page and "· ·" not in page
+    # без тарифа — без процентов
+    assert "Снижение цены" not in page and "Побед в регионе" in page
     # Точный уровень — только диваны.
     exact = client.get("/lots/8010?sup=code").text.split("Конкуренты и поставщики", 1)[1]
     assert "060640003333" not in exact.split("</section>", 1)[0]
     _login(client)
-    assert "снижает цену в среднем на 10.0%" in client.get("/lots/8010").text
+    assert ">10.0%<" in client.get("/lots/8010").text
     # У ИП — ИИН, у ТОО — БИН.
     assert "ИИН 651114400549" in client.get("/org/651114400549").text
     assert "БИН 050540002222" in client.get("/org/050540002222").text
@@ -490,7 +490,7 @@ def test_unpaid_see_only_five_suppliers_in_html(client, conn):
     conn.commit()
     orgs.refresh_directory(conn)
     block = client.get("/lots/8110").text.split('id="suppliers"', 1)[1].split("</section>", 1)[0]
-    assert block.count("<li>") == 5 and block.count("ТОО Участник") == 5 and "Показать всех (8)" in block
+    assert block.count('class="s-name"') == 5 and block.count("ТОО Участник") == 5 and "Показать всех (8)" in block
 
 
 def test_lot_level_customer_has_page_and_description_without_amount(client, conn):
