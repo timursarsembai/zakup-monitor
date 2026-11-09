@@ -21,7 +21,7 @@
 <meta property="og:url" content="{{ canonical }}">
 <meta property="og:title" content="{{ self.title()|trim }}">
 <meta property="og:description" content="{{ self.description()|trim }}">
-<meta property="og:image" content="{% block og_image %}{{ site_url }}/og/site.png{% endblock %}{{ '?lang=kk' if lang() == 'kk' }}">
+<meta property="og:image" content="{% block og_image %}{{ site_url }}/og/site.png?v=2{% endblock %}{{ ('&' if '?' in self.og_image() else '?') ~ 'lang=kk' if lang() == 'kk' }}">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta property="og:locale" content="{{ 'kk_KZ' if lang() == 'kk' else 'ru_RU' }}">
@@ -281,7 +281,7 @@
 {% block header %}
 <header>
   <a href="{{ '/dashboard' if request.state.staff else '/' }}" class="brand" aria-label="{{ _("Tenderim — на главную") }}"><img class="logo-light-bg" src="/static/logo-tenderim.png" alt="Tenderim" width="173" height="30"><img class="logo-dark-bg" src="/static/logo-tenderim-light.png" alt="Tenderim" width="173" height="30"><img class="brand-mark" src="/static/icon-192.png" alt="" width="32" height="32"></a>
-  <span class="brand-tag">{{ _("Госзакупки Казахстана: поиск, уведомления и подбор товаров с ИИ") }}</span>
+  <span class="brand-tag">{{ _("Тендеры Казахстана: поиск, уведомления и подбор товаров с ИИ") }}</span>
   {% set path = request.url.path %}
   <nav class="main-nav" aria-label="{{ _("Разделы") }}" data-head="{{ _("Закупки") }}">
     <a href="/announcements" data-search-open aria-controls="search-sheet" class="{{ 'on' if path in ('/', '/lots', '/announcements') or path.startswith('/lots/') or path.startswith('/a/') }}"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span>{{ _("nav:Закупки") }}</span></a>
