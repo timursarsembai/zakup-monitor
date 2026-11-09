@@ -38,6 +38,7 @@
     for (const [key, value] of new FormData(sheet)) {
       const field = sheet.querySelector(`[name="${key}"]`);
       if (field && field.closest(".subscribe") && key !== "edit") continue;
+      if (value === "") continue;  // пустые поля — короткий адрес; сервер понимает и так
       params.append(key, value);
     }
     return params.toString();
