@@ -49,6 +49,8 @@ ACTIONS = {
     "history_start": "Запустил догрузку истории с даты",
     "history_stop": "Остановил догрузку истории",
     "settings_requisites": "Изменил реквизиты",
+    "settings_brand": "Изменил текст под логотипом",
+    "settings_logo": "Изменил логотип",
     "settings_registration": "Регистрация открыта/закрыта",
     "user_add": "Добавил пользователя",
     "user_reset": "Сбросил пароль пользователю",

@@ -13,6 +13,7 @@ from fastapi.responses import RedirectResponse
 from zakup import (
     auth,
     bot,
+    branding,
     client_bot,
     credits,
     history,
@@ -88,7 +89,7 @@ def _settings_page(request: Request, user: int, *, sent: str = "", saved: str = 
         "error": error,
         "company_bin": company_bin,
         "tab": tab or {"ai": "ai", "bin": "company", "tariff": "tariff", "notify": "notify",
-                       "requisites": "requisites", "data": "data"}.get(saved),
+                       "requisites": "requisites", "data": "data", "brand": "brand"}.get(saved),
         "requisite_fields": legal.FIELDS,
         "me": user,
         "now": datetime.now(UTC),
@@ -478,6 +479,36 @@ def stop_history(request: Request, admin: Admin):
     if stopped:
         _audit(request, admin, "history_stop", "")
     return RedirectResponse("/settings?saved=data#data", status_code=303)
+
+
+@router.post("/settings/brand", dependencies=[Depends(same_origin)])
+def save_brand(request: Request, admin: Admin, tagline_ru: Annotated[str, Form()] = "",
+               tagline_kk: Annotated[str, Form()] = ""):
+    with core.pool.connection() as conn:
+        branding.save_tagline(conn, tagline_ru, tagline_kk)
+    _audit(request, admin, "settings_brand", tagline_ru[:100])
+    return RedirectResponse("/settings?saved=brand#brand", status_code=303)
+
+
+@router.post("/settings/brand/logo/{kind}", dependencies=[Depends(same_origin)])
+async def save_brand_logo(request: Request, admin: Admin, kind: str):
+    if kind not in branding.KINDS:
+        raise HTTPException(404)
+    form = await request.form()
+    if form.get("reset"):
+        with core.pool.connection() as conn:
+            branding.reset_logo(conn, kind)
+        _audit(request, admin, "settings_logo", kind, reset=True)
+        return RedirectResponse("/settings?saved=brand#brand", status_code=303)
+    upload = form.get("file")
+    content = await upload.read(branding.MAX_BYTES + 1) if hasattr(upload, "read") else b""
+    try:
+        with core.pool.connection() as conn:
+            branding.save_logo(conn, kind, content)
+    except ValueError as error:
+        return _settings_page(request, admin, error=str(error), status_code=422, tab="brand")
+    _audit(request, admin, "settings_logo", kind)
+    return RedirectResponse("/settings?saved=brand#brand", status_code=303)
 
 
 @router.post("/settings/requisites", dependencies=[Depends(same_origin)])

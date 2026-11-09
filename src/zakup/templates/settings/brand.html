@@ -1,0 +1,31 @@
+{# Настройки → вкладка «brand»: логотип и текст под ним. Подключается из settings.html. #}
+{% set bv = brand(_("Тендеры Казахстана: поиск, уведомления и подбор товаров с ИИ")) %}
+<div data-tab-panel="brand" hidden>
+<section class="panel wide">
+  <h2>{{ _("Текст под логотипом") }}</h2>
+  <p class="muted">{{ _("Показывается под логотипом в левой панели и рядом с ним на телефоне. Пусто — стандартный текст.") }}</p>
+  <form method="post" action="/settings/brand" class="tariff-form">
+    <label class="field"><span>{{ _("На русском") }}</span><input name="tagline_ru" value="{{ bv.tagline_ru }}" maxlength="120" placeholder="Тендеры Казахстана: поиск, уведомления и подбор товаров с ИИ"></label>
+    <label class="field"><span>{{ _("На казахском (пусто — как на русском)") }}</span><input name="tagline_kk" value="{{ bv.tagline_kk }}" maxlength="120"></label>
+    <button class="primary">{{ _("Сохранить") }}</button>
+    {% if saved == "brand" %}<p class="note">{{ _("Сохранено. На сайте — в течение минуты.") }}</p>{% endif %}
+  </form>
+</section>
+<section class="panel wide">
+  <h2>{{ _("Логотип") }}</h2>
+  <p class="muted">{{ _("PNG, JPEG или WebP до 900 КБ, лучше с прозрачным фоном. В шапке высота 30 px, ширина — по пропорциям; загружайте в 2–3 раза крупнее для чёткости.") }}</p>
+  {% for kind, label, bg in (("light", _("Для светлой темы (тёмные буквы)"), "#ffffff"), ("dark", _("Для тёмной темы (светлые буквы)"), "#14161a")) %}
+  <div style="margin: 14px 0 18px">
+    <b>{{ label }}</b>
+    <div style="margin: 8px 0; padding: 14px; background: {{ bg }}; border: 1px solid var(--line); border-radius: 10px; display: inline-block"><img src="{{ bv.logo[kind].src }}" alt="" style="height: 30px; width: auto; display: block"></div>
+    <form method="post" action="/settings/brand/logo/{{ kind }}" enctype="multipart/form-data" class="actions">
+      <input type="file" name="file" accept="image/png,image/jpeg,image/webp" required>
+      <button class="primary">{{ _("Загрузить") }}</button>
+    </form>
+    {% if not bv.logo[kind].src.startswith("/static/") %}
+    <form method="post" action="/settings/brand/logo/{{ kind }}" class="actions" style="margin-top: 6px"><input type="hidden" name="reset" value="1"><button>{{ _("Вернуть стандартный") }}</button></form>
+    {% endif %}
+  </div>
+  {% endfor %}
+</section>
+</div>

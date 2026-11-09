@@ -25,6 +25,7 @@ from zakup import (
     SITE_URL,
     audit,
     auth,
+    branding,
     catalog,
     config,
     i18n,
@@ -193,6 +194,21 @@ def _requisites() -> dict:
 
 
 templates.env.globals["requisites"] = _requisites
+
+
+def _brand(default_tagline: str) -> dict:
+    """Логотип и текст под ним — из настроек «Оформление»."""
+    data = branding.cached()
+    if data is None:
+        try:
+            with pool.connection() as conn:
+                data = branding.get(conn)
+        except psycopg.Error:
+            data = {}
+    return branding.view(data, i18n.language(), default_tagline)
+
+
+templates.env.globals["brand"] = _brand
 
 
 def _spec_blocks(text: str | None) -> list[tuple[str, Any]]:

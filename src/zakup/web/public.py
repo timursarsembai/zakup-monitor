@@ -18,6 +18,7 @@ from fastapi.responses import RedirectResponse, Response
 from zakup import (
     SITE_URL,
     ai_config,
+    branding,
     catalog,
     dashboard,
     details,
@@ -153,6 +154,20 @@ def og_announcement(announcement_id: int) -> Response:
     return _og_response(("a", announcement_id, lang, now.date(), end and end > now), lambda: og.card(
         lang, kicker=kicker, title=i18n.pick(name_ru, name_kz), customer=customer, amount=amount,
         end=end, now=now))
+
+
+@router.get("/brand/logo-{kind}")
+def brand_logo(kind: str) -> Response:
+    """Логотип из настроек «Оформление»; адрес с ?v=<хэш> — кэшируется надолго."""
+    if kind not in branding.KINDS:
+        raise HTTPException(404)
+    with core.pool.connection() as conn:
+        stored = branding.logo(conn, kind)
+    if stored is None:
+        return RedirectResponse("/" + branding.KINDS[kind], status_code=302)
+    mime, content = stored
+    return Response(content, media_type=mime, headers={
+        "Cache-Control": "public, max-age=31536000, immutable", "X-Content-Type-Options": "nosniff"})
 
 
 @router.get("/llms.txt")

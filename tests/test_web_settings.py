@@ -233,3 +233,30 @@ def test_admin_data_tab_starts_and_stops_history(client, conn):
     assert "Остановить" in client.get("/settings").text
     client.post("/settings/history/stop", headers=ORIGIN)
     assert conn.execute("SELECT status FROM backfill_runs").fetchone()[0] == "stopped"
+
+
+def test_admin_changes_tagline_and_logo(client, conn, monkeypatch):
+    import io
+
+    from PIL import Image
+
+    from zakup import branding
+
+    monkeypatch.setattr(branding, "_cache", None)
+    _login(client)
+    client.post("/settings/brand", data={"tagline_ru": "Свой  текст", "tagline_kk": ""}, headers=ORIGIN)
+    assert '<span class="brand-tag">Свой текст</span>' in client.get("/lots").text
+    png = io.BytesIO()
+    Image.new("RGBA", (300, 60)).save(png, "PNG")
+    response = client.post("/settings/brand/logo/light", files={"file": ("logo.png", png.getvalue(), "image/png")},
+                           headers=ORIGIN, follow_redirects=False)
+    assert response.status_code == 303
+    page = client.get("/lots").text
+    assert 'src="/brand/logo-light?v=' in page and 'width="150" height="30"' in page
+    logo = client.get("/brand/logo-light")
+    assert logo.headers["content-type"] == "image/png" and logo.content == png.getvalue()
+    bad = client.post("/settings/brand/logo/dark", files={"file": ("x.svg", b"<svg onload=alert(1)>", "image/svg+xml")},
+                      headers=ORIGIN)
+    assert bad.status_code == 422 and "PNG, JPEG или WebP" in bad.text
+    client.post("/settings/brand/logo/light", data={"reset": "1"}, headers=ORIGIN)
+    assert 'src="/static/logo-tenderim.png"' in client.get("/lots").text

@@ -33,7 +33,7 @@
 {% endblock %}
 {% block main_class %} class="auth"{% endblock %}
 {% block main %}
-<p class="brand"><a href="{{ '/dashboard' if request.state.staff else '/' }}" aria-label="{{ _("Tenderim — на главную") }}"><img class="logo-light-bg" src="/static/logo-tenderim.png" alt="Tenderim"><img class="logo-dark-bg" src="/static/logo-tenderim-light.png" alt="Tenderim"></a></p>
+<p class="brand"><a href="{{ '/dashboard' if request.state.staff else '/' }}" aria-label="{{ _("Tenderim — на главную") }}">{% set b = brand(_("Тендеры Казахстана: поиск, уведомления и подбор товаров с ИИ")) %}<img class="logo-light-bg" src="{{ b.logo.light.src }}" alt="Tenderim"><img class="logo-dark-bg" src="{{ b.logo.dark.src }}" alt="Tenderim"></a></p>
 <p class="lead">{{ _("Мониторинг тендеров Казахстана") }}
   <span class="langs">{% for code, label in languages.items() %}{% if code == lang() %}<b>{{ label }}</b>{% else %}<a href="/lang/{{ code }}">{{ label }}</a>{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}</span></p>
 {% block card %}{% endblock %}
