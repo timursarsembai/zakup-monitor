@@ -10,6 +10,17 @@ for (const [width, mobile] of [[1280, false], [390, true]]) {
   const page = await browser.newPage({ viewport: { width, height: 800 }, isMobile: mobile, hasTouch: mobile });
   page.on("pageerror", (error) => problems.push(`${width}px ${page.url()}: ${error.message}`));
   for (const path of pages) await page.goto(SITE + path, { waitUntil: "networkidle" });
+  if (!mobile && await page.evaluate(() => document.documentElement.dataset.chips === "desktop")) {
+    await page.goto(SITE + "/lots", { waitUntil: "networkidle" });
+    await page.click('[data-chip-open="region"]');
+    await page.waitForTimeout(300);
+    const placed = await page.evaluate(() => {
+      const sheet = document.getElementById("filters");
+      const chip = document.querySelector('[data-chip-open="region"]').getBoundingClientRect();
+      return sheet.classList.contains("open") && Math.abs(sheet.getBoundingClientRect().top - chip.bottom) < 40;
+    });
+    if (!placed) problems.push("1280px /lots: шторка «Регион» не раскрылась под кнопкой");
+  }
   if (mobile) {
     await page.goto(SITE + "/lots", { waitUntil: "networkidle" });
     await page.tap('[data-chip-open="region"]');

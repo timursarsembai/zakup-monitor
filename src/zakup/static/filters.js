@@ -26,9 +26,27 @@
     }
     snapshot = null;
   };
+  // Компьютер со строкой условий (DESKTOP_CHIPS): шторка выпадает вниз из-под нажатой кнопки.
+  const desktopChips = () => document.documentElement.dataset.chips === "desktop" && matchMedia("(min-width: 761px)").matches;
+  const placeDropdown = (trigger) => {
+    const bar = document.querySelector("[data-chipbar]").getBoundingClientRect();
+    const top = bar.bottom + 6;
+    if (trigger) {
+      const rect = trigger.getBoundingClientRect();
+      const width = Math.min(380, innerWidth - 32);
+      sheet.style.width = `${width}px`;
+      sheet.style.left = `${Math.max(16, Math.min(rect.left, innerWidth - width - 16))}px`;
+    } else {
+      sheet.style.width = `${bar.width}px`;
+      sheet.style.left = `${bar.left}px`;
+    }
+    sheet.style.top = `${top}px`;
+    sheet.style.maxHeight = `${innerHeight - top - 16}px`;
+  };
   const closeSheet = (applied = false) => {
     if (!applied && sheet.classList.contains("single")) restoreSnapshot();
     snapshot = null;
+    for (const prop of ["top", "left", "width", "maxHeight"]) sheet.style[prop] = "";
     sheet.classList.remove("open", "single");
     delete sheet.dataset.mode;
     for (const group of sheet.querySelectorAll(".shown")) group.classList.remove("shown");
@@ -42,11 +60,16 @@
     closeSheet();
     return true;
   };
-  const openSheet = (mode, label) => {
+  const openSheet = (mode, label, trigger) => {
     closeSheet();
     window.closeNavSheets?.();  // шторки «Ещё» / «Закупки» — закрыть: одна шторка за раз
     sheet.classList.add("open");
     document.body.classList.add("sheet-open");
+    const dropdown = desktopChips();
+    if (dropdown) {
+      placeDropdown(mode === "all" ? null : trigger);
+      if (backdrop) backdrop.hidden = false;
+    }
     if (mode === "all") return;
     sheet.classList.add("single");
     sheet.dataset.mode = mode;
@@ -168,7 +191,7 @@
   chipbar?.addEventListener("click", (event) => {
     const opener = event.target.closest("[data-chip-open]");
     if (opener) {
-      openSheet(opener.dataset.chipOpen, opener.dataset.title || opener.getAttribute("aria-label") || opener.textContent.trim());
+      openSheet(opener.dataset.chipOpen, opener.dataset.title || opener.getAttribute("aria-label") || opener.textContent.trim(), opener);
       return;
     }
     // «Только открытые», «Опубликованы сегодня» — переключаются сразу.
@@ -180,6 +203,8 @@
     }
   });
   backdrop?.addEventListener("click", () => closeSheet());
+  // Окно изменило размер — выпадающая шторка стоит не там: закрыть.
+  addEventListener("resize", () => { if (desktopChips() && sheet.classList.contains("open")) closeSheet(); });
   // «Сбросить» и «Мои фильтры» (тот же вид поиска) — без перезагрузки; блоки внутри
   // формы перерисовываются, поэтому — делегирование.
   sheet.addEventListener("click", (event) => {

@@ -124,6 +124,10 @@ templates.env.globals["open_statuses"] = set(OPEN_STATUSES)
 
 
 templates.env.globals["site_url"] = SITE_URL
+# Компьютер: фильтр поиска — строкой условий сверху (как на телефоне) с выпадающими шторками.
+# Не понравится — False: вернётся прежний фильтр целиком справа от результатов.
+DESKTOP_CHIPS = True
+templates.env.globals["desktop_chips"] = DESKTOP_CHIPS
 
 
 def _structured_demand(*, name, description, url, end, amount, count, unit, customer) -> dict:
