@@ -148,6 +148,41 @@ def save(conn: psycopg.Connection, item: dict[str, Any]) -> None:
                WHERE id = %(id)s""",
             lot,
         )
+    codes(conn, [int(item["id"])])
+
+
+def codes(conn: psycopg.Connection, announcement_ids: list[int]) -> None:
+    """Списки кодов регионов и разделов для фильтров (миграция 0019) — у объявлений и их лотов."""
+    conn.execute(
+        """UPDATE lots l SET regions = codes2(coalesce(nullif(l.kato, '{}'), a.kato)),
+                             divisions = codes2(l.enstru)
+           FROM announcements a WHERE a.id = l.trd_buy_id AND l.trd_buy_id = ANY(%(ids)s)""",
+        {"ids": announcement_ids})
+    conn.execute(
+        """UPDATE announcements a SET regions = codes2(a.kato),
+                  divisions = (SELECT codes2(array_agg(c)) FROM lots l, unnest(l.enstru) c
+                               WHERE l.trd_buy_id = a.id)
+           WHERE a.id = ANY(%(ids)s)""",
+        {"ids": announcement_ids})
+
+
+def fill_codes(conn: psycopg.Connection, batch: int = 2000) -> int:
+    """Старые записи без списков кодов — пачками, с коммитом после каждой: не держать таблицы."""
+    done = 0
+    while ids := [r[0] for r in conn.execute(
+            "SELECT id FROM announcements WHERE regions IS NULL ORDER BY id DESC LIMIT %s", (batch,))]:
+        codes(conn, ids)
+        conn.commit()
+        done += len(ids)
+    # Лоты без объявления в базе или добавленные после подробностей — по своим кодам.
+    while ids := [r[0] for r in conn.execute(
+            "SELECT id FROM lots WHERE regions IS NULL LIMIT %s", (batch,))]:
+        conn.execute("""UPDATE lots l SET regions = codes2(coalesce(nullif(l.kato, '{}'),
+                            (SELECT a.kato FROM announcements a WHERE a.id = l.trd_buy_id))),
+                            divisions = codes2(l.enstru) WHERE l.id = ANY(%s)""", (ids,))
+        conn.commit()
+        done += len(ids)
+    return done
 
 
 def fetch_one(conn: psycopg.Connection, client: Client, announcement_id: int) -> bool:

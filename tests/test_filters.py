@@ -434,3 +434,16 @@ def test_announcements_without_lots_are_hidden(conn):
     where, params = Filters(advance_min=0, disable_person="").where(NOW, "announcements")
     ids = [r[0] for r in conn.execute(f"SELECT a.id FROM announcements a WHERE {where}", params)]
     assert 1 in ids and 2 not in ids
+
+
+def test_details_fill_region_and_division_codes(conn):
+    from zakup import details
+
+    _announcement(conn, 1, kato=("751410000", "711110000"))
+    conn.execute("UPDATE lots SET enstru = '{\"311011\", \"170000\"}' WHERE id = 10")
+    details.codes(conn, [1])
+    assert conn.execute("SELECT regions, divisions FROM lots WHERE id = 10").fetchone() == (["71", "75"], ["17", "31"])
+    assert conn.execute("SELECT divisions FROM announcements WHERE id = 1").fetchone() == (["17", "31"],)
+    conn.execute("UPDATE lots SET regions = NULL")
+    assert details.fill_codes(conn) >= 1
+    assert conn.execute("SELECT count(*) FROM lots WHERE regions IS NULL").fetchone() == (0,)

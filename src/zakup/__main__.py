@@ -36,6 +36,7 @@ def _parser() -> argparse.ArgumentParser:
     more.add_argument("--limit", type=int, default=2000)
     more.add_argument("--part", choices=["open", "finished", "all"], default="all",
                       help="open — открытые (быстрый круг), finished — завершённые и протоколы")
+    sub.add_parser("codes", help="заполнить списки кодов регионов и разделов у старых записей")
     sub.add_parser("payments", help="запасная проверка неоплаченных заказов kazpayment")
     orgs = sub.add_parser("subjects", help="догрузить карточки организаций: заказчики, организаторы, победители")
     orgs.add_argument("--limit", type=int, default=600)
@@ -149,7 +150,14 @@ def _backfill_from(args) -> int:
     return 0 if run else 1
 
 
+def _codes(args) -> int:
+    with db.connect(config.database_url()) as conn:
+        print(f"codes: {details.fill_codes(conn)}")
+    return 0
+
+
 LOCAL = {
+    "codes": _codes,
     "backfill-from": _backfill_from,
     "migrate": _migrate, "payments": _payments, "autofix": _autofix, "tidy": _tidy, "nightly": _nightly,
     "client-bot": _client_bot, "bot": _bot, "research": _research, "add-user": _add_user,
