@@ -355,9 +355,10 @@ def test_organization_pages_for_customer_and_supplier(client, conn):
     page = client.get(f"/org/{customer}").text
     assert "<h1>ГУ Школа №9</h1>" in page and "Объявил закупок" in page and "school9@mail.kz" in page
     assert f'href="/org/{supplier}">ТОО Кровля</a>' in page and "10.0%" in page
-    assert '"taxID": "990740001111"' in page and "/a/900" in page
+    assert '"taxID": "990740001111"' in page and "/a/900" in client.get(f"/org/{customer}?tab=buys").text
     seller = client.get(f"/org/{supplier}").text
-    assert "Побед в закупках" in seller and "/lots/9001" in seller and f'href="/org/{customer}"' in seller
+    assert "Главные заказчики" in seller and f'href="/org/{customer}"' in seller
+    assert "/lots/9001" in client.get(f"/org/{supplier}?tab=wins").text
     # У ИП (по ИИН) — тоже страница: участие в закупках; неизвестный БИН — 404.
     assert "ИП Иванов" in client.get(f"/org/{person}").text
     assert client.get("/org/990740009999").status_code == 404
@@ -504,7 +505,8 @@ def test_lot_level_customer_has_page_and_description_without_amount(client, conn
     conn.commit()
     orgs.refresh_directory(conn)
     page = client.get("/org/990740007777")
-    assert page.status_code == 200 and "ГУ Школа №7" in page.text and "/a/820" in page.text
+    assert page.status_code == 200 and "ГУ Школа №7" in page.text
+    assert "/a/820" in client.get("/org/990740007777?tab=buys").text
     description = client.get("/lots/8201").text.split('name="description" content="', 1)[1].split('"', 1)[0]
     assert ". ," not in description and description.count(". .") == 0 and "приём заявок до" in description
 
@@ -520,3 +522,22 @@ def test_category_filter_in_search_and_subscriptions(client, conn):
     assert 'name="category" value="17"' in lots
     from zakup.filters import Filters
     assert Filters.from_json(Filters(categories=["17"]).to_json()).categories == ["17"]
+
+
+def test_organization_tabs(client, conn):
+    from zakup import orgs
+    customer, supplier, person = _org_data(conn)
+    orgs.refresh_directory(conn)
+    page = client.get(f"/org/{supplier}").text
+    assert 'aria-current="page">Обзор' in page and "?tab=wins" in page and "?tab=history" in page
+    assert "Динамика участия за 30 дней" in page and "<svg class=\"org-chart\"" in page
+    wins = client.get(f"/org/{supplier}?tab=wins&sort=amount&customer={customer}").text
+    assert "/lots/9001" in wins and "1 800 000.00" in wins and 'data-rview-box' in wins and "10.0%" in wins
+    history = client.get(f"/org/{person}?tab=history").text
+    assert "Не выиграл" in history and "1 900 000.00" in history and f'href="/org/{supplier}"' in history
+    assert "Победа · 1" in client.get(f"/org/{supplier}?tab=history").text
+    buys = client.get(f"/org/{customer}?tab=buys").text
+    assert "Прошедшие закупки" in buys and "/a/900" in buys
+    # Неизвестная вкладка или параметры — обзор, без ошибок.
+    assert client.get(f"/org/{supplier}?tab=evil&sort=x&page=-3").status_code == 200
+    assert client.get(f"/org/{customer}?tab=wins").status_code == 200  # у заказчика нет побед — обзор

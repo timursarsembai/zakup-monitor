@@ -9,12 +9,13 @@
 import re
 import threading
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import psycopg
 
 from zakup import subjects
+from zakup.goszakup import PORTAL_TZ
 
 _BIN = re.compile(r"^\d{12}$")
 LIST_LIMIT = 30
@@ -59,10 +60,27 @@ _MINE = """(SELECT id FROM announcements WHERE customer_bin = %(b)s OR org_bin =
             UNION SELECT trd_buy_id FROM lots WHERE customer_bin = %(b)s)"""
 
 
-def profile(conn: psycopg.Connection, bin_: str, now: datetime | None = None) -> dict[str, Any] | None:
-    """Всё для страницы организации; None — такой организации у нас нет."""
+# Вкладки страницы организации: (ключ, название). Показываются только те, где есть данные.
+TABS = (("overview", "Обзор"), ("wins", "Победы"), ("history", "История участия"),
+        ("where", "Где может участвовать"), ("buys", "Закупки"))
+TAB_PAGE = 50
+WIN_SORTS = {"date": "a.end_date DESC NULLS LAST, l.id", "amount": "r.winner_total DESC NULLS LAST, l.id",
+             "lot": "l.name_ru, l.id", "customer": "customer, l.id"}
+RESULTS = {"win": "Победа", "second": "Второе место", "lost": "Не выиграл", "failed": "Не состоялась"}
+DYNAMICS_DAYS = 30
+
+
+def _offered_sql() -> str:
+    return "r.offers @> jsonb_build_array(jsonb_build_object('bin', %(b)s::text))"
+
+
+def profile(conn: psycopg.Connection, bin_: str, tab: str = "overview", args: dict | None = None,
+            now: datetime | None = None) -> dict[str, Any] | None:
+    """Страница организации: шапка и цифры — всегда, данные — только открытой вкладки.
+    None — такой организации у нас нет."""
     if not has_page(bin_):
         return None
+    args = args or {}
     now = now or datetime.now(UTC)
     name_ru, name_kz = _name(conn, bin_)
     if not name_ru:
@@ -72,65 +90,178 @@ def profile(conn: psycopg.Connection, bin_: str, now: datetime | None = None) ->
         SELECT count(*) AS total, coalesce(sum(total_sum), 0) AS amount,
                count(*) FILTER (WHERE end_date > %(now)s) AS open
         FROM announcements WHERE id IN """ + _MINE, params)[0]
-    open_list = _rows(conn, """
-        SELECT id, number_anno, name_ru, name_kz, total_sum, end_date, count_lots
-        FROM announcements WHERE id IN """ + _MINE + """ AND end_date > %(now)s
-        ORDER BY end_date LIMIT %(limit)s""", params) if buyer["open"] else []
-    past_list = _rows(conn, """
-        SELECT id, number_anno, name_ru, name_kz, total_sum, end_date, count_lots
-        FROM announcements WHERE id IN """ + _MINE + """ AND end_date <= %(now)s
-        ORDER BY end_date DESC LIMIT %(limit)s""", params) if buyer["total"] > buyer["open"] else []
-    their_winners = _rows(conn, """
-        SELECT r.winner_bin AS bin, max(r.winner_name) AS name, count(*) AS wins,
-               sum(r.winner_total) AS amount
-        FROM lot_results r JOIN lots l ON l.id = r.lot_id
-        WHERE l.customer_bin = %(b)s AND r.outcome = 'winner'
-        GROUP BY 1 ORDER BY 3 DESC, 4 DESC NULLS LAST LIMIT 10""", params) if buyer["total"] else []
-    discount = conn.execute(
-        """SELECT avg(1 - r.winner_total / l.amount) FROM lot_results r JOIN lots l ON l.id = r.lot_id
-           WHERE l.customer_bin = %s AND r.outcome = 'winner' AND l.amount > 0
-             AND r.winner_total BETWEEN 0 AND l.amount""", (bin_,)).fetchone()[0] if buyer["total"] else None
     seller = _rows(conn, """
         SELECT count(*) AS wins, coalesce(sum(winner_total), 0) AS amount
         FROM lot_results WHERE winner_bin = %(b)s AND outcome = 'winner'""", params)[0]
-    offered = conn.execute(
-        "SELECT count(*) FROM lot_results WHERE offers @> jsonb_build_array(jsonb_build_object('bin', %s::text))",
-        (bin_,)).fetchone()[0]
-    wins = _rows(conn, """
-        SELECT l.id, l.name_ru, l.name_kz, l.amount, r.winner_total, l.customer_bin,
-               coalesce(a.customer_name_ru, l.customer_name_ru) AS customer, a.end_date
-        FROM lot_results r JOIN lots l ON l.id = r.lot_id LEFT JOIN announcements a ON a.id = l.trd_buy_id
-        WHERE r.winner_bin = %(b)s AND r.outcome = 'winner'
-        ORDER BY a.end_date DESC NULLS LAST LIMIT %(limit)s""", params) if seller["wins"] else []
-    their_customers = _rows(conn, """
+    offered = conn.execute(f"SELECT count(*) FROM lot_results r WHERE {_offered_sql()}", params).fetchone()[0]
+    if not (buyer["total"] or seller["wins"] or offered):
+        return None
+    has_codes = bool(offered) and conn.execute(
+        "SELECT 1 FROM supplier_activity WHERE bin = %s AND code <> '' LIMIT 1", (bin_,)).fetchone() is not None
+    tabs = [key for key, _ in TABS if key == "overview" or (key == "wins" and seller["wins"])
+            or (key == "history" and offered) or (key == "where" and has_codes) or (key == "buys" and buyer["total"])]
+    tab = tab if tab in tabs else "overview"
+    data = {"bin": bin_, "name_ru": name_ru, "name_kz": name_kz, "card": subjects.card(conn, bin_),
+            "buyer": buyer, "seller": seller, "offered": offered, "tabs": tabs, "tab": tab}
+    data["discount"] = conn.execute(
+        """SELECT avg(1 - r.winner_total / l.amount) FROM lot_results r JOIN lots l ON l.id = r.lot_id
+           WHERE l.customer_bin = %s AND r.outcome = 'winner' AND l.amount > 0
+             AND r.winner_total BETWEEN 0 AND l.amount""", (bin_,)).fetchone()[0] if buyer["total"] else None
+    data["seller_discount"] = conn.execute(
+        """SELECT avg(1 - r.winner_total / l.amount) FROM lot_results r JOIN lots l ON l.id = r.lot_id
+           WHERE r.winner_bin = %s AND r.outcome = 'winner' AND l.amount > 0
+             AND r.winner_total BETWEEN 0 AND l.amount""", (bin_,)).fetchone()[0] if seller["wins"] else None
+    data.update({"overview": _overview, "wins": _wins, "history": _history, "where": _where,
+                 "buys": _buys}[tab](conn, params, data, args, now))
+    return data
+
+
+def _overview(conn, params, data, args, now) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    since = now - timedelta(days=DYNAMICS_DAYS)
+    days = [(since + timedelta(days=i + 1)).astimezone(PORTAL_TZ).date() for i in range(DYNAMICS_DAYS)]
+    if data["offered"]:
+        # Заявки и победы по дням: день — подача заявки (applied_at), иначе окончание приёма.
+        rows = conn.execute(
+            f"""SELECT coalesce(CASE WHEN o->>'applied_at' ~ '^\\d\\d\\.\\d\\d\\.\\d{{4}} \\d\\d:\\d\\d:\\d\\d$'
+                                     THEN to_timestamp(o->>'applied_at', 'DD.MM.YYYY HH24:MI:SS')::date END,
+                                (a.end_date AT TIME ZONE 'Asia/Almaty')::date) AS day,
+                       count(*), count(*) FILTER (WHERE r.outcome = 'winner' AND r.winner_bin = %(b)s)
+                FROM lot_results r CROSS JOIN LATERAL jsonb_array_elements(r.offers) o
+                JOIN lots l ON l.id = r.lot_id LEFT JOIN announcements a ON a.id = l.trd_buy_id
+                WHERE {_offered_sql()} AND o->>'bin' = %(b)s GROUP BY 1""", params).fetchall()
+        by_day = {day: (n, w) for day, n, w in rows}
+        out["dynamics"] = [(d, *by_day.get(d, (0, 0))) for d in days]
+    if data["buyer"]["total"]:
+        rows = conn.execute(
+            """SELECT (publish_date AT TIME ZONE 'Asia/Almaty')::date, count(*) FROM announcements
+               WHERE id IN """ + _MINE + " AND publish_date >= %(since)s GROUP BY 1",
+            {**params, "since": since}).fetchall()
+        by_day = dict(rows)
+        out["buy_dynamics"] = [(d, by_day.get(d, 0)) for d in days]
+        out["buys_divisions"] = _rows(conn, """
+            SELECT left(enstru[1], 2) AS code, count(*) AS lots, coalesce(sum(amount), 0) AS amount
+            FROM lots WHERE customer_bin = %(b)s AND cardinality(enstru) > 0
+            GROUP BY 1 ORDER BY 2 DESC, 3 DESC LIMIT 8""", params)
+        out["buys_names"] = _rows(conn, """
+            SELECT min(name_ru) AS name_ru, min(name_kz) AS name_kz, count(*) AS lots,
+                   coalesce(sum(amount), 0) AS amount
+            FROM lots WHERE customer_bin = %(b)s AND name_ru IS NOT NULL
+            GROUP BY lower(name_ru) HAVING count(*) > 1 ORDER BY 3 DESC, 4 DESC LIMIT 12""", params)
+        out["their_winners"] = _their_winners(conn, params, 5)
+    if data["seller"]["wins"]:
+        out["sells_divisions"] = _rows(conn, """
+            SELECT left(l.enstru[1], 2) AS code, count(*) AS lots, coalesce(sum(r.winner_total), 0) AS amount
+            FROM lot_results r JOIN lots l ON l.id = r.lot_id
+            WHERE r.winner_bin = %(b)s AND r.outcome = 'winner' AND cardinality(l.enstru) > 0
+            GROUP BY 1 ORDER BY 2 DESC, 3 DESC LIMIT 8""", params)
+        out["their_customers"] = _their_customers(conn, params, 5)
+    return out
+
+
+def _their_winners(conn, params, limit: int) -> list[dict[str, Any]]:
+    return _rows(conn, f"""
+        SELECT r.winner_bin AS bin, max(r.winner_name) AS name, count(*) AS wins, sum(r.winner_total) AS amount
+        FROM lot_results r JOIN lots l ON l.id = r.lot_id
+        WHERE l.customer_bin = %(b)s AND r.outcome = 'winner'
+        GROUP BY 1 ORDER BY 3 DESC, 4 DESC NULLS LAST LIMIT {int(limit)}""", params)
+
+
+def _their_customers(conn, params, limit: int) -> list[dict[str, Any]]:
+    return _rows(conn, f"""
         SELECT l.customer_bin AS bin, max(coalesce(a.customer_name_ru, l.customer_name_ru)) AS name,
                count(*) AS wins, sum(r.winner_total) AS amount
         FROM lot_results r JOIN lots l ON l.id = r.lot_id LEFT JOIN announcements a ON a.id = l.trd_buy_id
         WHERE r.winner_bin = %(b)s AND r.outcome = 'winner'
-        GROUP BY 1 ORDER BY 3 DESC, 4 DESC NULLS LAST LIMIT 10""", params) if seller["wins"] else []
-    # Что покупает (заказчик) и что поставляет (победитель): разделы КПВЭД и частые названия.
-    buys_divisions = _rows(conn, """
-        SELECT left(enstru[1], 2) AS code, count(*) AS lots, coalesce(sum(amount), 0) AS amount
-        FROM lots WHERE customer_bin = %(b)s AND cardinality(enstru) > 0
-        GROUP BY 1 ORDER BY 2 DESC, 3 DESC LIMIT 8""", params) if buyer["total"] else []
-    buys_names = _rows(conn, """
-        SELECT min(name_ru) AS name_ru, min(name_kz) AS name_kz, count(*) AS lots,
-               coalesce(sum(amount), 0) AS amount
-        FROM lots WHERE customer_bin = %(b)s AND name_ru IS NOT NULL
-        GROUP BY lower(name_ru) HAVING count(*) > 1 ORDER BY 3 DESC, 4 DESC LIMIT 12""", params) if buyer["total"] else []
-    sells_divisions = _rows(conn, """
-        SELECT left(l.enstru[1], 2) AS code, count(*) AS lots, coalesce(sum(r.winner_total), 0) AS amount
-        FROM lot_results r JOIN lots l ON l.id = r.lot_id
-        WHERE r.winner_bin = %(b)s AND r.outcome = 'winner' AND cardinality(l.enstru) > 0
-        GROUP BY 1 ORDER BY 2 DESC, 3 DESC LIMIT 8""", params) if seller["wins"] else []
-    if not (buyer["total"] or seller["wins"] or offered):
-        return None
+        GROUP BY 1 ORDER BY 3 DESC, 4 DESC NULLS LAST LIMIT {int(limit)}""", params)
+
+
+def _page(args: dict) -> int:
+    try:
+        return min(max(int(args.get("page") or 1), 1), MAX_PAGE)
+    except ValueError:
+        return 1
+
+
+def _wins(conn, params, data, args, now) -> dict[str, Any]:
+    sort = args.get("sort") if args.get("sort") in WIN_SORTS else "date"
+    customers = _their_customers(conn, params, 200)
+    customer = args.get("customer") if args.get("customer") in {c["bin"] for c in customers} else ""
+    where = "r.winner_bin = %(b)s AND r.outcome = 'winner'" + (" AND l.customer_bin = %(customer)s" if customer else "")
+    page = _page(args)
+    query = {**params, "customer": customer}
+    total = conn.execute(f"SELECT count(*) FROM lot_results r JOIN lots l ON l.id = r.lot_id WHERE {where}",
+                         query).fetchone()[0]
+    rows = _rows(conn, f"""
+        SELECT l.id, l.name_ru, l.name_kz, l.lot_number, l.amount, r.winner_total, l.customer_bin,
+               coalesce(a.customer_name_ru, l.customer_name_ru) AS customer, a.end_date,
+               jsonb_array_length(coalesce(r.offers, '[]')) AS bidders
+        FROM lot_results r JOIN lots l ON l.id = r.lot_id LEFT JOIN announcements a ON a.id = l.trd_buy_id
+        WHERE {where} ORDER BY {WIN_SORTS[sort]}
+        LIMIT {TAB_PAGE} OFFSET {(page - 1) * TAB_PAGE}""", query)
+    return {"rows": rows, "total": total, "page": page, "pages": (total + TAB_PAGE - 1) // TAB_PAGE,
+            "sort": sort, "customer": customer, "customers": customers}
+
+
+def _history(conn, params, data, args, now) -> dict[str, Any]:
+    result = args.get("result") if args.get("result") in RESULTS else ""
+    outcome = """CASE WHEN r.outcome = 'winner' AND r.winner_bin = %(b)s THEN 'win'
+                      WHEN r.second_bin = %(b)s THEN 'second'
+                      WHEN r.outcome = 'winner' THEN 'lost' ELSE 'failed' END"""
+    where = _offered_sql() + (f" AND {outcome} = %(result)s" if result else "")
+    query = {**params, "result": result}
+    page = _page(args)
+    counts = dict(conn.execute(
+        f"SELECT {outcome}, count(*) FROM lot_results r WHERE {_offered_sql()} GROUP BY 1", params).fetchall())
+    total = sum(counts.values()) if not result else counts.get(result, 0)
+    rows = _rows(conn, f"""
+        SELECT l.id, l.name_ru, l.name_kz, l.lot_number, l.amount, l.customer_bin,
+               coalesce(a.customer_name_ru, l.customer_name_ru) AS customer, a.end_date,
+               (SELECT e->>'total' FROM jsonb_array_elements(r.offers) e WHERE e->>'bin' = %(b)s LIMIT 1) AS offer,
+               r.winner_bin, r.winner_name, r.winner_total, {outcome} AS result
+        FROM lot_results r JOIN lots l ON l.id = r.lot_id LEFT JOIN announcements a ON a.id = l.trd_buy_id
+        WHERE {where} ORDER BY a.end_date DESC NULLS LAST, l.id
+        LIMIT {TAB_PAGE} OFFSET {(page - 1) * TAB_PAGE}""", query)
+    return {"rows": rows, "total": total, "page": page, "pages": (total + TAB_PAGE - 1) // TAB_PAGE,
+            "result": result, "counts": counts}
+
+
+def _where(conn, params, data, args, now) -> dict[str, Any]:
+    """Открытые лоты тех классов товаров (6 цифр ЕНС ТРУ), где организация уже участвовала;
+    сначала — в регионах, куда она поставляла."""
+    from zakup.catalog import LOT_REGION, open_filter
+
+    classes = [row[0] for row in conn.execute(
+        """SELECT left(code, 6) FROM supplier_activity WHERE bin = %s AND code <> ''
+           GROUP BY 1 ORDER BY sum(offers) DESC LIMIT 15""", (data["bin"],))]
+    regions = [row[0] for row in conn.execute(
+        "SELECT region FROM supplier_activity WHERE bin = %s AND region <> '' GROUP BY 1", (data["bin"],))]
+    if not classes:
+        return {"rows": [], "classes": [], "regions": regions}
+    where, query = open_filter().where(now, "lots")
+    rows = _rows(conn, f"""
+        SELECT l.id, l.name_ru, l.name_kz, l.lot_number, l.amount, l.customer_bin,
+               coalesce(a.customer_name_ru, l.customer_name_ru) AS customer, a.end_date,
+               {LOT_REGION} AS region, ({LOT_REGION}) = ANY(%(regions)s) AS familiar
+        FROM lots l, announcements a
+        WHERE {where} AND left(l.enstru[1], 2) = ANY(%(divisions)s) AND left(l.enstru[1], 6) = ANY(%(classes)s)
+        ORDER BY familiar DESC, a.end_date, l.id LIMIT {TAB_PAGE}""",
+        {**query, "regions": regions, "classes": classes, "divisions": sorted({c[:2] for c in classes})})
+    return {"rows": rows, "classes": classes, "regions": regions}
+
+
+def _buys(conn, params, data, args, now) -> dict[str, Any]:
+    buyer = data["buyer"]
     return {
-        "bin": bin_, "name_ru": name_ru, "name_kz": name_kz, "card": subjects.card(conn, bin_),
-        "buyer": buyer, "open": open_list, "past": past_list, "their_winners": their_winners,
-        "discount": float(discount) if discount is not None else None,
-        "seller": seller, "offered": offered, "wins": wins, "their_customers": their_customers,
-        "buys_divisions": buys_divisions, "buys_names": buys_names, "sells_divisions": sells_divisions,
+        "open": _rows(conn, """
+            SELECT id, number_anno, name_ru, name_kz, total_sum, end_date, count_lots
+            FROM announcements WHERE id IN """ + _MINE + """ AND end_date > %(now)s
+            ORDER BY end_date LIMIT %(limit)s""", params) if buyer["open"] else [],
+        "past": _rows(conn, """
+            SELECT id, number_anno, name_ru, name_kz, total_sum, end_date, count_lots
+            FROM announcements WHERE id IN """ + _MINE + """ AND end_date <= %(now)s
+            ORDER BY end_date DESC LIMIT %(limit)s""", params) if buyer["total"] > buyer["open"] else [],
+        "their_winners": _their_winners(conn, params, 20),
     }
 
 

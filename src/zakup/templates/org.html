@@ -21,16 +21,89 @@
 {% endblock %}
 {% block style %}
 {{ contacts_styles() }}
-  .org-head { margin-bottom: 18px; }
+  .org-head { margin-bottom: 14px; }
   .org-head h1 { margin: 4px 0 6px; }
-  .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; margin: 16px 0 6px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; margin: 14px 0 6px; }
   .tile { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
-  .tile b { display: block; font-size: 22px; line-height: 1.25; }
-  h2 { font-size: 18px; margin: 28px 0 10px; }
+  .tile b { display: block; font-size: 22px; line-height: 1.25; font-variant-numeric: tabular-nums; }
+  h2 { font-size: 18px; margin: 26px 0 10px; }
   td.when { white-space: nowrap; font-variant-numeric: tabular-nums; }
   .chips-row { display: flex; flex-wrap: wrap; gap: 6px 8px; }
   .chips-row a { padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px; font-size: 14px; }
+  .chips-row a.on { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  /* Вкладки: на телефоне — прокрутка вбок. */
+  .org-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin: 18px 0 16px; overflow-x: auto; scrollbar-width: none; }
+  .org-tabs a { padding: 10px 14px; white-space: nowrap; color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; }
+  .org-tabs a.on { color: var(--fg); border-bottom-color: var(--accent); font-weight: 600; }
+  .org-tabs .n { font-size: 12px; color: var(--muted); margin-left: 4px; }
+  .tab-tools { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: end; margin: 0 0 12px; }
+  .tab-tools label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+  .tab-tools select { padding: 7px 9px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); font: inherit; min-width: 200px; }
+  .view-switch { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .view-switch button { display: inline-flex; align-items: center; gap: 6px; border: 0; border-radius: 0; padding: 6px 10px; color: var(--muted); background: none; }
+  .view-switch button[aria-pressed=true] { background: var(--accent); color: var(--on-accent); }
+  .view-switch svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; }
+  .pager { display: flex; gap: 12px; align-items: center; margin: 14px 0; }
+  .res-win { color: var(--ok); font-weight: 600; } .res-second { color: var(--accent); } .res-lost, .res-failed { color: var(--muted); }
+  svg.org-chart { width: 100%; height: auto; display: block; }
+  svg.org-chart text { fill: var(--muted); font-size: 10px; }
+  svg.org-chart .a { fill: var(--accent); } svg.org-chart .b { fill: var(--muted); opacity: .45; }
+  .chart-legend { display: flex; gap: 14px; font-size: 13px; color: var(--muted); margin-top: 4px; }
+  .chart-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; background: var(--accent); }
+  .chart-legend i.b { background: var(--muted); opacity: .45; }
+  .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 0 28px; }
+  /* Плитка: строки таблицы — карточки, подписи столбцов — над значениями. */
+  [data-rview=cards] { overflow: visible; }
+  [data-rview=cards] table.org-table, [data-rview=cards] table.org-table tbody { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 10px; min-width: 0 !important; }
+  [data-rview=cards] table.org-table tbody { grid-column: 1 / -1; }
+  [data-rview=cards] table.org-table tr:first-child:has(th) { display: none; }
+  [data-rview=cards] table.org-table tr { display: flex; flex-wrap: wrap; gap: 8px 16px; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+  [data-rview=cards] table.org-table td { display: block; border: 0; padding: 0; min-width: 0 !important; text-align: left; }
+  [data-rview=cards] table.org-table td[data-label]::before { content: attr(data-label); display: block; font-size: 12px; color: var(--muted); }
+  [data-rview=cards] table.org-table td.wide { flex: 1 1 100%; }
 {% endblock %}
+{% macro view_switch() %}
+<div class="view-switch" role="group" aria-label="{{ _("Вид отображения") }}">
+  <button type="button" data-rview="table"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18M3 12h18M3 19h18"/></svg><span>{{ _("Таблица") }}</span></button>
+  <button type="button" data-rview="cards"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5"/></svg><span>{{ _("Плитка") }}</span></button>
+</div>
+{% endmacro %}
+{# Ссылка на эту же вкладку с другими параметрами (сортировка, фильтр, страница). #}
+{% macro tab_url(tab) %}{% set q = {"tab": tab} %}{% for k, v in kwargs.items() if v %}{% set __ = q.update({k: v}) %}{% endfor %}/org/{{ o.bin }}{% if q.tab != "overview" or q|length > 1 %}?{{ q | urlencode }}{% endif %}{% endmacro %}
+{# Столбики по дням (последние 30): series — [(значения, класс, название)]. #}
+{% macro bars(days, series) %}
+{% set W, H = 600, 130 %}{% set n = days|length %}{% set slot = W / n %}{% set groups = series|length %}
+{% set peak = [1] %}{% for values, cls, label in series %}{% set __ = peak.append(values|max) %}{% endfor %}{% set top = peak|max %}
+<svg class="org-chart" viewBox="0 0 {{ W }} {{ H + 18 }}" role="img" aria-label="{{ series|map(attribute=2)|join(", ") }}">
+  <text x="0" y="9">{{ top }}</text>
+  {% for values, cls, label in series %}{% set g = loop.index0 %}{% for v in values %}{% set h = ((v / top) * (H - 14)) if v else 0 %}
+  <rect class="{{ cls }}" x="{{ '%.1f'|format(loop.index0 * slot + slot * 0.12 + g * slot * 0.76 / groups) }}" y="{{ '%.1f'|format(H - h) }}" width="{{ '%.1f'|format(slot * 0.76 / groups) }}" height="{{ '%.1f'|format(h) }}" rx="1.5"><title>{{ days[loop.index0].strftime("%d.%m") }}: {{ v }} — {{ label }}</title></rect>
+  {% endfor %}{% endfor %}
+  {% for d in days %}{% if loop.index0 % 5 == 0 or loop.last %}<text x="{{ '%.1f'|format(loop.index0 * slot + slot / 2) }}" y="{{ H + 13 }}" text-anchor="middle">{{ d.strftime("%d.%m") }}</text>{% endif %}{% endfor %}
+</svg>
+<div class="chart-legend">{% for values, cls, label in series %}<span><i class="{{ cls }}"></i>{{ label }} · {{ values|sum }}</span>{% endfor %}</div>
+{% endmacro %}
+{% macro divisions(rows) %}<div class="chips-row">{% for c in rows %}{% if division_name(c.code) %}<a href="/category/{{ c.code }}">{{ division_name(c.code) }} · {{ c.lots }}</a>{% endif %}{% endfor %}</div>{% endmacro %}
+{% macro pager(total, page, pages) %}{% if pages > 1 %}<div class="pager">{% if page > 1 %}<a href="{{ tab_url(o.tab, sort=o.get("sort"), customer=o.get("customer"), result=o.get("result"), page=page - 1) }}">← {{ _("Назад") }}</a>{% endif %}<span class="muted">{{ _("стр.") }} {{ page }} {{ _("из") }} {{ pages }} · {{ total }}</span>{% if page < pages %}<a href="{{ tab_url(o.tab, sort=o.get("sort"), customer=o.get("customer"), result=o.get("result"), page=page + 1) }}">{{ _("Дальше") }} →</a>{% endif %}</div>{% endif %}{% endmacro %}
+{% macro announcements_table(rows) %}
+<div class="table-wrap" data-rview-box><table class="org-table">
+  <tr><th>{{ _("Объявление") }}</th><th>{{ _("Лотов") }}</th><th>{{ _("Сумма, ₸") }}</th><th>{{ _("Приём заявок до") }}</th></tr>
+  {% for r in rows %}
+  <tr>
+    <td class="wide"><a href="/a/{{ r.id }}">{{ pick(r.name_ru, r.name_kz) or r.number_anno }}</a><div class="muted">№ {{ r.number_anno or r.id }}</div></td>
+    <td class="num" data-label="{{ _("Лотов") }}">{{ r.count_lots or "" }}</td>
+    <td class="num" data-label="{{ _("Сумма, ₸") }}">{{ r.total_sum | money if r.total_sum is not none else "" }}</td>
+    <td class="when" data-label="{{ _("Приём заявок до") }}">{{ (r.end_date|local).strftime("%d.%m.%Y %H:%M") if r.end_date else "—" }}</td>
+  </tr>
+  {% endfor %}
+</table></div>
+{% endmacro %}
+{% macro orgs_table(rows, who, count_label) %}
+<div class="table-wrap"><table>
+  <tr><th>{{ who }}</th><th>{{ count_label }}</th><th>{{ _("Сумма, ₸") }}</th></tr>
+  {% for w in rows %}<tr><td>{{ org_link(w.bin, w.name) }}</td><td class="num">{{ w.wins }}</td><td class="num">{{ w.amount | money if w.amount is not none else "" }}</td></tr>{% endfor %}
+</table></div>
+{% endmacro %}
 {% block main %}
 <p class="crumbs muted"><a href="/orgs">{{ _("Организации") }}</a> {{ _("→ организация") }}</p>
 <div class="org-head">
@@ -45,87 +118,115 @@
   {% if o.buyer.total %}
   <div class="tile"><span class="muted">{{ _("Объявил закупок") }}</span><b>{{ o.buyer.total }}</b><span class="muted">{{ _("на") }} {{ o.buyer.amount | money }} ₸</span></div>
   <div class="tile"><span class="muted">{{ _("Открыто сейчас") }}</span><b>{{ o.buyer.open }}</b></div>
-  {% if o.discount is not none %}<div class="tile"><span class="muted">{{ _("Снижение цены на торгах") }}</span><b>{{ '%.1f'|format(o.discount * 100) }}%</b><span class="muted">{{ _("в среднем от плановой суммы") }}</span></div>{% endif %}
+  {% if o.discount is not none %}<div class="tile"><span class="muted">{{ _("Снижение цены на его торгах") }}</span><b>{{ '%.1f'|format(o.discount * 100) }}%</b></div>{% endif %}
   {% endif %}
-  {% if o.seller.wins or o.offered %}
-  <div class="tile"><span class="muted">{{ _("Побед в закупках") }}</span><b>{{ o.seller.wins }}</b>{% if o.seller.wins %}<span class="muted">{{ _("на") }} {{ o.seller.amount | money }} ₸</span>{% endif %}</div>
-  <div class="tile"><span class="muted">{{ _("Подавал заявки на лоты") }}</span><b>{{ o.offered }}</b></div>
+  {% if o.offered %}
+  <div class="tile"><span class="muted">{{ _("Участвовал в лотах") }}</span><b>{{ o.offered }}</b></div>
+  <div class="tile"><span class="muted">{{ _("Побед") }}</span><b>{{ o.seller.wins }}{% if o.offered %} <span class="muted" style="font-size:14px">· {{ (o.seller.wins / o.offered * 100) | round | int }}%</span>{% endif %}</b>{% if o.seller.wins %}<span class="muted">{{ _("на") }} {{ o.seller.amount | money }} ₸</span>{% endif %}</div>
+  {% if o.seller_discount is not none %}<div class="tile"><span class="muted">{{ _("Снижает цену, когда выигрывает") }}</span><b>{{ '%.1f'|format(o.seller_discount * 100) }}%</b></div>{% endif %}
   {% endif %}
 </div>
-<p class="muted">{{ _("По открытым данным портала goszakup.gov.kz, собранным Tenderim; пополняется каждый день.") }}</p>
 
-{% macro announcements_table(rows) %}
-<div class="table-wrap"><table>
-  <tr><th>{{ _("Объявление") }}</th><th>{{ _("Лотов") }}</th><th>{{ _("Сумма, ₸") }}</th><th>{{ _("Приём заявок до") }}</th></tr>
-  {% for r in rows %}
-  <tr>
-    <td><a href="/a/{{ r.id }}">{{ pick(r.name_ru, r.name_kz) or r.number_anno }}</a><div class="muted">№ {{ r.number_anno or r.id }}</div></td>
-    <td class="num">{{ r.count_lots or "" }}</td>
-    <td class="num">{{ r.total_sum | money if r.total_sum is not none else "" }}</td>
-    <td class="when">{{ (r.end_date|local).strftime("%d.%m.%Y %H:%M") if r.end_date else "—" }}</td>
-  </tr>
+<nav class="org-tabs" aria-label="{{ _("Разделы страницы") }}">
+  {% for key in o.tabs %}
+  <a href="{{ tab_url(key) }}" class="{{ 'on' if o.tab == key }}"{% if o.tab == key %} aria-current="page"{% endif %}>{{ _(tab_names[key]) }}{% if key == "wins" %}<span class="n">{{ o.seller.wins }}</span>{% elif key == "history" %}<span class="n">{{ o.offered }}</span>{% elif key == "buys" %}<span class="n">{{ o.buyer.total }}</span>{% endif %}</a>
   {% endfor %}
-</table></div>
-{% endmacro %}
+</nav>
 
-{% macro divisions(rows, region) %}<div class="chips-row">{% for c in rows %}{% if division_name(c.code) %}<a href="/category/{{ c.code }}{{ '/' ~ region if region }}">{{ division_name(c.code) }} · {{ c.lots }}</a>{% endif %}{% endfor %}</div>{% endmacro %}
-{% if o.buys_divisions or o.buys_names %}
-<h2>{{ _("Что чаще всего покупает") }}</h2>
-{% if o.buys_divisions %}{{ divisions(o.buys_divisions, none) }}{% endif %}
-{% if o.buys_names %}
-<div class="table-wrap" style="margin-top:12px"><table>
-  <tr><th>{{ _("Товар, работа, услуга") }}</th><th>{{ _("Лотов") }}</th><th>{{ _("Сумма, ₸") }}</th></tr>
-  {% for n in o.buys_names %}<tr><td>{{ pick(n.name_ru, n.name_kz) }}</td><td class="num">{{ n.lots }}</td><td class="num">{{ n.amount | money }}</td></tr>{% endfor %}
-</table></div>
+{% if o.tab == "overview" %}
+  {% if o.dynamics %}
+  <h2>{{ _("Динамика участия за 30 дней") }}</h2>
+  {{ bars(o.dynamics|map(attribute=0)|list, [(o.dynamics|map(attribute=1)|list, "b", _("заявки")), (o.dynamics|map(attribute=2)|list, "a", _("победы"))]) }}
+  {% endif %}
+  {% if o.buy_dynamics %}
+  <h2>{{ _("Объявленные закупки за 30 дней") }}</h2>
+  {{ bars(o.buy_dynamics|map(attribute=0)|list, [(o.buy_dynamics|map(attribute=1)|list, "a", _("объявления"))]) }}
+  {% endif %}
+  {% if o.sells_divisions %}<h2>{{ _("Что поставляет") }}</h2>{{ divisions(o.sells_divisions) }}{% endif %}
+  {% if o.buys_divisions or o.buys_names %}
+  <h2>{{ _("Что чаще всего покупает") }}</h2>
+  {% if o.buys_divisions %}{{ divisions(o.buys_divisions) }}{% endif %}
+  {% if o.buys_names %}
+  <div class="table-wrap" style="margin-top:12px"><table>
+    <tr><th>{{ _("Товар, работа, услуга") }}</th><th>{{ _("Лотов") }}</th><th>{{ _("Сумма, ₸") }}</th></tr>
+    {% for n in o.buys_names %}<tr><td>{{ pick(n.name_ru, n.name_kz) }}</td><td class="num">{{ n.lots }}</td><td class="num">{{ n.amount | money }}</td></tr>{% endfor %}
+  </table></div>
+  {% endif %}
+  {% endif %}
+  <div class="cols">
+    {% if o.their_customers %}<section><h2>{{ _("Главные заказчики") }}</h2>{{ orgs_table(o.their_customers, _("Заказчик"), _("Побед")) }}
+      {% if "wins" in o.tabs %}<p><a href="{{ tab_url('wins') }}">{{ _("Все победы →") }}</a></p>{% endif %}</section>{% endif %}
+    {% if o.their_winners %}<section><h2>{{ _("Кто выигрывает у этого заказчика") }}</h2>{{ orgs_table(o.their_winners, _("Поставщик"), _("Побед")) }}
+      <p><a href="{{ tab_url('buys') }}">{{ _("Все закупки →") }}</a></p></section>{% endif %}
+  </div>
+{% elif o.tab == "wins" %}
+  <form class="tab-tools" method="get" action="/org/{{ o.bin }}">
+    <input type="hidden" name="tab" value="wins">
+    <label>{{ _("Сортировка") }}<select name="sort" onchange="this.form.submit()">{% for key, label in win_sorts.items() %}<option value="{{ key }}" {% if o.sort == key %}selected{% endif %}>{{ _(label) }}</option>{% endfor %}</select></label>
+    <label>{{ _("Заказчик") }}<select name="customer" onchange="this.form.submit()"><option value="">{{ _("Все заказчики") }}</option>{% for c in o.customers %}<option value="{{ c.bin }}" {% if o.customer == c.bin %}selected{% endif %}>{{ c.name }} · {{ c.wins }}</option>{% endfor %}</select></label>
+    <noscript><button>{{ _("Показать") }}</button></noscript>
+    {{ view_switch() }}
+  </form>
+  <div class="table-wrap" data-rview-box><table class="org-table">
+    <tr><th>{{ _("Лот") }}</th><th>{{ _("Заказчик") }}</th><th>{{ _("Плановая сумма, ₸") }}</th><th>{{ _("Сумма победы, ₸") }}</th><th>{{ _("Снижение") }}</th><th>{{ _("Участников") }}</th><th>{{ _("Дата") }}</th></tr>
+    {% for w in o.rows %}
+    <tr>
+      <td class="wide"><a href="/lots/{{ w.id }}">{{ pick(w.name_ru, w.name_kz) or w.lot_number }}</a></td>
+      <td class="wide" data-label="{{ _("Заказчик") }}">{{ org_link(w.customer_bin, w.customer) }}</td>
+      <td class="num" data-label="{{ _("Плановая сумма, ₸") }}">{{ w.amount | money if w.amount is not none else "" }}</td>
+      <td class="num" data-label="{{ _("Сумма победы, ₸") }}"><b>{{ w.winner_total | money if w.winner_total is not none else "" }}</b></td>
+      <td class="num" data-label="{{ _("Снижение") }}">{% if w.amount and w.winner_total is not none and w.winner_total <= w.amount %}{{ '%.1f'|format((1 - w.winner_total / w.amount) * 100) }}%{% endif %}</td>
+      <td class="num" data-label="{{ _("Участников") }}">{{ w.bidders or "" }}</td>
+      <td class="when" data-label="{{ _("Дата") }}">{{ (w.end_date|local).strftime("%d.%m.%Y") if w.end_date else "—" }}</td>
+    </tr>
+    {% endfor %}
+  </table></div>
+  {{ pager(o.total, o.page, o.pages) }}
+{% elif o.tab == "history" %}
+  <div class="tab-tools">
+    <div class="chips-row">
+      <a href="{{ tab_url('history') }}" class="{{ 'on' if not o.result }}">{{ _("Все") }} · {{ o.counts.values()|sum }}</a>
+      {% for key, label in results.items() if o.counts.get(key) %}<a href="{{ tab_url('history', result=key) }}" class="{{ 'on' if o.result == key }}">{{ _(label) }} · {{ o.counts[key] }}</a>{% endfor %}
+    </div>
+    {{ view_switch() }}
+  </div>
+  <div class="table-wrap" data-rview-box><table class="org-table">
+    <tr><th>{{ _("Лот") }}</th><th>{{ _("Заказчик") }}</th><th>{{ _("Плановая сумма, ₸") }}</th><th>{{ _("Его заявка, ₸") }}</th><th>{{ _("Итог") }}</th><th>{{ _("Победитель") }}</th><th>{{ _("Дата") }}</th></tr>
+    {% for h in o.rows %}
+    <tr>
+      <td class="wide"><a href="/lots/{{ h.id }}">{{ pick(h.name_ru, h.name_kz) or h.lot_number }}</a></td>
+      <td class="wide" data-label="{{ _("Заказчик") }}">{{ org_link(h.customer_bin, h.customer) }}</td>
+      <td class="num" data-label="{{ _("Плановая сумма, ₸") }}">{{ h.amount | money if h.amount is not none else "" }}</td>
+      <td class="num" data-label="{{ _("Его заявка, ₸") }}">{{ h.offer | money if h.offer else "" }}</td>
+      <td data-label="{{ _("Итог") }}"><span class="res-{{ h.result }}">{{ _(results[h.result]) }}</span></td>
+      <td data-label="{{ _("Победитель") }}">{% if h.result != "win" and h.winner_bin %}{{ org_link(h.winner_bin, h.winner_name) }}{% if h.winner_total is not none %}<div class="muted">{{ h.winner_total | money }} ₸</div>{% endif %}{% endif %}</td>
+      <td class="when" data-label="{{ _("Дата") }}">{{ (h.end_date|local).strftime("%d.%m.%Y") if h.end_date else "—" }}</td>
+    </tr>
+    {% endfor %}
+  </table></div>
+  {{ pager(o.total, o.page, o.pages) }}
+{% elif o.tab == "where" %}
+  <p class="muted">{{ _("Открытые лоты тех товаров, в закупках которых организация уже участвовала; сначала — в регионах, куда она поставляла.") }}</p>
+  <div class="tab-tools">{{ view_switch() }}</div>
+  {% if o.rows %}
+  <div class="table-wrap" data-rview-box><table class="org-table">
+    <tr><th>{{ _("Лот") }}</th><th>{{ _("Заказчик") }}</th><th>{{ _("Сумма, ₸") }}</th><th>{{ _("Регион") }}</th><th>{{ _("Приём заявок до") }}</th></tr>
+    {% for r in o.rows %}
+    <tr>
+      <td class="wide"><a href="/lots/{{ r.id }}">{{ pick(r.name_ru, r.name_kz) or r.lot_number }}</a></td>
+      <td class="wide" data-label="{{ _("Заказчик") }}">{{ org_link(r.customer_bin, r.customer) }}</td>
+      <td class="num" data-label="{{ _("Сумма, ₸") }}">{{ r.amount | money if r.amount is not none else "" }}</td>
+      <td data-label="{{ _("Регион") }}">{{ region_name(r.region) }}{% if r.familiar %} <span class="muted">· {{ _("поставлял сюда") }}</span>{% endif %}</td>
+      <td class="when" data-label="{{ _("Приём заявок до") }}">{{ (r.end_date|local).strftime("%d.%m.%Y %H:%M") if r.end_date else "—" }}</td>
+    </tr>
+    {% endfor %}
+  </table></div>
+  {% else %}<p class="muted">{{ _("Сейчас открытых лотов таких товаров нет.") }}</p>{% endif %}
+{% elif o.tab == "buys" %}
+  <div class="tab-tools">{{ view_switch() }}</div>
+  {% if o.open %}<h2>{{ _("Открытые закупки") }}</h2>{{ announcements_table(o.open) }}{% endif %}
+  {% if o.their_winners %}<h2>{{ _("Кто выигрывает у этого заказчика") }}</h2>{{ orgs_table(o.their_winners, _("Поставщик"), _("Побед")) }}{% endif %}
+  {% if o.past %}<h2>{{ _("Прошедшие закупки") }}</h2>{{ announcements_table(o.past) }}{% endif %}
 {% endif %}
-{% endif %}
-{% if o.sells_divisions %}
-<h2>{{ _("Что поставляет") }}</h2>
-{{ divisions(o.sells_divisions, none) }}
-{% endif %}
-
-{% if o.open %}
-<h2>{{ _("Открытые закупки") }}</h2>
-{{ announcements_table(o.open) }}
-{% endif %}
-
-{% if o.their_winners %}
-<h2>{{ _("Кто выигрывает у этого заказчика") }}</h2>
-<div class="table-wrap"><table>
-  <tr><th>{{ _("Поставщик") }}</th><th>{{ _("Побед") }}</th><th>{{ _("Сумма, ₸") }}</th></tr>
-  {% for w in o.their_winners %}
-  <tr><td>{{ org_link(w.bin, w.name) }}</td><td class="num">{{ w.wins }}</td><td class="num">{{ w.amount | money if w.amount is not none else "" }}</td></tr>
-  {% endfor %}
-</table></div>
-{% endif %}
-
-{% if o.wins %}
-<h2>{{ _("Победы в закупках") }}</h2>
-<div class="table-wrap"><table>
-  <tr><th>{{ _("Лот") }}</th><th>{{ _("Заказчик") }}</th><th>{{ _("Плановая сумма, ₸") }}</th><th>{{ _("Сумма победы, ₸") }}</th></tr>
-  {% for w in o.wins %}
-  <tr>
-    <td><a href="/lots/{{ w.id }}">{{ pick(w.name_ru, w.name_kz) or w.id }}</a>{% if w.end_date %}<div class="muted">{{ (w.end_date|local).strftime("%d.%m.%Y") }}</div>{% endif %}</td>
-    <td>{{ org_link(w.customer_bin, w.customer) }}</td>
-    <td class="num">{{ w.amount | money if w.amount is not none else "" }}</td>
-    <td class="num">{{ w.winner_total | money if w.winner_total is not none else "" }}</td>
-  </tr>
-  {% endfor %}
-</table></div>
-{% endif %}
-
-{% if o.their_customers %}
-<h2>{{ _("Главные заказчики") }}</h2>
-<div class="table-wrap"><table>
-  <tr><th>{{ _("Заказчик") }}</th><th>{{ _("Побед") }}</th><th>{{ _("Сумма, ₸") }}</th></tr>
-  {% for c in o.their_customers %}
-  <tr><td>{{ org_link(c.bin, c.name) }}</td><td class="num">{{ c.wins }}</td><td class="num">{{ c.amount | money if c.amount is not none else "" }}</td></tr>
-  {% endfor %}
-</table></div>
-{% endif %}
-
-{% if o.past %}
-<h2>{{ _("Прошедшие закупки") }}</h2>
-{{ announcements_table(o.past) }}
-{% endif %}
+<p class="muted" style="margin-top:24px">{{ _("По открытым данным портала goszakup.gov.kz, собранным Tenderim; пополняется каждый день.") }}</p>
 {% endblock %}

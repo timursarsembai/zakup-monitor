@@ -211,16 +211,23 @@ def orgs_page(request: Request, user: Viewer, role: str = "", form: str = "", re
 
 
 @router.get("/org/{bin_}")
-def org_page(request: Request, user: Viewer, bin_: str, background: BackgroundTasks):
-    """Открытая страница организации: закупки заказчика, победы и участие поставщика."""
+def org_page(request: Request, user: Viewer, bin_: str, background: BackgroundTasks, tab: str = "overview"):
+    """Открытая страница организации вкладками: обзор, победы, история участия, где может
+    участвовать, закупки (заказчика)."""
+    args = {key: request.query_params.get(key, "")[:20] for key in ("sort", "customer", "result", "page")}
     with core.pool.connection() as conn:
-        profile = orgs.profile(conn, bin_)
+        profile = orgs.profile(conn, bin_, tab, args)
     if profile is None:
         raise HTTPException(404, "Такой организации нет в базе")
     # Карточки нет или она устарела — подтянуть с портала после ответа (контакты появятся
     # при следующем открытии), не дожидаясь очереди сборщика.
     background.add_task(_subjects_in_background, [bin_])
-    return templates.TemplateResponse(request, "org.html", {"o": profile})
+    return templates.TemplateResponse(request, "org.html", {
+        "o": profile, "tab_names": dict(orgs.TABS), "win_sorts": WIN_SORT_NAMES, "results": orgs.RESULTS})
+
+
+WIN_SORT_NAMES = {"date": "Сначала новые", "amount": "Сумма победы — больше", "lot": "Лот по алфавиту",
+                  "customer": "Заказчик по алфавиту"}
 
 
 @router.get("/categories")
