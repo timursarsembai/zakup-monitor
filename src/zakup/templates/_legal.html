@@ -8,6 +8,14 @@
   .doc .unfilled { background: color-mix(in srgb, #d93025 18%, transparent); padding: 0 4px; border-radius: 4px; }
   .doc .req-table td { padding: 6px 10px 6px 0; vertical-align: top; }
   .doc .req-table td:first-child { color: var(--muted); white-space: nowrap; }
+  .doc .req-table td:last-child { overflow-wrap: anywhere; }
+  /* Телефон: подпись над значением, строки не вылезают за экран. */
+  @media (max-width: 760px) {
+    .doc .req-table, .doc .req-table tbody, .doc .req-table tr, .doc .req-table td { display: block; width: auto; }
+    .doc .req-table tr { padding: 8px 0; border-bottom: 1px solid var(--line); }
+    .doc .req-table td { padding: 0; }
+    .doc .req-table td:first-child { font-size: 13px; white-space: normal; }
+  }
 {% endmacro %}
 {% macro requisites_table(fields) %}
 <table class="req-table">
