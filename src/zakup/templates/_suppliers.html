@@ -1,0 +1,57 @@
+{# Блок «Конкуренты и поставщики» на странице лота (zakup.suppliers). Названия — ссылки на
+   страницы организаций, контакты там. Без тарифа — по SHOWN в группе и без снижения цены. #}
+{% macro supplier_rows(rows, total, here, paid, shown) %}
+<ul class="sup-list">
+  {% for r in rows %}
+  <li{% if not paid and loop.index > shown %} hidden{% endif %}>
+    <a href="/org/{{ r.bin }}">{{ pick(r.name_ru, r.name_kz) }}</a>
+    <span class="muted">
+      {%- if here %} · {{ _("побед здесь:") }} {{ r.here_wins or 0 }}, {{ _("заявок:") }} {{ r.here_offers or 0 }}{% endif -%}
+      {{ " · " }}{{ _("всего побед:") }} {{ r.wins or 0 }}, {{ _("заявок:") }} {{ r.offers or 0 }}
+      {%- if r.last_at %} · {{ _("последняя закупка") }} {{ (r.last_at|local).strftime("%d.%m.%Y") }}{% endif -%}
+      {%- if paid and r.discount is not none %} · {{ _("снижает цену в среднем на") }} {{ '%.1f'|format(r.discount * 100) }}%{% endif -%}
+      {%- if not here and r.regions %} · {{ r.regions | map("region_name_filter") | select | join(", ") }}{% endif -%}
+    </span>
+    <a class="sup-contacts" href="/org/{{ r.bin }}">{{ _("Контакты →") }}</a>
+  </li>
+  {% endfor %}
+</ul>
+{% if paid and total > rows|length %}<p class="muted">{{ _("И ещё") }} {{ total - rows|length }}.</p>{% endif %}
+{% if not paid and total > shown %}<p class="muted"><button type="button" data-paid class="link-button">{{ _("Показать всех") }} ({{ total }}) 🔒</button></p>{% endif %}
+{% endmacro %}
+
+{% macro suppliers_block(s, lot_id, paid, shown) %}
+<section class="sup-box" id="suppliers">
+  <h2>{{ _("Конкуренты и поставщики") }}</h2>
+  <p class="muted">{{ _("Кто уже участвовал в госзакупках такого товара и поставлял его. Это ваши вероятные конкуренты по этому лоту — и возможные поставщики или партнёры. Сначала — кто работал в регионе поставки лота.") }}</p>
+  <div class="sup-levels">
+    {% set labels = {"code": _("такой же товар"), "class": _("похожие товары"), "division": s.class_name or _("весь раздел")} %}
+    {% for level in ("code", "class", "division") %}{% if s.available[level] %}
+    <a href="/lots/{{ lot_id }}?sup={{ level }}#suppliers" rel="nofollow" class="{{ 'on' if s.level == level }}">{{ labels[level] }} · {{ s.available[level] }}</a>
+    {% endif %}{% endfor %}
+  </div>
+  {% if s.here %}
+  <h3>{{ _("В регионе поставки:") }} {{ region_name(s.region) }}</h3>
+  {{ supplier_rows(s.here, s.here_total, true, paid, shown) }}
+  {% endif %}
+  {% if s.rest %}
+  <h3>{{ _("По всему Казахстану") if s.here else _("По Казахстану") }}</h3>
+  {{ supplier_rows(s.rest, s.rest_total, false, paid, shown) }}
+  {% endif %}
+  {% if not s.here and not s.rest %}<p class="muted">{{ _("На этом уровне пока никого нет.") }}</p>{% endif %}
+</section>
+{% endmacro %}
+
+{% macro suppliers_styles() %}
+  .sup-box { border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin-top: 16px; }
+  .sup-box h2 { margin-top: 0; }
+  .sup-box h3 { font-size: 15px; margin: 16px 0 6px; }
+  .sup-levels { display: flex; flex-wrap: wrap; gap: 6px 8px; margin: 8px 0 4px; }
+  .sup-levels a { padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px; font-size: 14px; }
+  .sup-levels a.on { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  .sup-list { list-style: none; margin: 0; padding: 0; }
+  .sup-list li { padding: 7px 0; border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+  .sup-list li:first-child { border-top: 0; }
+  .sup-list .sup-contacts { margin-left: auto; white-space: nowrap; font-size: 14px; }
+  .link-button { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font: inherit; }
+{% endmacro %}

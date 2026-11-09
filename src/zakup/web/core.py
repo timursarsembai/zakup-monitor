@@ -30,6 +30,7 @@ from zakup import (
     i18n,
     legal,
     orgs,
+    subjects,
     tariff,
     visits,
 )
@@ -150,9 +151,12 @@ def _org_link(bin_: str | None, name: str | None) -> Markup:
 
 
 templates.env.globals["org_link"] = _org_link
+# У ИП и физлиц — ИИН, у организаций — БИН.
+templates.env.globals["id_label"] = lambda number: i18n.gettext("ИИН" if subjects.is_iin(number) else "БИН")
 # Подборки: название категории КПВЭД и региона на языке интерфейса.
 templates.env.globals["division_name"] = lambda code: catalog.division_name(code, i18n.language())
 templates.env.globals["region_name"] = lambda code: i18n.gettext(REGIONS[code]) if code in REGIONS else ""
+templates.env.filters["region_name_filter"] = templates.env.globals["region_name"]
 
 
 def _tariff() -> dict:

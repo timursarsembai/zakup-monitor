@@ -17,11 +17,11 @@
 <h1>{{ _("Организации") }}</h1>
 <p class="muted">{{ _("Заказчики и поставщики госзакупок по данным goszakup.gov.kz. Цифры — за всё время, что Tenderim собирает закупки.") }} <a href="/categories">{{ _("Категории") }}</a> · <a href="/regions">{{ _("Регионы") }}</a></p>
 {% macro link() %}{% set params = dict(f) %}{% set __ = params.update({"page": 1}) %}{% set __ = params.update(kwargs) %}/orgs?{{ params | urlencode }}{% endmacro %}
-<div class="roles">{% for key, label in roles.items() %}<a href="{{ link(role=key) }}" class="{{ 'on' if f.role == key }}">{{ _(label) }}</a>{% endfor %}</div>
+<div class="roles">{% for key, label in roles.items() %}<a href="{{ link(role=key, form="") }}" class="{{ 'on' if f.role == key }}">{{ _(label) }}</a>{% endfor %}</div>
 <form class="org-filter" method="get" action="/orgs">
   <input type="hidden" name="role" value="{{ f.role }}">
   <label>{{ _("Название или БИН/ИИН") }}<input name="q" value="{{ f.q }}" placeholder="{{ _("например, Аягоз") }}"></label>
-  <label>{{ _("Форма") }}<select name="form"><option value="">{{ _("Все") }}</option>{% for key, label in forms.items() %}<option value="{{ key }}" {% if f.form == key %}selected{% endif %}>{{ _(label) }}</option>{% endfor %}</select></label>
+  <label>{{ _("Форма") }}<select name="form"><option value="">{{ _("Все") }}</option>{% for key, label in forms.items() if key in form_counts %}<option value="{{ key }}" {% if f.form == key %}selected{% endif %}>{{ _(label) }} · {{ form_counts[key] }}</option>{% endfor %}</select></label>
   <label>{{ _("Регион") }}<select name="region"><option value="">{{ _("Весь Казахстан") }}</option>{% for key, label in regions.items() %}<option value="{{ key }}" {% if f.region == key %}selected{% endif %}>{{ _(label) }}</option>{% endfor %}</select></label>
   <label>{{ _("Сортировка") }}<select name="sort">{% for key, label in sorts.items() %}<option value="{{ key }}" {% if f.sort == key %}selected{% endif %}>{{ _(label) }}</option>{% endfor %}</select></label>
   <button>{{ _("Показать") }}</button>
@@ -32,7 +32,7 @@
   <tr><th>{{ _("Организация") }}</th><th>{{ _("Регион") }}</th><th>{{ _("Закупок") }}</th><th>{{ _("На сумму, ₸") }}</th><th>{{ _("Открыто") }}</th><th>{{ _("Побед") }}</th><th>{{ _("На сумму, ₸") }}</th><th>{{ _("Заявок") }}</th></tr>
   {% for r in rows %}
   <tr>
-    <td><a href="/org/{{ r.bin }}">{{ pick(r.name_ru, r.name_kz) }}</a><div class="form-tag">{{ _(forms[r.form]) }} · {{ r.bin }}</div></td>
+    <td><a href="/org/{{ r.bin }}">{{ pick(r.name_ru, r.name_kz) }}</a><div class="form-tag">{{ _(forms[r.form]) }} · {{ id_label(r.bin) }} {{ r.bin }}</div></td>
     <td>{{ region_name(r.region) }}</td>
     <td class="num">{{ r.buys or "" }}</td>
     <td class="num">{{ r.buy_amount | money if r.buys else "" }}</td>

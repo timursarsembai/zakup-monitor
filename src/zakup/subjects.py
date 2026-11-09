@@ -7,6 +7,7 @@
 
 import logging
 import re
+from datetime import date
 from typing import Any
 
 import psycopg
@@ -18,42 +19,74 @@ from zakup.goszakup import Client, GoszakupError
 logger = logging.getLogger(__name__)
 
 REFRESH_AFTER = "30 days"
-QUERY = """{ Subjects(filter: {bin: "%s"}) { bin nameRu nameKz phone email website
-  Address { addressType address phone } } }"""
+FIELDS = """bin iin nameRu nameKz fullNameRu fullNameKz regdate phone email website katoList
+  refKopfCode customer supplier organizer okedList Address { addressType address phone katoCode }"""
+QUERY = "{ Subjects(filter: {bin: \"%s\"}) { " + FIELDS + " } }"
+# ИП портал ищет по ИИН, и по одному ИИН бывает две записи: человек и его ИП.
+QUERY_IIN = "{ Subjects(filter: {iin: \"%s\"}) { " + FIELDS + " } }"
 _BIN = re.compile(r"^\d{12}$")
+
+
+def is_iin(number: str | None) -> bool:
+    """ИИН физлица (и ИП): 5-я цифра — первая цифра дня рождения (0–3); у БИН там тип (4–6)."""
+    return bool(number and _BIN.match(number) and number[4] in "0123")
 
 
 def fetch(client: Client, bin_: str) -> dict[str, Any] | None:
     if not _BIN.match(bin_ or ""):
         return None
-    found = (client.graphql(QUERY % bin_).get("Subjects") or [None])[0]
-    return found
+    if not is_iin(bin_):
+        return (client.graphql(QUERY % bin_).get("Subjects") or [None])[0]
+    found = client.graphql(QUERY_IIN % bin_).get("Subjects") or []
+    # Из записей «человек» и «ИП» — ИП: у него дата регистрации и рабочие контакты.
+    found.sort(key=lambda item: (not (item.get("nameRu") or "").upper().startswith("ИП"),
+                                 not item.get("regdate"), not item.get("email")))
+    return found[0] if found else None
+
+
+def _date(value: str | None) -> date | None:
+    try:
+        return date.fromisoformat((value or "")[:10]) if value else None
+    except ValueError:
+        return None
 
 
 def save(conn: psycopg.Connection, bin_: str, subject: dict[str, Any] | None) -> None:
     subject = subject or {}
     addresses, seen = [], set()
-    for item in subject.get("Address") or []:
-        text = " ".join((item.get("address") or "").split())
+    # Сначала юридический адрес (тип 1), потом фактический и прочие.
+    for item in sorted(subject.get("Address") or [], key=lambda a: a.get("addressType") or 9):
+        text = " ".join((item.get("address") or "").split()).strip(" ,")
         if text and text.lower() not in seen:
             seen.add(text.lower())
-            addresses.append({"address": text, "phone": item.get("phone") or ""})
+            addresses.append({"address": text, "phone": item.get("phone") or "",
+                              "kato": item.get("katoCode") or ""})
+    kato = subject.get("katoList") or [a["kato"] for a in addresses if a["kato"]]
     conn.execute(
-        """INSERT INTO subjects (bin, name_ru, name_kz, phone, email, website, addresses, fetched_at)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, now())
+        """INSERT INTO subjects (bin, name_ru, name_kz, phone, email, website, addresses, fetched_at,
+                                 full_name_ru, full_name_kz, reg_date, kopf, kato, is_customer, is_supplier, oked)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, now(), %s, %s, %s, %s, %s, %s, %s, %s)
            ON CONFLICT (bin) DO UPDATE SET name_ru = excluded.name_ru, name_kz = excluded.name_kz,
                phone = excluded.phone, email = excluded.email, website = excluded.website,
-               addresses = excluded.addresses, fetched_at = now()""",
+               addresses = excluded.addresses, fetched_at = now(), full_name_ru = excluded.full_name_ru,
+               full_name_kz = excluded.full_name_kz, reg_date = excluded.reg_date, kopf = excluded.kopf,
+               kato = excluded.kato, is_customer = excluded.is_customer,
+               is_supplier = excluded.is_supplier, oked = excluded.oked""",
         (bin_, subject.get("nameRu"), subject.get("nameKz"), subject.get("phone") or "",
-         subject.get("email") or "", subject.get("website") or "", Jsonb(addresses)),
+         subject.get("email") or "", subject.get("website") or "", Jsonb(addresses),
+         subject.get("fullNameRu"), subject.get("fullNameKz"), _date(subject.get("regdate")),
+         subject.get("refKopfCode") or None, kato or None,
+         bool(subject.get("customer") or subject.get("organizer")) if subject else None,
+         bool(subject.get("supplier")) if subject else None,
+         subject.get("okedList") if isinstance(subject.get("okedList"), int) else None),
     )
     conn.commit()
 
 
 def refresh(conn: psycopg.Connection, client: Client, limit: int = 300) -> int:
     """Догружает карточки, которых нет или они устарели: сначала заказчиков и организаторов
-    открытых объявлений, потом победителей (для страниц организаций), потом
-    заказчиков прошлых закупок. Обычные запросы к API портала, по одному БИН."""
+    открытых объявлений, потом победителей (для страниц организаций), потом заказчиков
+    прошлых закупок, потом всех участников. Обычные запросы к API портала, по одному БИН."""
     bins = [row[0] for row in conn.execute(
         f"""SELECT b FROM (
                 SELECT DISTINCT ON (b) b, priority FROM (
@@ -61,8 +94,9 @@ def refresh(conn: psycopg.Connection, client: Client, limit: int = 300) -> int:
                            CASE WHEN end_date > now() THEN 0 ELSE 2 END AS priority
                     FROM announcements
                     UNION ALL
-                    SELECT winner_bin, 1 FROM lot_results
-                    WHERE outcome = 'winner'
+                    SELECT winner_bin, 1 FROM lot_results WHERE outcome = 'winner'
+                    UNION ALL
+                    SELECT o->>'bin', 3 FROM lot_results r, jsonb_array_elements(r.offers) o
                 ) wanted ORDER BY b, priority) ranked
             LEFT JOIN subjects s ON s.bin = ranked.b
             WHERE b ~ '^\\d{{12}}$'
@@ -107,12 +141,13 @@ def card(conn: psycopg.Connection, bin_: str | None) -> dict[str, Any] | None:
     if not bin_:
         return None
     row = conn.execute(
-        "SELECT name_ru, name_kz, phone, email, website, addresses FROM subjects WHERE bin = %s",
+        """SELECT name_ru, name_kz, phone, email, website, addresses, full_name_ru, full_name_kz,
+                  reg_date, kopf FROM subjects WHERE bin = %s""",
         (bin_,),
     ).fetchone()
     if row is None:
         return None
-    name_ru, name_kz, phone, email, website, addresses = row
+    name_ru, name_kz, phone, email, website, addresses, full_ru, full_kz, reg_date, kopf = row
     phones = []
     for raw, label in [(p, "") for p in re.split(r"[,;]", phone or "")] + [
             (a["phone"], "") for a in addresses or []]:
@@ -124,7 +159,9 @@ def card(conn: psycopg.Connection, bin_: str | None) -> dict[str, Any] | None:
         site = "https://" + site
     return {"bin": bin_, "name_ru": name_ru, "name_kz": name_kz, "phones": phones,
             "email": (email or "").strip(), "website": site,
-            "addresses": [a["address"] for a in addresses or []]}
+            "addresses": [a["address"] for a in addresses or []],
+            "full_name_ru": full_ru, "full_name_kz": full_kz, "reg_date": reg_date, "kopf": kopf,
+            "id_label": "ИИН" if is_iin(bin_) else "БИН"}
 
 
 def phones_in_text(*texts: str | None) -> list[dict[str, str]]:

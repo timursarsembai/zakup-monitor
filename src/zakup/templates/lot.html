@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% from "_lot_card.html" import lot_styles, lot_card, lot_winners with context %}
 {% from "_share.html" import share_buttons, share_styles with context %}
+{% from "_suppliers.html" import suppliers_block, suppliers_styles with context %}
 {% block title %}{{ loc(lot) }} — {{ _("лот") }} {{ lot.lotNumber or lot.id }}{% endblock %}
 {% block description %}{{ _("Госзакупка") }}: {{ loc(lot) }}. {{ _("Заказчик") }}: {{ loc(lot, "customerNameRu") or "—" }}. {% if lot.get("amount") is not none %}{{ _("Сумма") }} {{ lot.amount | money }} ₸{% endif %}{% if end %}, {{ _("приём заявок до") }} {{ (end|local).strftime("%d.%m.%Y %H:%M") }}{% endif %}.{% endblock %}
 {% block og_image %}{{ site_url }}/og/lot/{{ lot.id }}.png{% endblock %}
@@ -19,6 +20,7 @@
 {% block style %}
 {{ lot_styles() }}
 {{ share_styles() }}
+{{ suppliers_styles() }}
   .crumbs { margin: 4px 0 10px; }
   .parent { border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; margin-bottom: 16px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; }
   .parent .title { font-weight: 600; }
@@ -112,6 +114,7 @@
 
 {{ share_buttons("/lots/" ~ lot.id, portal_url ~ "?tab=lots", loc(lot) ~ " — " ~ _("лот") ~ " " ~ (lot.lotNumber or lot.id)) }}
 {{ lot_card(lot, link=false) }}
+{% if rivals %}{{ suppliers_block(rivals, lot.id, request.state.paid, rivals_shown) }}{% endif %}
 
 <section class="research-box" id="research">
   <h2 style="margin-top:0">{{ _("Поиск товаров с ИИ") }}</h2>

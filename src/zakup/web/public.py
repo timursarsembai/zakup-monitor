@@ -30,6 +30,7 @@ from zakup import (
     results,
     spec,
     subjects,
+    suppliers,
     trends,
     visits,
 )
@@ -196,13 +197,15 @@ def orgs_page(request: Request, user: Viewer, role: str = "", form: str = "", re
     region = region if region in REGIONS else ""
     sort = sort if sort in orgs.SORTS else "amount"
     with core.pool.connection() as conn:
+        forms = orgs.form_counts(conn, role)
+        form = form if form in forms else ""
         rows, total = orgs.directory(conn, role=role, form=form, region=region, q=q, sort=sort, page=page)
     page = min(max(page, 1), orgs.MAX_PAGE)
     pages = min((total + orgs.PAGE_SIZE - 1) // orgs.PAGE_SIZE, orgs.MAX_PAGE)
     return templates.TemplateResponse(request, "orgs.html", {
         "rows": rows, "total": total, "page": page, "pages": pages,
-        "f": {"role": role, "form": form if form in orgs.FORMS else "", "region": region, "q": q, "sort": sort},
-        "roles": orgs.ROLES, "forms": orgs.FORMS, "sorts": orgs.SORTS, "regions": REGIONS})
+        "f": {"role": role, "form": form, "region": region, "q": q, "sort": sort},
+        "roles": orgs.ROLES, "forms": orgs.FORMS, "form_counts": forms, "sorts": orgs.SORTS, "regions": REGIONS})
 
 
 @router.get("/org/{bin_}")
@@ -520,7 +523,7 @@ def announcement(request: Request, user: Viewer, announcement_id: int, backgroun
 
 
 @router.get("/lots/{lot_id}")
-def lot_page(request: Request, user: Viewer, lot_id: int, background: BackgroundTasks):
+def lot_page(request: Request, user: Viewer, lot_id: int, background: BackgroundTasks, sup: str = ""):
     with core.pool.connection() as conn:
         row = conn.execute("SELECT trd_buy_id FROM lots WHERE id = %s", (lot_id,)).fetchone()
     if row is None or row[0] is None:
@@ -534,6 +537,7 @@ def lot_page(request: Request, user: Viewer, lot_id: int, background: Background
         job, done = _research_view(request, conn, user, lot_id) if user and request.state.paid else (None, None)
         lot_info = research.lot_context(conn, lot_id)
         provider = ai_config.provider(conn)
+        rivals = suppliers.for_lot(conn, lot_id, sup or None)
     if user:
         _audit(request, user, "view_lot", f"/lots/{lot_id}")
     context.update(lot=lot, others=[other for other in context["lots"] if other["id"] != lot_id],
@@ -542,7 +546,7 @@ def lot_page(request: Request, user: Viewer, lot_id: int, background: Background
                    manual_links=research.manual_links(
                        lot_info, research.default_region(lot_info) if lot_info else ""),
                    provider_name=research.PROVIDERS.get(provider, provider),
-                   targets=research.TARGETS,
+                   targets=research.TARGETS, rivals=rivals, rivals_shown=suppliers.SHOWN,
                    is_admin=request.state.role == "admin")
     return templates.TemplateResponse(request, "lot.html", context)
 

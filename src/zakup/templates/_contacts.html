@@ -10,7 +10,7 @@
     {% if card.email %}<div class="org-row">✉️ <a href="mailto:{{ card.email }}">{{ card.email }}</a></div>{% endif %}
     {% for address in card.addresses %}<div class="org-row">📍 {{ address }}</div>{% endfor %}
     <div class="org-row">🌐 {% if card.website %}<a href="{{ card.website | safe_url }}" target="_blank" rel="noopener">{{ card.website | replace("https://", "") | replace("http://", "") }}</a>{% else %}<a href="https://www.google.com/search?q={{ ((card.name_ru or name) ~ ' официальный сайт') | urlencode }}" target="_blank" rel="noopener">{{ _("Найти официальный сайт") }}</a>{% endif %}
-      · <span class="muted">{{ _("БИН") }} {{ card.bin }}</span></div>
+      · <span class="muted">{{ _(card.id_label) }} {{ card.bin }}</span></div>
   {% else %}
     {% if extra %}<div class="org-row">{{ phone_links(extra) }}</div>{% endif %}
     <div class="org-row muted">{{ _("Контакты загружаются с портала — обновите страницу через минуту.") }}</div>

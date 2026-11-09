@@ -77,6 +77,39 @@
     document.addEventListener("click", (e) => { if (!tools.contains(e.target) && e.target !== burger) set(false); });
     document.addEventListener("keydown", (e) => { if (e.key === "Escape") set(false); });
   })();
+  // Телефон: «Ещё» в нижней панели — шторка снизу. Закрывается повторным нажатием,
+  // по фону, Esc и свайпом вниз.
+  (() => {
+    const more = document.querySelector("[data-more]");
+    const sheet = document.querySelector("[data-more-sheet]");
+    const backdrop = document.querySelector("[data-more-backdrop]");
+    if (!more || !sheet || !backdrop) return;
+    let timer;
+    const set = (open) => {
+      clearTimeout(timer);
+      more.setAttribute("aria-expanded", String(open));
+      if (open) {
+        sheet.hidden = backdrop.hidden = false;
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          sheet.classList.add("open");
+          backdrop.classList.add("open");
+        }));
+      } else {
+        sheet.classList.remove("open");
+        backdrop.classList.remove("open");
+        timer = setTimeout(() => { sheet.hidden = backdrop.hidden = true; }, 260);
+      }
+    };
+    more.addEventListener("click", () => set(more.getAttribute("aria-expanded") !== "true"));
+    backdrop.addEventListener("click", () => set(false));
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") set(false); });
+    let startY = null;
+    sheet.addEventListener("touchstart", (e) => { startY = sheet.scrollTop ? null : e.touches[0].clientY; }, { passive: true });
+    sheet.addEventListener("touchend", (e) => {
+      if (startY !== null && e.changedTouches[0].clientY - startY > 60) set(false);
+      startY = null;
+    }, { passive: true });
+  })();
   // Подтверждение для форм с data-confirm (выход, удаление и т.п.): защита от
   // случайного нажатия. Текст — из атрибута, не из кода.
   document.addEventListener("submit", (event) => {
@@ -92,8 +125,12 @@
     const show = () => {
       const [, color, label] = THEMES[index()];
       const [, , nextLabel] = THEMES[(index() + 1) % THEMES.length];
-      button.innerHTML = '<span class="swatch"></span>';
-      button.firstChild.style.background = color;
+      // Плитка в шторке «Ещё» — кружок и подпись; обычная кнопка — только кружок.
+      if (button.dataset.themeToggle === "tile") button.querySelector(".swatch").style.background = color;
+      else {
+        button.innerHTML = '<span class="swatch"></span>';
+        button.firstChild.style.background = color;
+      }
       button.title = `${CONFIG.t.theme}: ${label}. ${CONFIG.t.press} — ${nextLabel.toLowerCase()}`;
     };
     button.addEventListener("click", () => {

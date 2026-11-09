@@ -145,18 +145,26 @@ MAX_PAGE = 200
 
 
 def refresh_directory(conn: psycopg.Connection) -> None:
+    """Справочник и «кто что поставлял» — с новыми закупками, итогами и карточками."""
     conn.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY org_directory")
+    conn.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY supplier_activity")
     conn.commit()
+
+
+_ROLE_SQL = {"": "true", "buyer": "buys > 0", "seller": "(wins > 0 OR offers > 0)"}
+
+
+def form_counts(conn: psycopg.Connection, role: str = "") -> dict[str, int]:
+    """Сколько организаций каждой формы у выбранной роли (у заказчиков нет ИП и т. п.)."""
+    rows = conn.execute(f"SELECT form, count(*) FROM org_directory WHERE name_ru IS NOT NULL "
+                        f"AND {_ROLE_SQL.get(role, 'true')} GROUP BY form").fetchall()
+    return {form: n for form, n in rows if n}
 
 
 def directory(conn: psycopg.Connection, *, role: str = "", form: str = "", region: str = "", q: str = "",
               sort: str = "amount", page: int = 1) -> tuple[list[dict[str, Any]], int]:
     """Страница справочника и сколько всего подходит. Неизвестные значения фильтров — без фильтра."""
-    clauses, params = ["name_ru IS NOT NULL"], {}
-    if role == "buyer":
-        clauses.append("buys > 0")
-    elif role == "seller":
-        clauses.append("(wins > 0 OR offers > 0)")
+    clauses, params = ["name_ru IS NOT NULL", _ROLE_SQL.get(role, "true")], {}
     if form in FORMS:
         clauses.append("form = %(form)s")
         params["form"] = form

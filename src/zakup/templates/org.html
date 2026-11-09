@@ -1,8 +1,8 @@
 {% extends "base.html" %}
 {% from "_contacts.html" import org_contacts, contacts_styles with context %}
 {% set name = pick(o.name_ru, o.name_kz) %}
-{% block title %}{{ name }} — {{ _("БИН") }} {{ o.bin }}: {{ _("госзакупки и контакты") }}{% endblock %}
-{% block description %}{{ name }}, {{ _("БИН") }} {{ o.bin }}.{% if o.buyer.total %} {{ _("Госзакупки:") }} {{ o.buyer.total }} {{ _("объявл. на") }} {{ o.buyer.amount | money }} ₸{% if o.buyer.open %}, {{ _("сейчас открыто:") }} {{ o.buyer.open }}{% endif %}.{% endif %}{% if o.seller.wins %} {{ _("Побед в закупках:") }} {{ o.seller.wins }} {{ _("на") }} {{ o.seller.amount | money }} ₸.{% endif %}{% if o.card and (o.card.phones or o.card.addresses) %} {{ _("Телефоны и адрес.") }}{% endif %}{% endblock %}
+{% block title %}{{ name }} — {{ id_label(o.bin) }} {{ o.bin }}: {{ _("госзакупки и контакты") }}{% endblock %}
+{% block description %}{{ name }}, {{ id_label(o.bin) }} {{ o.bin }}.{% if o.buyer.total %} {{ _("Госзакупки:") }} {{ o.buyer.total }} {{ _("объявл. на") }} {{ o.buyer.amount | money }} ₸{% if o.buyer.open %}, {{ _("сейчас открыто:") }} {{ o.buyer.open }}{% endif %}.{% endif %}{% if o.seller.wins %} {{ _("Побед в закупках:") }} {{ o.seller.wins }} {{ _("на") }} {{ o.seller.amount | money }} ₸.{% endif %}{% if o.card and (o.card.phones or o.card.addresses) %} {{ _("Телефоны и адрес.") }}{% endif %}{% endblock %}
 {% block structured %}
 {% set org = {"@context": "https://schema.org", "@type": "Organization", "name": name, "taxID": o.bin,
               "url": site_url ~ "/org/" ~ o.bin} %}
@@ -35,7 +35,9 @@
 <p class="crumbs muted"><a href="/announcements">{{ _("Закупки") }}</a> {{ _("→ организация") }}</p>
 <div class="org-head">
   <h1>{{ name }}</h1>
-  <div class="muted">{{ _("БИН") }} {{ o.bin }}</div>
+  {% set full = pick(o.card.full_name_ru, o.card.full_name_kz) if o.card else none %}
+  {% if full and full != name %}<div>{{ full }}</div>{% endif %}
+  <div class="muted">{{ id_label(o.bin) }} {{ o.bin }}{% if o.card and o.card.reg_date %} · {{ _("дата регистрации") }} {{ o.card.reg_date.strftime("%d.%m.%Y") }}{% endif %}</div>
   {% if o.card %}{{ org_contacts(o.card, o.name_ru) }}{% endif %}
 </div>
 

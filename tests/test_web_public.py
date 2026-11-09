@@ -406,3 +406,56 @@ def test_category_and_region_pages(client, conn):
     assert "Өңірлер бойынша" in client.get("/regions?lang=kk").text
     static = client.get("/sitemap-static.xml").text
     assert "/category/17/75" in static and "/orgs" in static
+
+
+def _tender(conn, ident, *, code, kato, end, winner=None, offers=()):
+    db.upsert_announcement(conn, {"id": ident, "number_anno": f"{ident}-1", "name_ru": f"Мебель {ident}",
+                                  "total_sum": 1000000, "customer_bin": "990740001111",
+                                  "customer_name_ru": "ГУ Школа №9", "end_date": end})
+    details.save(conn, {"id": ident, "nameRu": f"Мебель {ident}", "endDate": end, "Lots": [
+        {"id": ident * 10, "trdBuyId": ident, "lotNumber": f"M-{ident}", "nameRu": "Диван", "amount": 1000000,
+         "count": 1, "plnPointKatoList": [kato], "Plans": [{"refEnstruCode": code}]}]})
+    if winner:
+        conn.execute(
+            """INSERT INTO lot_results (lot_id, outcome, winner_bin, winner_name, winner_total, offers)
+               VALUES (%s, 'winner', %s, %s, 900000, %s)""",
+            (ident * 10, winner[0], winner[1],
+             db.Jsonb([{"bin": b, "name": n, "total": "900000"} for b, n in [winner, *offers]])))
+
+
+def test_lot_page_shows_competitors_and_suppliers(client, conn):
+    from zakup import orgs
+    sofa, chair = "310912.100.000001", "310912.300.000002"
+    _tender(conn, 801, code=sofa, kato="551010000", end="2099-01-01 09:00:00")  # открытый лот, Павлодар
+    _tender(conn, 802, code=sofa, kato="551010000", end="2026-10-30 09:00:00",
+            winner=("050540002222", "ТОО Кровля"), offers=[("651114400549", "ИП Иванов")])
+    _tender(conn, 803, code=chair, kato="751410000", end="2026-10-29 09:00:00",
+            winner=("060640003333", "ТОО Мебель-Юг"))
+    conn.commit()
+    orgs.refresh_directory(conn)
+    page = client.get("/lots/8010").text
+    assert "Конкуренты и поставщики" in page and "В регионе поставки: Павлодарская область" in page
+    here, rest = page.split("В регионе поставки:", 1)[1].split("По всему Казахстану", 1)
+    assert 'href="/org/050540002222"' in here and 'href="/org/651114400549"' in here
+    assert 'href="/org/060640003333"' in rest and "г. Алматы" in rest
+    assert "снижает цену" not in page  # без тарифа — без процентов
+    # Точный уровень — только диваны.
+    exact = client.get("/lots/8010?sup=code").text.split("Конкуренты и поставщики", 1)[1]
+    assert "060640003333" not in exact.split("</section>", 1)[0]
+    _login(client)
+    assert "снижает цену в среднем на 10.0%" in client.get("/lots/8010").text
+    # У ИП — ИИН, у ТОО — БИН.
+    assert "ИИН 651114400549" in client.get("/org/651114400549").text
+    assert "БИН 050540002222" in client.get("/org/050540002222").text
+
+
+def test_directory_forms_follow_role_and_mobile_more_sheet(client, conn):
+    from zakup import orgs
+    _org_data(conn)
+    orgs.refresh_directory(conn)
+    buyers = client.get("/orgs?role=buyer").text
+    assert 'value="ip"' not in buyers and 'value="gu"' in buyers
+    assert 'value="ip"' in client.get("/orgs?role=seller").text
+    assert "Найдено: 1" in client.get("/orgs?role=buyer&form=ip").text  # чужая форма сбрасывается
+    home = client.get("/").text
+    assert "data-more-sheet" in home and 'href="/orgs" class="more-tile' in home and "nav-wide" in home
