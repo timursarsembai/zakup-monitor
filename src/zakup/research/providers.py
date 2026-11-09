@@ -7,6 +7,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import threading
 from typing import Any
 
 import httpx
@@ -77,7 +78,22 @@ _LOCAL_DENY = {"permissions": {"deny": [
 ]}}
 
 
-_last_usage: dict[str, Any] = {}
+class _Usage(threading.local):
+    """Стоимость последнего запуска — своя у каждого потока службы (поиски идут параллельно)."""
+
+    def __init__(self) -> None:
+        self.data: dict[str, Any] = {}
+
+
+_usage = _Usage()
+
+
+def last_usage() -> dict[str, Any]:
+    return _usage.data
+
+
+def reset_usage() -> None:
+    _usage.data = {}
 _ENV_KEEP = {"PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "SHELL", "TERM", "XDG_RUNTIME_DIR"}
 
 
@@ -111,7 +127,7 @@ def _claude_code(prompt: str, model: str, schema: dict | None = None,
     if output.get("is_error") or not output.get("structured_output"):
         raise ResearchError(f"Claude Code: {str(output.get('result') or output.get('subtype'))[:300]}")
     # Во сколько обошёлся бы запуск по API: считаем себестоимость запроса для тарифов.
-    _last_usage.update(cost_usd=output.get("total_cost_usd"), usage=output.get("usage"),
+    _usage.data.update(cost_usd=output.get("total_cost_usd"), usage=output.get("usage"),
                        models=output.get("modelUsage"), duration_ms=output.get("duration_ms"),
                        turns=output.get("num_turns"))
     return output["structured_output"]

@@ -2,6 +2,7 @@
 
 
 import logging
+import threading
 import time
 from typing import Any
 
@@ -210,35 +211,73 @@ def run_job(conn: psycopg.Connection, job: dict[str, Any]) -> dict[str, Any]:
     return found
 
 
-HELPERS_PER_SEARCH = 5
+
+
+# Поиски товаров одновременно (каждый — отдельный Claude Code). Больше — упрёмся в лимиты
+# подписки; выжимки и вопросы поставщику — своей дорожкой, они не ждут длинных поисков.
+RESEARCH_WORKERS = 2
 
 
 def work(database_url: str, providers: list[str], once: bool = False) -> None:
-    """Берёт задачи по очереди. Одна за раз: подписку и ключи не нагружаем."""
-    from zakup import db, questions
+    """Очередь ИИ: дорожка коротких задач (выжимки, вопросы поставщику; проверка раз в
+    секунду) и RESEARCH_WORKERS дорожек поиска товаров."""
+    from zakup import db
 
-    first = True
-    while True:
+    with db.connect(database_url) as conn:
+        _reap(conn, providers, True)  # «в работе» на старте — мёртвые: прошлый запуск службы
+    if once:
         with db.connect(database_url) as conn:
-            _reap(conn, providers, first)
-            first = False
-            # Выжимки короткие (секунды) — их вперёд длинных поисков товаров, но не
-            # больше нескольких подряд: поток выжимок не должен останавливать поиски.
-            for _ in range(HELPERS_PER_SEARCH):
-                if not (_work_summaries(conn, providers) or questions.work_one(conn, providers)):
-                    break
-            job = _take(conn, providers)
-            if job:
+            _light_once(conn, providers)
+            if job := _take(conn, providers):
                 _run(conn, job)
-        if once:
-            return
+        return
+    lanes = [threading.Thread(target=_light_lane, args=(database_url, providers), name="ai-light", daemon=True)]
+    lanes += [threading.Thread(target=_research_lane, args=(database_url, providers), name=f"ai-research-{n}",
+                               daemon=True) for n in range(RESEARCH_WORKERS)]
+    for lane in lanes:
+        lane.start()
+    for lane in lanes:
+        lane.join()
+
+
+def _light_once(conn: psycopg.Connection, providers: list[str]) -> bool:
+    from zakup import questions
+
+    return bool(_work_summaries(conn, providers) or questions.work_one(conn, providers))
+
+
+def _light_lane(database_url: str, providers: list[str]) -> None:
+    from zakup import db
+
+    while True:
+        try:
+            with db.connect(database_url) as conn:
+                while _light_once(conn, providers):
+                    pass
+        except Exception as exc:  # noqa: BLE001 — дорожка не должна умирать от одной ошибки
+            logger.warning("light lane: %s", exc)
+        time.sleep(1)
+
+
+def _research_lane(database_url: str, providers: list[str]) -> None:
+    from zakup import db
+
+    while True:
+        job = None
+        try:
+            with db.connect(database_url) as conn:
+                _reap(conn, providers, False)
+                if job := _take(conn, providers):
+                    _run(conn, job)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("research lane: %s", exc)
         if not job:
-            time.sleep(5)
+            time.sleep(2)
 
 
 def _reap(conn: psycopg.Connection, providers: list[str], first: bool) -> None:
     """Зависшие задачи — в ошибку (поиск возвращается на баланс). На старте «running»
-    своих провайдеров — точно мёртвые: исполнитель один."""
+    своих провайдеров — точно мёртвые: служба одна (дорожки запускаются после этой проверки)."""
     reaped = conn.execute(
         f"""UPDATE lot_research SET status = 'error', finished_at = now(),
                error = 'прервано: перезапуск службы'
@@ -278,7 +317,7 @@ def _take(conn: psycopg.Connection, providers: list[str]) -> dict[str, Any] | No
 def _run(conn: psycopg.Connection, job: dict[str, Any]) -> None:
     """Выполняет поиск и сохраняет итог; не удалось — поиск возвращается на баланс."""
     logger.info("research %s: lot %s via %s", job["id"], job["lot_id"], job["provider"])
-    prov._last_usage.clear()
+    prov.reset_usage()
     try:
         result, error = run_job(conn, job), None
     except Exception as exc:  # noqa: BLE001 — задача не должна зависнуть в running
@@ -292,6 +331,6 @@ def _run(conn: psycopg.Connection, job: dict[str, Any]) -> None:
                finished_at = now(), usage = %s WHERE id = %s AND status = 'running'""",
         ("done" if result is not None else "error",
          Jsonb(result) if result is not None else None, error,
-         Jsonb(dict(prov._last_usage)) if prov._last_usage else None, job["id"]),
+         Jsonb(dict(prov.last_usage())) if prov.last_usage() else None, job["id"]),
     )
     conn.commit()

@@ -40,6 +40,9 @@
 <section class="sup-box" id="suppliers">
   <h2>{{ _("Конкуренты и поставщики") }}</h2>
   <p class="muted">{{ _("Кто уже участвовал в госзакупках такого товара и поставлял его. Это ваши вероятные конкуренты по этому лоту — и возможные поставщики или партнёры. Сначала — кто работал в регионе поставки лота.") }}</p>
+  {% if s.level == "name" %}
+  <p class="muted">{{ _("У лота на портале нет кода ЕНС ТРУ — подобрали по прошлым лотам с теми же словами в названии.") }}</p>
+  {% else %}
   <p class="muted">{{ _("Победы и заявки считаются по закупкам товаров выбранного уровня сходства:") }}</p>
   <div class="sup-levels">
     {% set labels = {"code": _("такой же товар"), "class": _("похожие товары"), "division": s.class_name or _("весь раздел")} %}
@@ -47,6 +50,7 @@
     <a href="/lots/{{ lot_id }}?sup={{ level }}#suppliers" rel="nofollow" class="{{ 'on' if s.level == level }}">{{ labels[level] }} · {{ s.available[level] }}</a>
     {% endif %}{% endfor %}
   </div>
+  {% endif %}
   <div class="view-switch r-switch" role="group" aria-label="{{ _("Вид отображения") }}">
     <button type="button" data-rview="table"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18M3 12h18M3 19h18"/></svg><span>{{ _("Таблица") }}</span></button>
     <button type="button" data-rview="cards"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5"/></svg><span>{{ _("Плитка") }}</span></button>

@@ -623,3 +623,19 @@ def test_analytics_shows_results_by_category(client, conn):
     dashboard._market_cache = None
     page = client.get("/analytics")
     assert page.status_code == 200 and "Снижение цены и конкуренция по категориям" in page.text
+
+
+def test_suppliers_by_name_when_lot_has_no_enstru(conn):
+    from zakup import suppliers
+
+    db.upsert_announcement(conn, {"id": 900, "name_ru": "Мебель", "end_date": "2026-10-01 09:00:00"})
+    db.upsert_lot(conn, {"id": 9001, "trd_buy_id": 900, "name_ru": "Диван кожаный", "amount": 100000})
+    conn.execute("""INSERT INTO lot_results (lot_id, outcome, winner_bin, winner_name, winner_total, offers)
+                    VALUES (9001, 'winner', '333333333333', 'ТОО Диваны', 90000,
+                            '[{"bin": "333333333333", "total": "90000"}, {"bin": "444444444444", "total": "95000"}]')""")
+    db.upsert_announcement(conn, {"id": 901, "name_ru": "Диван", "end_date": "2099-01-01 09:00:00"})
+    db.upsert_lot(conn, {"id": 9002, "trd_buy_id": 901, "name_ru": "Диван", "amount": 150000})
+    s = suppliers.for_lot(conn, 9002)
+    assert s["level"] == "name" and {r["bin"] for r in s["rest"]} == {"333333333333", "444444444444"}
+    winner = next(r for r in s["rest"] if r["bin"] == "333333333333")
+    assert winner["wins"] == 1 and round(float(winner["discount"]), 2) == 0.10
