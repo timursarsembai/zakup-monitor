@@ -1,27 +1,3 @@
-  // «Сбросить» — без перезагрузки; ссылки внутри перерисовываемых блоков — делегированием.
-  sheet.addEventListener("click", (event) => {
-    const link = event.target.closest("[data-reset-all]");
-    if (!link) return;
-    event.preventDefault();
-    softApply(link.getAttribute("href"));
-  });
-  // «Мои фильтры»: выбран один (как переключатель; повторное нажатие снимает выбор).
-  // Компьютер — загружается сразу; телефон (шторка) — по «Применить».
-  const loadSaved = (url, scope) => {
-    if (scope && !location.pathname.endsWith("/" + scope)) location.href = url;
-    else softApply(url);
-  };
-  const pickedSaved = () => sheet.querySelector('[name="saved_pick"]:checked');
-  sheet.addEventListener("change", (event) => {
-    const box = event.target.closest('[name="saved_pick"]');
-    if (!box) return;
-    for (const other of sheet.querySelectorAll('[name="saved_pick"]')) if (other !== box) other.checked = false;
-    if (!box.checked) sheet.querySelector("[data-saved-none]").checked = true;
-    if (sheet.dataset.mode === "saved") return;
-    const picked = pickedSaved();
-    box.closest("details").open = false;
-    loadSaved(picked.value, picked.dataset.savedScope);
-  });
 // Панель фильтров поиска: на телефоне — на весь экран, подписка, аванс, срок.
 // Подписи — из data-labels у блока аванса.
 (() => {
@@ -97,12 +73,15 @@
       option.classList.toggle("on", option.dataset.sortValue === sheet.querySelector("[data-sort-field]").value);
     }
   };
+  let inflight = null;  // новый запрос отменяет прежний: медленный ответ не перебьёт свежий
   const softApply = async (target) => {
     const url = target || `${location.pathname}?${query()}`;
+    inflight?.abort();
+    const controller = inflight = new AbortController();
     // Шторку закрываем, когда результаты уже на месте, — без «схлопывания» на полпути.
     document.querySelector("[data-results]")?.classList.add("loading");
     try {
-      const response = await fetch(url, { headers: { "X-Requested-With": "fetch" } });
+      const response = await fetch(url, { headers: { "X-Requested-With": "fetch" }, signal: controller.signal });
       if (!response.ok || response.redirected) throw new Error(String(response.status));
       const doc = new DOMParser().parseFromString(await response.text(), "text/html");
       const fresh = doc.querySelector("[data-results]");
@@ -125,11 +104,12 @@
           if (mine && theirs) mine.innerHTML = theirs.innerHTML;
         }
       }
-      history.pushState({ soft: true }, "", url);
+      if (url !== location.pathname + location.search) history.pushState({ soft: true }, "", url);
       closeSheet();
       window.initSortbar?.();
       window.applyRView?.();
     } catch (e) {
+      if (e.name === "AbortError") return;  // отменён более новым запросом
       location.href = url;  // не вышло — обычный переход
     }
   };
@@ -182,11 +162,29 @@
   // «Сбросить» и «Мои фильтры» (тот же вид поиска) — без перезагрузки; блоки внутри
   // формы перерисовываются, поэтому — делегирование.
   sheet.addEventListener("click", (event) => {
-    const link = event.target.closest("[data-reset-all], [data-saved-filter]:not([data-other-scope])");
+    const link = event.target.closest("[data-reset-all]");
     if (!link) return;
     event.preventDefault();
     softApply(link.getAttribute("href"));
   });
+  // «Мои фильтры»: выбран один (как переключатель; повторное нажатие снимает выбор).
+  // Компьютер — загружается сразу; телефон (шторка) — по «Применить».
+  const loadSaved = (url, scope) => {
+    if (scope && !location.pathname.endsWith("/" + scope)) location.href = url;
+    else softApply(url);
+  };
+  const pickedSaved = () => sheet.querySelector('[name="saved_pick"]:checked');
+  sheet.addEventListener("change", (event) => {
+    const box = event.target.closest('[name="saved_pick"]');
+    if (!box) return;
+    for (const other of sheet.querySelectorAll('[name="saved_pick"]')) if (other !== box) other.checked = false;
+    if (!box.checked) sheet.querySelector("[data-saved-none]").checked = true;
+    if (sheet.dataset.mode === "saved") return;
+    const picked = pickedSaved();
+    box.closest("details").open = false;
+    loadSaved(picked.value, picked.dataset.savedScope);
+  });
+
   for (const option of sheet.querySelectorAll("[data-sort-value]")) {
     option.addEventListener("click", () => {
       sheet.querySelector("[data-sort-field]").value = option.dataset.sortValue;
@@ -224,11 +222,18 @@
   // Блок подписки перерисовывается (режим правки) — кнопку ищем каждый раз.
   sheet.addEventListener("submit", (event) => {
     if (event.submitter !== sheet.querySelector(".subscribe button.primary")) {
-      for (const field of sheet.querySelectorAll(".subscribe [name]")) field.disabled = field.name !== "edit";
+      const fields = [...sheet.querySelectorAll(".subscribe [name]")].filter((f) => f.name !== "edit");
+      for (const field of fields) field.disabled = true;
+      // Выгрузка в Excel страницу не покидает — поля подписки вернуть.
+      setTimeout(() => { for (const field of fields) field.disabled = false; });
     }
   });
-  sheet.querySelector('.subscribe [name="name"]')?.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") { event.preventDefault(); sheet.querySelector(".subscribe button.primary")?.click(); }
+  // Enter в названии подписки — подписать (делегированием: блок подписки перерисовывается).
+  sheet.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && event.target.matches('.subscribe [name="name"]')) {
+      event.preventDefault();
+      sheet.querySelector(".subscribe button.primary")?.click();
+    }
   });
   // Escape закрывает полноэкранный фильтр на телефоне.
   document.addEventListener("keydown", (event) => {
