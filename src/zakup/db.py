@@ -140,7 +140,10 @@ def upsert_announcement(conn: psycopg.Connection, item: dict[str, Any]) -> None:
                org_name_ru = excluded.org_name_ru, publish_date = excluded.publish_date,
                start_date = excluded.start_date, end_date = excluded.end_date,
                last_update_date = excluded.last_update_date, raw = excluded.raw,
-               fetched_at = now()""",
+               fetched_at = now()
+           -- Портал не менял объявление — строку не переписываем: пересканирование (10 000
+           -- за круг) иначе плодит старые версии строк и раздувает таблицу.
+           WHERE announcements.raw IS DISTINCT FROM excluded.raw""",
         (
             int(item["id"]),
             item.get("number_anno"),
@@ -179,7 +182,8 @@ def upsert_lot(conn: psycopg.Connection, item: dict[str, Any]) -> None:
                customer_bin = excluded.customer_bin,
                customer_name_ru = excluded.customer_name_ru,
                last_update_date = excluded.last_update_date, raw = excluded.raw,
-               fetched_at = now()""",
+               fetched_at = now()
+           WHERE lots.raw IS DISTINCT FROM excluded.raw""",
         (
             int(item["id"]),
             _int(item.get("trd_buy_id")),
