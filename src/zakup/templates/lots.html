@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_seo.html" import seo_block with context %}
 {% from "_filters.html" import filter_form, filter_styles, pager, sort_bar with context %}
 {% from "_marks.html" import mark_control, mark_styles %}
 {% block title %}{{ _("Лоты") }}{% endblock %}
@@ -41,4 +42,5 @@
 </table></div>
 {{ pager() }}
 </div>
+{{ seo_block("lots") }}
 {% endblock %}

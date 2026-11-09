@@ -376,20 +376,21 @@ def test_organization_directory_filters(client, conn):
     from zakup import orgs
     orgs.refresh_directory(conn)
     buyers = client.get("/orgs/customers").text
-    assert "ГУ Школа №9" in buyers and "ТОО Кровля" not in buyers and "Найдено: 1" in buyers
+    assert "ГУ Школа №9" in buyers and "ТОО Кровля" not in buyers and "Найдено заказчиков: <b>1</b>" in buyers
     sellers = client.get("/orgs/suppliers").text
     assert "ТОО Кровля" in sellers and "ИП Иванов" in sellers and "ГУ Школа №9" not in sellers and "Доля побед" in sellers
     only_ip = client.get("/orgs/suppliers?form=ip").text
     assert "ИП Иванов" in only_ip and "ТОО Кровля" not in only_ip
     assert "ТОО Кровля" in client.get("/orgs/suppliers?q=кровля").text
-    assert "Найдено: 1" in client.get("/orgs/suppliers?q=0505").text
-    assert "Найдено: 0" in client.get("/orgs/suppliers?q=%25_").text
+    assert "Найдено поставщиков: <b>1</b>" in client.get("/orgs/suppliers?q=0505").text
+    assert "Найдено поставщиков: <b>0</b>" in client.get("/orgs/suppliers?q=%25_").text
     assert client.get("/orgs/suppliers?sort=evil;drop&region=zz&form=x&page=-5").status_code == 200
     assert client.get("/orgs/everyone").status_code == 404
     old = client.get("/orgs?role=seller&form=ip", follow_redirects=False)
     assert old.status_code == 301 and old.headers["location"] == "/orgs/suppliers?form=ip"
     home = client.get("/").text
     assert 'href="/orgs/customers"' in home and 'href="/orgs/suppliers"' in home  # меню
+    assert home.count("<h1>") == 1 and "<h1>Объявления о госзакупках Казахстана</h1>" in home  # SEO-блок
 
 
 def test_category_and_region_pages(client, conn):
@@ -461,7 +462,7 @@ def test_directory_forms_follow_role_and_mobile_more_sheet(client, conn):
     buyers = client.get("/orgs/customers").text
     assert 'value="ip"' not in buyers and 'value="gu"' in buyers
     assert 'value="ip"' in client.get("/orgs/suppliers").text
-    assert "Найдено: 1" in client.get("/orgs/customers?form=ip").text  # чужая форма сбрасывается
+    assert "Найдено заказчиков: <b>1</b>" in client.get("/orgs/customers?form=ip").text  # чужая форма сбрасывается
     home = client.get("/").text
     assert "data-more-sheet" in home and 'href="/orgs/suppliers" class="more-tile' in home and "nav-wide" in home
 
