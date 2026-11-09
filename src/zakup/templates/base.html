@@ -111,6 +111,16 @@
   .a11y-row output { min-width: 48px; text-align: center; font-weight: 600; }
   .a11y-row button { min-width: 40px; font-size: 18px; }
   a { color: var(--accent); text-decoration: none; }
+  /* Ссылки в содержимом и подвале: при наведении — светло-оранжевая заливка (боковое меню
+     и кнопки-ссылки — со своими стилями). :where — нулевой вес: свои :hover страниц важнее. */
+  :where(main a:not(.button, .primary, .pw-buy, .buy, .wa, .org-wa, .org-call, .call, .icon-button,
+                    .lang-card, .chip-link, .more-tile), .site-foot a) {
+    border-radius: 4px; -webkit-box-decoration-break: clone; box-decoration-break: clone;
+    transition: background-color .15s, box-shadow .15s; }
+  :where(main a:not(.button, .primary, .pw-buy, .buy, .wa, .org-wa, .org-call, .call, .icon-button,
+                    .lang-card, .chip-link, .more-tile):hover, .site-foot a:hover) {
+    background-color: color-mix(in srgb, var(--accent) 12%, transparent);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 12%, transparent); }
   form.filters, form.inline-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 12px 0; }
   input[type=text], input:not([type]) { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; }
   button { padding: 6px 12px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; cursor: pointer; }
