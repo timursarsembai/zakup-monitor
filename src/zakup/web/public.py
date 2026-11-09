@@ -2,6 +2,7 @@
 документы, robots и sitemap, события из браузера.
 """
 
+import io
 import json
 import threading
 import time
@@ -27,6 +28,7 @@ from zakup import (
     marks,
     og,
     orgs,
+    outcomes,
     research,
     results,
     spec,
@@ -40,7 +42,7 @@ from zakup.filters import (
     STATUS_NAMES,
     Filters,
 )
-from zakup.goszakup import GoszakupError, parse_date
+from zakup.goszakup import PORTAL_TZ, GoszakupError, parse_date
 from zakup.matcher import PORTAL_ANNOUNCEMENT_URL
 from zakup.web import core
 from zakup.web.ai import _research_view
@@ -48,6 +50,7 @@ from zakup.web.core import (
     DETAIL_TTL,
     MAX_PAGE,
     PAGE_SIZE,
+    Paid,
     Viewer,
     _audit,
     _editing,
@@ -393,7 +396,7 @@ def sitemap_part(kind: str) -> Response:
         with core.pool.connection() as conn:
             catalog_paths = catalog.sitemap_paths(conn)
         urls = [(f"{SITE_URL}{path}", None) for path in (
-            "/", "/announcements", "/lots", "/orgs/customers", "/orgs/suppliers", "/analytics", "/pricing", "/offer", "/privacy", "/contacts",
+            "/", "/announcements", "/lots", "/orgs/customers", "/orgs/suppliers", "/results", "/analytics", "/pricing", "/offer", "/privacy", "/contacts",
             *catalog_paths)]
     else:
         prefix, _, index = kind.partition("-")
@@ -424,6 +427,66 @@ def sitemap_part(kind: str) -> Response:
 def analytics_trends(days: int = 30):
     """Динамика рынка за период (вкладка «Динамика» в «Анализе рынка»): открыто всем, с кэшем."""
     return trends.cached(core.pool.connection, days)
+
+
+@router.get("/results")
+def results_page(request: Request, user: Viewer, page: int = 1):
+    """Итоги тендеров: кто, у кого и за сколько выиграл; сводка по тому же фильтру."""
+    f = outcomes.ResultFilters.from_query(parse_qs(request.url.query), catalog.DIVISIONS)
+    page = min(max(page, 1), outcomes.MAX_PAGE)
+    now = datetime.now(UTC)
+    with core.pool.connection() as conn:
+        rows, total = outcomes.search(conn, f, page, now)
+        summary = outcomes.summary(conn, f, now)
+    pages = min((total + outcomes.PAGE_SIZE - 1) // outcomes.PAGE_SIZE, outcomes.MAX_PAGE)
+    return templates.TemplateResponse(request, "results.html", {
+        "f": f, "rows": rows, "total": total, "page": page, "pages": pages, "s": summary,
+        "query": urlencode(f.query()), "periods": outcomes.PERIODS, "outcomes": outcomes.OUTCOMES,
+        "discounts": outcomes.DISCOUNTS, "sorts": outcomes.SORTS, "regions": REGIONS,
+        "categories": {code: catalog.division_name(code, i18n.language()) for code in catalog.DIVISIONS}})
+
+
+RESULTS_EXPORT_LIMIT = 10_000
+
+
+@router.get("/results/export.xlsx")
+def results_export(request: Request, user: Paid):
+    """Итоги по фильтру в Excel — по подписке."""
+    from openpyxl import Workbook
+
+    _audit(request, user, "export", "/results?" + request.url.query)
+    f = outcomes.ResultFilters.from_query(parse_qs(request.url.query), catalog.DIVISIONS)
+    with core.pool.connection() as conn:
+        rows, _ = outcomes.search(conn, f, 1, datetime.now(UTC), limit=RESULTS_EXPORT_LIMIT)
+    book = Workbook()
+    sheet = book.active
+    sheet.title = "Итоги"
+    sheet.append(["Дата итогов", "Объявление", "Лот", "Наименование лота", "Заказчик", "БИН заказчика",
+                  "Регион", "Сумма лота, ₸", "Исход", "Победитель", "БИН победителя", "Цена победителя, ₸",
+                  "Снижение, %", "Участников", "Причина", "Ссылка"])
+    region_names = templates.env.globals["region_name"]
+    for r in rows:
+        date = r["date"].astimezone(PORTAL_TZ).replace(tzinfo=None) if r["date"] else None
+        sheet.append([date, r["number_anno"], r["lot_number"], r["name_ru"], r["customer"], r["customer_bin"],
+                      ", ".join(filter(None, (region_names(c) for c in r["regions"] or []))), r["amount"],
+                      "Победитель определён" if r["outcome"] == "winner" else "Не состоялась",
+                      r["winner_name"], r["winner_bin"], r["winner_total"],
+                      round(float(r["discount"]) * 100, 1) if r["discount"] is not None else None,
+                      r["offers"], r["reason"], f"{SITE_URL}/lots/{r['id']}"])
+        for cell in sheet[sheet.max_row]:  # «=…» из названий с портала — текстом, не формулой
+            if cell.data_type == "f":
+                cell.data_type = "s"
+    for column, width in zip("ABCDEFGHIJKLMNOP", (17, 14, 16, 45, 40, 15, 22, 15, 20, 36, 15, 16, 11, 11, 30, 40),
+                             strict=True):
+        sheet.column_dimensions[column].width = width
+    for cell in sheet["A"][1:]:
+        cell.number_format = "dd.mm.yyyy hh:mm"
+    sheet.freeze_panes = "A2"
+    body = io.BytesIO()
+    book.save(body)
+    return Response(body.getvalue(),
+                    media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f'attachment; filename="itogi-{datetime.now(PORTAL_TZ):%Y-%m-%d-%H%M}.xlsx"'})
 
 
 @router.get("/analytics")

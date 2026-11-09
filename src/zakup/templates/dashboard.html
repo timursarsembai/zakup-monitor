@@ -243,6 +243,20 @@
         {% endfor %}
       </table></div>
     </section>
+    {% for key, title, link, label in (("results_by_division", _("Снижение цены и конкуренция по категориям"), "category", division_label),
+                                       ("results_by_region", _("Снижение цены и конкуренция по регионам"), "region", region_name)) %}
+    <section class="card wide">
+      <h2>{{ title }}</h2>
+      <p class="muted">{{ _("Лоты с победителем за 90 дней: медианное снижение от плановой суммы, сколько в среднем участников и доля лотов, где была одна заявка. Нажмите — откроются итоги с этим фильтром.") }}</p>
+      <div class="scroll"><table class="stats">
+        <tr><th style="text-align:left">{{ _("Категория") if link == "category" else _("Регион") }}</th><th>{{ _("Лотов") }}</th><th>{{ _("Снижение") }}</th><th>{{ _("Участников") }}</th><th>{{ _("Одна заявка") }}</th></tr>
+        {% for code, n, discount, offers, single in m[key] or [] %}
+        <tr><td class="text"><a href="/results?{{ link }}={{ code }}&amp;period=90">{{ label(code) or code }}</a></td><td class="num">{{ num(n) }}</td><td class="num">{{ pct(discount) }}</td><td class="num">{{ (offers | float) | round(1) }}</td><td class="num">{{ pct(single) }}</td></tr>
+        {% else %}<tr><td class="muted" colspan="5">{{ _("Пока нет данных.") }}</td></tr>{% endfor %}
+      </table></div>
+    </section>
+    {% endfor %}
+    <section class="card wide"><a href="/results">{{ _("Все итоги тендеров с фильтрами →") }}</a></section>
   </div>
 </div>
 

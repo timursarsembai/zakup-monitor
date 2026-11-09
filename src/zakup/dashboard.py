@@ -168,6 +168,12 @@ def _competition(conn) -> dict[str, Any]:
         SELECT winner_bin, max(winner_name), count(*), sum(winner_total) FROM lot_results
         WHERE outcome = 'winner' AND winner_name IS NOT NULL AND winner_bin IS NOT NULL
         GROUP BY winner_bin ORDER BY 3 DESC, 4 DESC LIMIT 10""")
+    # По разделам и областям за 90 дней: где сильнее снижают цену и где мало конкурентов.
+    from zakup import outcomes
+
+    now = datetime.now(UTC)
+    data["results_by_division"] = outcomes.by_group(conn, "divisions", 90, now)
+    data["results_by_region"] = outcomes.by_group(conn, "regions", 90, now, limit=20)
     return data
 
 

@@ -590,3 +590,36 @@ def test_supplier_discount_and_bids_need_tariff(client, conn):
     _login(client)
     assert "Снижает цену, когда выигрывает" in client.get(f"/org/{supplier}").text
     assert "1 900 000.00" in client.get(f"/org/{person}?tab=history").text
+
+
+def test_results_page_filters_summary_and_paid_export(client, conn):
+    from tests.web_helpers import _announcement_with_lots
+
+    _announcement_with_lots(conn)
+    lot = conn.execute("SELECT id, trd_buy_id FROM lots ORDER BY id LIMIT 1").fetchone()
+    conn.execute("UPDATE announcements SET itogi_date = now() WHERE id = %s", (lot[1],))
+    conn.execute("UPDATE lots SET amount = 100000, regions = '{75}', divisions = '{17}' WHERE id = %s", (lot[0],))
+    conn.execute("""INSERT INTO lot_results (lot_id, outcome, winner_bin, winner_name, winner_total, offers)
+                    VALUES (%s, 'winner', '111111111111', 'ТОО Победа', 80000,
+                            '[{"bin": "111111111111", "total": "80000"}, {"bin": "222222222222", "total": "90000"}]')""",
+                 (lot[0],))
+    conn.commit()
+    page = client.get("/results").text
+    assert "ТОО Победа" in page and "20.0%" in page and "Найдено итогов: <b>1</b>" in page
+    assert "ТОО Победа" not in client.get("/results?region=71").text
+    assert "ТОО Победа" in client.get("/results?category=17&winner=победа").text
+    assert "Найдено итогов: <b>0</b>" in client.get("/results?outcome=failed").text
+    assert client.get("/results?period=evil&sort=x;drop&page=-3&min_sum=abc").status_code == 200
+    # Excel — только по подписке; администратору (тестовый вход) — можно.
+    assert client.get("/results/export.xlsx", follow_redirects=False).status_code in (302, 303, 401, 402, 403)
+    _login(client)
+    xls = client.get("/results/export.xlsx")
+    assert xls.status_code == 200 and xls.headers["content-type"].startswith("application/vnd.openxml")
+
+
+def test_analytics_shows_results_by_category(client, conn):
+    from zakup import dashboard
+
+    dashboard._market_cache = None
+    page = client.get("/analytics")
+    assert page.status_code == 200 and "Снижение цены и конкуренция по категориям" in page.text

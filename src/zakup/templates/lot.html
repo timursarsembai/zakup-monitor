@@ -135,7 +135,7 @@
 </section>
 
 {% if lot.id in results %}
-<h2>{{ _("Итоги") }}</h2>
+<h2 id="results">{{ _("Итоги") }}</h2>
 {{ lot_winners(lot, results[lot.id]) }}
 {% elif end and end < now %}
 <p class="muted">{{ _("Итоги по лоту ещё не опубликованы.") }}</p>

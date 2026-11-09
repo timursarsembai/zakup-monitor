@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% from "_filters.html" import filter_styles, multi with context %}
+{% from "_seo.html" import seo_block with context %}
+{% macro pct(v) %}{% if v is not none %}{{ ((v | float) * 100) | round(1) }}%{% else %}—{% endif %}{% endmacro %}
+{% macro big(v) %}{% set v = v | float %}{% if v >= 1e9 %}{{ (v / 1e9) | round(1) }} {{ _("млрд ₸") }}{% elif v >= 1e6 %}{{ (v / 1e6) | round(1) }} {{ _("млн ₸") }}{% else %}{{ v | count }} ₸{% endif %}{% endmacro %}
+{% block title %}{{ _("Итоги тендеров") }} — {{ _("Казахстан") }}{% endblock %}
+{% block description %}{{ _("Итоги госзакупок Казахстана: победители лотов, цена победы, снижение от плановой суммы, число участников. Фильтры по категории, региону, заказчику и победителю.") }}{% endblock %}
+{% block style %}
+{{ filter_styles() }}
+  .pager { display: flex; gap: 10px; align-items: center; margin: 14px 0; }
+  .res-panel .fgrid { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+  .res-panel .fgrid .wide { grid-column: 1 / -1; }
+  .res-panel input:not([type=checkbox]):not([type=radio]), .res-panel select { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); font: inherit; }
+  .res-panel .two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .res-panel .radios { display: grid; gap: 6px; }
+  .found-row { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; margin: 12px 0 8px; }
+  .found-row .right { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .view-switch { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .view-switch button { display: inline-flex; align-items: center; gap: 6px; border: 0; border-radius: 0; padding: 5px 10px; color: var(--muted); background: none; }
+  .view-switch button[aria-pressed=true] { background: var(--accent); color: var(--on-accent); }
+  .view-switch svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; }
+  .xls { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border: 1px solid var(--line); border-radius: 8px; color: var(--fg); }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; margin: 12px 0; }
+  .kpi { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+  .kpi b { display: block; font-size: 22px; line-height: 1.2; font-variant-numeric: tabular-nums; }
+  .kpi span { font-size: 13px; color: var(--muted); }
+  .top-winners { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin-bottom: 12px; }
+  .top-winners h2 { font-size: 15px; margin: 0 0 6px; }
+  .top-winners ol { margin: 0; padding-left: 22px; }
+  .top-winners li { margin: 4px 0; }
+  .sub { font-size: 13px; color: var(--muted); }
+  .drop { color: var(--ok); font-weight: 600; }
+  .failed { color: var(--muted); }
+  [data-rview=cards] { overflow: visible; }
+  [data-rview=cards] table.res-table, [data-rview=cards] table.res-table tbody { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; min-width: 0 !important; }
+  [data-rview=cards] table.res-table tbody { grid-column: 1 / -1; }
+  [data-rview=cards] table.res-table tr:first-child:has(th) { display: none; }
+  [data-rview=cards] table.res-table tr { display: flex; flex-wrap: wrap; gap: 8px 16px; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+  [data-rview=cards] table.res-table td { display: block; border: 0; padding: 0; min-width: 0 !important; text-align: left; }
+  [data-rview=cards] table.res-table td[data-label]::before { content: attr(data-label); display: block; font-size: 12px; color: var(--muted); }
+  [data-rview=cards] table.res-table td.wide { flex: 1 1 100%; }
+  @media (max-width: 760px) { .res-panel .desk-sort { display: none; } .kpi b { font-size: 19px; } }
+{% endblock %}
+{% block main %}
+{% set chips = [("q", _("Слова"), ("«" ~ f.q[:16] ~ "»") if f.q else ""),
+                ("category", _("Категория"), (categories[f.categories[0]] ~ (" +" ~ (f.categories | length - 1) if f.categories | length > 1 else "")) if f.categories else ""),
+                ("region", _("Регион"), (region_name(f.regions[0]) ~ (" +" ~ (f.regions | length - 1) if f.regions | length > 1 else "")) if f.regions else ""),
+                ("period", _("Период"), _(periods[f.period]) if f.period != "30" else ""),
+                ("customer", _("Заказчик"), f.customer[:18]),
+                ("winner", _("Победитель"), f.winner[:18]),
+                ("sum", _("Сумма"), (_("от") ~ " " ~ (f.min_sum | count) if f.min_sum is not none else "") ~ (" " ~ _("до") ~ " " ~ (f.max_sum | count) if f.max_sum is not none else "")),
+                ("outcome", _("Исход"), _(outcomes[f.outcome]) if f.outcome != "winner" else ""),
+                ("discount", _("Снижение"), _(discounts[f.discount]) if f.discount else "")] %}
+<div class="chipbar" data-chipbar>
+  <div class="chip-fixed">
+    <button type="button" class="chip-icon" data-chip-open="sort" aria-label="{{ _("Сортировка") }}" title="{{ _("Сортировка") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4v16M3 8l4-4 4 4M17 20V4M13 16l4 4 4-4"/></svg></button>
+    <button type="button" class="chip-icon" data-chip-open="all" aria-label="{{ _("Фильтры") }}" title="{{ _("Фильтры") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>{% set n = f.active_count() %}{% if n %}<span class="count">{{ n }}</span>{% endif %}</button>
+  </div>
+  <button type="button" class="chip-arrow" data-chip-arrow="-1" aria-label="{{ _("Назад") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg></button>
+  <div class="chip-scroll">
+    {% for key, label, value in chips %}<button type="button" class="chip {{ 'set' if value }}" data-chip-open="{{ key }}" data-title="{{ label }}">{{ value or label }}<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>{% endfor %}
+  </div>
+  <button type="button" class="chip-arrow" data-chip-arrow="1" aria-label="{{ _("Дальше") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></button>
+</div>
+<div class="filter-backdrop" data-filter-backdrop hidden></div>
+
+<form method="get" action="/results" class="filters-panel res-panel" id="filters" aria-label="{{ _("Фильтр") }}">
+  <div class="sheet-head"><b>{{ _("Фильтр") }}</b><button type="button" data-filter-close aria-label="{{ _("Закрыть") }}">✕</button></div>
+  <div class="fgrid">
+    <div class="wide" data-chip="q"><label class="fl" for="r-q">{{ _("Слова в названии лота") }}</label><input id="r-q" type="search" name="q" value="{{ f.q }}" placeholder="{{ _("например, бумага А4") }}"></div>
+    <div data-chip="category"><span class="fl">{{ _("Категория") }}</span>{{ multi("category", categories, f.categories, _("Все категории")) }}</div>
+    <div data-chip="region"><span class="fl">{{ _("Регион поставки") }}</span>{{ multi("region", regions, f.regions, _("Весь Казахстан")) }}</div>
+    <div data-chip="period"><span class="fl">{{ _("Период итогов") }}</span><div class="radios">{% for key, label in periods.items() %}<label class="check"><input type="radio" name="period" value="{{ key }}" {% if f.period == key %}checked{% endif %}> {{ _(label) }}</label>{% endfor %}</div></div>
+    <div data-chip="customer"><label class="fl" for="r-customer">{{ _("Заказчик: название или БИН") }}</label><input id="r-customer" type="search" name="customer" value="{{ f.customer }}"></div>
+    <div data-chip="winner"><label class="fl" for="r-winner">{{ _("Победитель: название или БИН/ИИН") }}</label><input id="r-winner" type="search" name="winner" value="{{ f.winner }}"></div>
+    <div data-chip="sum"><span class="fl">{{ _("Сумма лота, ₸, с — по") }}</span><div class="two"><input name="min_sum" inputmode="numeric" placeholder="{{ _("с") }}" value="{{ f.min_sum if f.min_sum is not none }}" aria-label="{{ _("Сумма с") }}"><input name="max_sum" inputmode="numeric" placeholder="{{ _("по") }}" value="{{ f.max_sum if f.max_sum is not none }}" aria-label="{{ _("Сумма по") }}"></div></div>
+    <div data-chip="outcome"><span class="fl">{{ _("Исход") }}</span><div class="radios">{% for key, label in outcomes.items() %}<label class="check"><input type="radio" name="outcome" value="{{ key }}" {% if f.outcome == key %}checked{% endif %}> {{ _(label) }}</label>{% endfor %}</div></div>
+    <div data-chip="discount"><span class="fl">{{ _("Снижение от плановой суммы") }}</span><div class="radios">{% for key, label in discounts.items() %}<label class="check"><input type="radio" name="discount" value="{{ key }}" {% if f.discount == key %}checked{% endif %}> {{ _(label) }}</label>{% endfor %}</div></div>
+    <div class="desk-sort"><label class="fl" for="r-sort">{{ _("Сортировка") }}</label><select id="r-sort" name="sort" data-sort-field>{% for key, label in sorts.items() %}<option value="{{ key }}" {% if f.sort == key %}selected{% endif %}>{{ _(label) }}</option>{% endfor %}</select></div>
+  </div>
+  <div class="sort-pick" data-chip="sort">
+    <span class="fl">{{ _("Сортировка") }}</span>
+    {% for key, label in sorts.items() %}<button type="button" class="sort-option {{ 'on' if f.sort == key }}" data-sort-value="{{ key }}">{{ _(label) }}</button>{% endfor %}
+  </div>
+  <div class="single-actions">
+    <button type="button" data-chip-reset>{{ _("Сбросить") }}</button>
+    <button class="primary">{{ _("Применить") }}</button>
+  </div>
+  <div class="panel-actions">
+    <button class="primary">{{ _("Найти") }}</button>
+    <a href="/results" data-reset-all>{{ _("Сбросить") }}</a>
+  </div>
+</form>
+
+<div data-results>
+<div class="kpis">
+  <div class="kpi"><b>{{ s.won | count }}</b><span>{{ _("лотов с победителем") }}</span></div>
+  <div class="kpi"><b>{{ big(s.paid) }}</b><span>{{ _("сумма побед из") }} {{ big(s.plan) }} {{ _("плановых") }}</span></div>
+  <div class="kpi"><b>{{ pct(s.median) }}</b><span>{{ _("медианное снижение цены") }}</span></div>
+  <div class="kpi"><b>{{ (s.offers | float) | round(1) if s.offers is not none else "—" }}</b><span>{{ _("участников в среднем") }}{% if s.single is not none %} · {{ pct(s.single) }} {{ _("с одной заявкой") }}{% endif %}</span></div>
+  <div class="kpi"><b>{{ pct(s.failed_share) }}</b><span>{{ _("не состоялись") }} ({{ s.failed | count }})</span></div>
+</div>
+{% if s.winners %}
+<section class="top-winners">
+  <h2>{{ _("Чаще всех выигрывают") }}</h2>
+  <ol>{% for bin, name, wins, total in s.winners %}<li>{{ org_link(bin, name) }} <span class="sub">· {{ _("побед:") }} {{ wins }} · {{ big(total) }}</span></li>{% endfor %}</ol>
+</section>
+{% endif %}
+<div class="found-row">
+  <span class="muted">{{ _("Найдено итогов:") }} <b>{{ total | count }}</b></span>
+  <div class="right">
+    <a class="xls" href="/results/export.xlsx?{{ query }}" {% if not request.state.paid %}data-paid data-feature="results_export"{% endif %}>⬇ Excel</a>
+    <div class="view-switch" role="group" aria-label="{{ _("Вид отображения") }}">
+      <button type="button" data-rview="table"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18M3 12h18M3 19h18"/></svg><span>{{ _("Таблица") }}</span></button>
+      <button type="button" data-rview="cards"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5"/></svg><span>{{ _("Плитка") }}</span></button>
+    </div>
+  </div>
+</div>
+{% if rows %}
+<div class="table-wrap" data-rview-box><table class="res-table">
+  <tr><th>{{ _("Дата итогов") }}</th><th>{{ _("Лот") }}</th><th>{{ _("Сумма лота, ₸") }}</th><th>{{ _("Победитель") }}</th><th>{{ _("Цена победы, ₸") }}</th><th>{{ _("Снижение") }}</th><th>{{ _("Участников") }}</th></tr>
+  {% for r in rows %}
+  <tr>
+    <td data-label="{{ _("Дата итогов") }}">{{ (r.date | local).strftime("%d.%m.%Y") if r.date else "—" }}</td>
+    <td class="wide" style="min-width:260px"><a class="title" href="/lots/{{ r.id }}">{{ pick(r.name_ru, r.name_kz) or "—" }}</a>
+      <div class="sub">{{ r.customer or "" }}{% if r.regions %} · {{ r.regions | map("region_name_filter") | select | join(", ") }}{% endif %}</div></td>
+    <td class="num" data-label="{{ _("Сумма лота, ₸") }}">{{ r.amount | money }}</td>
+    {% if r.outcome == "winner" %}
+    <td data-label="{{ _("Победитель") }}">{{ org_link(r.winner_bin, r.winner_name) }}</td>
+    <td class="num" data-label="{{ _("Цена победы, ₸") }}"><b>{{ r.winner_total | money if r.winner_total is not none else "—" }}</b></td>
+    <td class="num" data-label="{{ _("Снижение") }}">{% if r.discount is not none %}<span class="drop">−{{ pct(r.discount) }}</span>{% else %}—{% endif %}</td>
+    {% else %}
+    <td class="failed" colspan="3" data-label="{{ _("Исход") }}">{{ _("Не состоялась") }}{% if r.reason %}: {{ r.reason }}{% endif %}</td>
+    {% endif %}
+    <td class="num" data-label="{{ _("Участников") }}">{{ r.offers }}{% if r.offers %} · <a href="/lots/{{ r.id }}#results" {% if not request.state.paid %}data-paid data-feature="results_offers"{% endif %}>{{ _("все") }}</a>{% endif %}</td>
+  </tr>
+  {% endfor %}
+</table></div>
+{% if pages > 1 %}<div class="pager">{% if page > 1 %}<a href="/results?{{ query }}&page={{ page - 1 }}">← {{ _("Назад") }}</a>{% endif %}<span class="muted">{{ _("стр.") }} {{ page }} {{ _("из") }} {{ pages }}</span>{% if page < pages %}<a href="/results?{{ query }}&page={{ page + 1 }}">{{ _("Дальше") }} →</a>{% endif %}</div>{% endif %}
+{% else %}<p class="muted">{{ _("Ничего не найдено — попробуйте убрать часть фильтров или увеличить период.") }}</p>{% endif %}
+</div>
+{{ seo_block("results") }}
+<script src="/static/filters.js?v={{ asset_v }}"></script>
+{% endblock %}

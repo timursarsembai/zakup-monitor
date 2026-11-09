@@ -280,6 +280,8 @@
     .more-tile.on { color: var(--accent); font-weight: 600; background: color-mix(in srgb, var(--accent) 10%, transparent); }
     .more-tile.more-out { color: var(--bad); }
     .more-grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); padding-bottom: 4px; }
+    .more-grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); padding-bottom: 4px; }
+    .more-grid.three .more-tile { padding: 16px 4px; font-size: 14px; }
     .more-grid.two .more-tile { padding: 16px 4px; font-size: 14px; }
     .more-tile .more-swatch { display: block; width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--line); }
     .more-sheet.open .more-tile { opacity: 1; transform: none; }
@@ -315,9 +317,10 @@
   <span class="brand-tag">{{ b.tagline }}</span>
   {% set path = request.url.path %}
   <nav class="main-nav" aria-label="{{ _("Разделы") }}" data-head="{{ _("Закупки") }}">
-    <a href="/announcements" data-search-open aria-controls="search-sheet" class="{{ 'on' if path in ('/', '/lots', '/announcements') or path.startswith('/lots/') or path.startswith('/a/') }}"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span>{{ _("nav:Закупки") }}</span></a>
+    <a href="/announcements" data-search-open aria-controls="search-sheet" class="{{ 'on' if path in ('/', '/lots', '/announcements', '/results') or path.startswith('/lots/') or path.startswith('/a/') }}"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span>{{ _("nav:Закупки") }}</span></a>
     <a href="/announcements" class="nav-sub {{ 'on' if path in ('/', '/announcements') or path.startswith('/a/') }}"><span>{{ _("Объявления") }}</span></a>
     <a href="/lots" class="nav-sub {{ 'on' if path == '/lots' or path.startswith('/lots/') }}"><span>{{ _("Лоты") }}</span></a>
+    <a href="/results" class="nav-sub {{ 'on' if path == '/results' }}"><span>{{ _("Итоги") }}</span></a>
     <a href="/my" {% if not request.state.paid %}data-paid {% endif %}class="{{ 'guest-hide ' if not request.state.user_id }}{{ 'on' if path == '/my' }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-6-4-6 4z"/></svg><span>{{ _("nav:Мои лоты") }}</span></a>
     <a href="/research" {% if not request.state.paid %}data-paid {% endif %}class="{{ 'guest-hide ' if not request.state.user_id }}{{ 'on' if path == '/research' }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg><span>{{ _("nav:ИИ-подбор") }}</span></a>
     <a href="/subscriptions" {% if not request.state.paid %}data-paid {% endif %}class="nav-wide {{ 'on' if path == '/subscriptions' }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg><span>{{ _("nav:Подписки") }}</span></a>
@@ -374,9 +377,10 @@
 <div class="more-backdrop" data-more-backdrop hidden></div>
 <div class="more-sheet" id="search-sheet" data-search-sheet hidden role="dialog" aria-modal="true" aria-label="{{ _("nav:Закупки") }}">
   <div class="more-grip" aria-hidden="true"></div>
-  <div class="more-grid g0 two">
+  <div class="more-grid g0 three">
     {{ tile("/announcements", _("Объявления"), '<path d="M4 4h16v16H4z"/><path d="M8 9h8M8 13h8M8 17h5"/>', path in ("/", "/announcements") or path.startswith("/a/")) }}
     {{ tile("/lots", _("Лоты"), '<rect x="3" y="4" width="18" height="5" rx="1.5"/><rect x="3" y="11" width="18" height="4" rx="1.5"/><rect x="3" y="17" width="18" height="3" rx="1.5"/>', path == "/lots" or path.startswith("/lots/")) }}
+    {{ tile("/results", _("Итоги"), '<path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0z"/><path d="M17 5h3v2a3 3 0 0 1-3 3M7 5H4v2a3 3 0 0 0 3 3"/>', path == "/results") }}
   </div>
 </div>
 <div class="more-sheet" id="more-sheet" data-more-sheet hidden role="dialog" aria-modal="true" aria-label="{{ _("Ещё разделы") }}">

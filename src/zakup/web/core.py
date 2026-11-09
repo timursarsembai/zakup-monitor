@@ -171,6 +171,7 @@ templates.env.globals["division_name"] = lambda code: catalog.division_name(code
 templates.env.globals["region_name"] = lambda code: i18n.gettext(REGIONS[code]) if code in REGIONS else ""
 templates.env.filters["region_name_filter"] = templates.env.globals["region_name"]
 templates.env.filters["division_label"] = lambda code: catalog.division_name(code, i18n.language()) or code
+templates.env.globals["division_label"] = templates.env.filters["division_label"]
 
 
 def _tariff() -> dict:
