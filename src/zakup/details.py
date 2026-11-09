@@ -130,10 +130,10 @@ def save(conn: psycopg.Connection, item: dict[str, Any]) -> None:
                count_lots = coalesce(%(count_lots)s, count_lots),
                customer_bin = coalesce(%(customer_bin)s, customer_bin),
                customer_name_ru = coalesce(%(customer_name_ru)s, customer_name_ru),
-               detail = %(detail)s, details_fetched_at = now(),
+               detail = %(detail)s, details_fetched_at = now(), lots_ready = %(lots_ready)s,
                details_update_date = coalesce(%(last_update_date)s, last_update_date)
            WHERE id = %(id)s""",
-        {**fields, "detail": Jsonb(item)},
+        {**fields, "detail": Jsonb(item), "lots_ready": bool(lots)},
     )
     raw_lots = {int(lot["id"]): lot for lot in item.get("Lots") or []}
     for lot in lots:
@@ -170,10 +170,9 @@ def refresh(conn: psycopg.Connection, client: Client, limit: int) -> int:
                       OR NOT detail ? 'nameKz'
                       OR last_update_date > details_update_date
                       OR details_fetched_at < now() - interval '1 day'
-                      -- Сразу после публикации портал бывает отдаёт объявление ещё без лотов:
-                      -- такие перечитываем на каждом круге сборщика (раз в 2 минуты).
-                      OR (details_fetched_at < now() - interval '1 minute'
-                          AND NOT EXISTS (SELECT 1 FROM lots l WHERE l.trd_buy_id = announcements.id)))
+                      -- API портала отдаёт лоты с задержкой (до ~20 минут): пока в подробностях
+                      -- нет лотов, перечитываем на каждом круге сборщика (раз в 2 минуты).
+                      OR (NOT lots_ready AND details_fetched_at < now() - interval '1 minute'))
                ORDER BY details_fetched_at NULLS FIRST, end_date
                LIMIT %s""",
             (limit,),

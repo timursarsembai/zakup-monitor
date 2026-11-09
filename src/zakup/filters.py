@@ -322,9 +322,12 @@ class Filters:
         окном от сегодня до дня по правилу.
         """
         lots = scope == "lots"
-        # Объявление без лотов не показываем: API портала отдаёт лоты с задержкой до ~20 минут,
-        # а пустое объявление выглядит как ошибка сайта. Появится, когда придут лоты.
-        clauses = ["l.trd_buy_id = a.id"] if lots else ["EXISTS (SELECT 1 FROM lots x WHERE x.trd_buy_id = a.id)"]
+        # Открытое объявление — только когда в его подробностях пришли лоты (lots_ready): API
+        # портала отдаёт их с задержкой, а пустая страница объявления выглядит как ошибка сайта.
+        # Так же и рассылка: подписки-фильтры строятся на этом условии.
+        clauses = ["(a.lots_ready OR a.end_date <= %(now)s)"]
+        if lots:
+            clauses.insert(0, "l.trd_buy_id = a.id")
         params: dict[str, Any] = {"now": now}
         for part in (self._where_kind, self._where_ids, self._where_place_and_sum,
                      self._where_dates, self._where_advance, self._where_words):

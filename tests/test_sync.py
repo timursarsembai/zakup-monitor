@@ -145,7 +145,7 @@ def test_open_announcement_without_lots_is_refetched_soon(conn):
                     details_fetched_at = now() - interval '20 minutes' WHERE id = 5""")
     details.refresh(conn, Portal(), 10)
     assert len(asked) == 1  # лотов нет — перечитали, не дожидаясь суток
-    db.upsert_lot(conn, {"id": 50, "trd_buy_id": 5, "name_ru": "Реагент"})
-    conn.execute("UPDATE announcements SET details_fetched_at = now() - interval '20 minutes' WHERE id = 5")
+    conn.execute("""UPDATE announcements SET lots_ready = true,
+                    details_fetched_at = now() - interval '20 minutes' WHERE id = 5""")
     details.refresh(conn, Portal(), 10)
-    assert len(asked) == 1  # с лотами — как обычно, раз в сутки
+    assert len(asked) == 1  # лоты в подробностях есть — как обычно, раз в сутки

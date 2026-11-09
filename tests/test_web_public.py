@@ -148,6 +148,7 @@ def test_pagination_and_per_page(client, conn):
     db.upsert_announcement(conn, {"id": 600, "name_ru": "Много лотов", "end_date": "2099-01-01 09:00:00"})
     for i in range(25):
         db.upsert_lot(conn, {"id": 6000 + i, "trd_buy_id": 600, "name_ru": f"Лот {i}", "amount": 1})
+    conn.execute("UPDATE announcements SET lots_ready = true WHERE id = 600")  # лоты пришли
     conn.commit()
     _login(client)
     page = client.get("/lots?applied=1&deadline_mode=&per_page=20").text

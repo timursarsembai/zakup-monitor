@@ -9,6 +9,7 @@ from zakup import auth, db
 def test_favorite_heart_on_search_and_my_lots(client, conn):
     db.upsert_announcement(conn, {"id": 78, "name_ru": "Стулья", "end_date": "2099-01-01 09:00:00"})
     db.upsert_lot(conn, {"id": 6, "trd_buy_id": 78, "name_ru": "Стул офисный", "amount": 500000})
+    conn.execute("UPDATE announcements SET lots_ready = true WHERE id = 78")
     conn.commit()
     _login(client)
     search = "/lots?applied=1&deadline_mode=&advance_min=0"
