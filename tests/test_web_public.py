@@ -506,3 +506,16 @@ def test_lot_level_customer_has_page_and_description_without_amount(client, conn
     assert page.status_code == 200 and "ГУ Школа №7" in page.text and "/a/820" in page.text
     description = client.get("/lots/8201").text.split('name="description" content="', 1)[1].split('"', 1)[0]
     assert ". ," not in description and description.count(". .") == 0 and "приём заявок до" in description
+
+
+def test_category_filter_in_search_and_subscriptions(client, conn):
+    _announcement_with_lots(conn)  # «Бумага А4» — 171211…, «Ручка» без кода
+    _login(client)
+    lots = client.get("/lots?applied=1&deadline_mode=&category=17").text
+    assert "Бумага А4" in lots and "Ручка шариковая" not in lots
+    assert "Бумага А4" not in client.get("/lots?applied=1&deadline_mode=&category=31").text
+    assert "Канцтовары для школы" in client.get("/announcements?applied=1&deadline_mode=&category=17").text
+    assert "Канцтовары для школы" not in client.get("/announcements?applied=1&deadline_mode=&category=31").text
+    assert 'name="category" value="17"' in lots
+    from zakup.filters import Filters
+    assert Filters.from_json(Filters(categories=["17"]).to_json()).categories == ["17"]

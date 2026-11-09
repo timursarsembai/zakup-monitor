@@ -179,7 +179,8 @@
       background: var(--bg); border-top: 1px solid var(--line); border-radius: 18px 18px 0 0; padding: 8px 10px 14px;
       box-shadow: 0 -10px 30px rgb(0 0 0 / 25%); transform: translateY(100%); transition: transform .26s cubic-bezier(.2, .8, .2, 1); max-height: 70vh; overflow-y: auto; }
     .more-sheet.open { transform: translateY(0); }
-    .more-grip { width: 40px; height: 4px; border-radius: 2px; background: var(--line); margin: 2px auto 10px; }
+    .more-grip { width: 40px; height: 4px; border-radius: 2px; background: var(--line); margin: 2px auto 6px; }
+    .more-head { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin: 8px 6px 2px; }
     .more-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
     .more-form { margin: 0; display: contents; }
     .more-tile { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 2px; border-radius: 12px; color: var(--fg); background: none; border: 0;
@@ -189,8 +190,8 @@
     .more-tile.more-out { color: var(--bad); }
     .more-tile .more-swatch { display: block; width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--line); }
     .more-sheet.open .more-tile { opacity: 1; transform: none; }
-    {% for i in range(16) %}.more-sheet.open .more-grid > :nth-child({{ i + 1 }}) .more-tile, .more-sheet.open .more-grid > .more-tile:nth-child({{ i + 1 }}) { transition-delay: {{ 30 + i * 25 }}ms; }
-    {% endfor %}
+    {% for g in range(3) %}{% for i in range(6) %}.more-sheet.open .more-grid.g{{ g }} > :nth-child({{ i + 1 }}), .more-sheet.open .more-grid.g{{ g }} > :nth-child({{ i + 1 }}) .more-tile { transition-delay: {{ 30 + (g * 4 + i) * 22 }}ms; }
+    {% endfor %}{% endfor %}
   }
   @media (max-width: 760px) and (prefers-reduced-motion: reduce) {
     .more-sheet, .more-tile, .more-backdrop { transition: none !important; }
@@ -266,25 +267,33 @@
 <div class="more-backdrop" data-more-backdrop hidden></div>
 <div class="more-sheet" id="more-sheet" data-more-sheet hidden role="dialog" aria-modal="true" aria-label="{{ _("Ещё разделы") }}">
   <div class="more-grip" aria-hidden="true"></div>
-  <div class="more-grid">
+  {# Группы: разделы сайта, аккаунт, вид. #}
+  <div class="more-head">{{ _("Разделы") }}</div>
+  <div class="more-grid g0">
     {{ tile("/subscriptions", _("nav:Подписки"), '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/>', path == "/subscriptions", true) }}
-    {{ tile("/orgs", _("Организации"), '<path d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-5h6v5M9 10h.01M15 10h.01M9 13h.01M15 13h.01"/>', path == "/orgs" or path.startswith("/org/")) }}
     {{ tile("/categories", _("Категории"), '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>', path == "/categories" or path.startswith("/category/")) }}
     {{ tile("/regions", _("Регионы"), '<path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/>', path == "/regions" or path.startswith("/region/")) }}
+    {{ tile("/orgs", _("Организации"), '<path d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-5h6v5M9 10h.01M15 10h.01M9 13h.01M15 13h.01"/>', path == "/orgs" or path.startswith("/org/")) }}
     {{ tile("/analytics", _("Аналитика"), '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>', path == "/analytics") }}
     {% if request.state.staff %}{{ tile("/dashboard", _("Дашборд"), '<rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>', path == "/dashboard") }}{% endif %}
+  </div>
+  <div class="more-head">{{ _("Аккаунт") }}</div>
+  <div class="more-grid g1">
     {% if request.state.user_id and not request.state.staff %}{{ tile("/balance", _("Поиски:") ~ " " ~ request.state.searches, '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>', path == "/balance") }}{% endif %}
     {{ tile("/pricing", _("Тариф"), '<path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/>', path == "/pricing") }}
     {{ tile("/settings", _("Настройки"), '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1 7 17M17 7l2.1-2.1"/>', path == "/settings") }}
-    {% set other = "ru" if lang() == "kk" else "kk" %}
-    {{ tile("/lang/" ~ other, "Русский" if other == "ru" else "Қазақша", '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>') }}
-    <button type="button" class="more-tile" data-theme-toggle="tile"><span class="swatch more-swatch"></span><span>{{ _("Тема") }}</span></button>
     {% if not request.state.user_id %}
     {{ tile("/login?next=" ~ (path | urlencode), _("Вход"), '<path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3"/>') }}
     {{ tile("/register", _("Регистрация"), '<circle cx="9" cy="8" r="4"/><path d="M2 21a7 7 0 0 1 14 0M19 8v6M16 11h6"/>') }}
     {% else %}
     <form method="post" action="/logout" data-confirm="{{ _("Выйти из аккаунта?") }}" class="more-form"><button class="more-tile more-out"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg><span>{{ _("Выйти") }}</span></button></form>
     {% endif %}
+  </div>
+  <div class="more-head">{{ _("Вид") }}</div>
+  <div class="more-grid g2">
+    {% set other = "ru" if lang() == "kk" else "kk" %}
+    {{ tile("/lang/" ~ other, "Русский" if other == "ru" else "Қазақша", '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>') }}
+    <button type="button" class="more-tile" data-theme-toggle="tile"><span class="swatch more-swatch"></span><span>{{ _("Тема") }}</span></button>
   </div>
 </div>
 {% endblock %}

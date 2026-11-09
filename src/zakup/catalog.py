@@ -125,7 +125,8 @@ def division_name(code: str | None, lang: str = "ru") -> str | None:
 def open_filter(division: str | None = None, region: str | None = None) -> Filters:
     """Фильтр открытых лотов — как в поиске для гостей, плюс категория и регион (для ссылки
     «все в поиске»: там лот попадает по любому своему коду и месту поставки)."""
-    return replace(Filters.public(), enstru=division or "", regions=[region] if region else [], sort="end")
+    return replace(Filters.public(), categories=[division] if division else [], regions=[region] if region else [],
+                   sort="end")
 
 
 def counts(conn: psycopg.Connection, now: datetime | None = None) -> dict[tuple[str, str], tuple[int, float]]:

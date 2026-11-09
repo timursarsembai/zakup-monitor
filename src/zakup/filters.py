@@ -14,7 +14,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 from zakup.goszakup import PORTAL_TZ
-from zakup.i18n import gettext
+from zakup.i18n import gettext, language
 
 # Справочник статусов портала (ref_buy_status / ref_lots_status), только те, что
 # встречаются на практике. Коды у объявлений и лотов общие, кроме итогов.
@@ -156,6 +156,8 @@ class Filters:
     # "only" — только среди организаций инвалидов, "exclude" — без них, "" — все.
     disable_person: str = "only"
     regions: list[str] = field(default_factory=lambda: ["75", "19"])
+    # Категории — разделы КПВЭД, первые две цифры кода ЕНС ТРУ (zakup.catalog.DIVISIONS).
+    categories: list[str] = field(default_factory=list)
     methods: list[str] = field(default_factory=list)
     subjects: list[int] = field(default_factory=list)
     years: list[int] = field(default_factory=list)
@@ -238,6 +240,7 @@ class Filters:
             # Старые ссылки и сохранённые формы: галочка присылала "1".
             disable_person="only" if disable == "1" else disable if disable in DISABLE_PERSON else "",
             regions=[v for v in form.get("region", []) if v in REGIONS],
+            categories=[v for v in form.get("category", []) if re.fullmatch(r"\d\d", v)][:100],
             methods=[v for v in form.get("method", []) if v in METHODS],
             subjects=ints("subject", SUBJECTS),
             years=ints("year", range(2000, 2100)),
@@ -264,7 +267,7 @@ class Filters:
     def active_count(self) -> int:
         """Сколько условий задано (для кнопки «Фильтры» на телефоне)."""
         flags = [self.q, self.exclude, self.number, self.lot_number, self.enstru, self.customer,
-                 self.regions, self.methods, self.subjects, self.years, self.disable_person,
+                 self.regions, self.categories, self.methods, self.subjects, self.years, self.disable_person,
                  self.min_sum is not None or self.max_sum is not None, self.deadline,
                  self.start_from or self.start_to, self.published_from or self.published_to,
                  self.itogi_from or self.itogi_to,
@@ -349,6 +352,11 @@ class Filters:
         if self.enstru and lots:
             clauses.append("EXISTS (SELECT 1 FROM unnest(l.enstru) e WHERE e LIKE %(enstru)s)")
             params["enstru"] = _like(self.enstru) + "%"
+        if self.categories:
+            # Лот — по любому своему коду ЕНС ТРУ; объявление — если такой есть у его лота.
+            codes = "l.enstru" if lots else "(SELECT array_agg(e) FROM lots l2, unnest(l2.enstru) e WHERE l2.trd_buy_id = a.id)"
+            clauses.append(f"EXISTS (SELECT 1 FROM unnest({codes}) c WHERE left(c, 2) = ANY(%(categories)s))")
+            params["categories"] = self.categories
         if self.customer:
             lot_part = " OR l.customer_{} {} %(customer)s" if lots else ""
             if self.customer.isdigit():
@@ -440,7 +448,7 @@ class Filters:
     def to_query(self, scope: str = "lots") -> str:
         """Ссылка на поиск с этим фильтром."""
         pairs: list[tuple[str, Any]] = [("applied", 1)]
-        names = {"stages": "stage", "statuses": "status", "regions": "region",
+        names = {"stages": "stage", "statuses": "status", "regions": "region", "categories": "category",
                  "methods": "method", "subjects": "subject", "years": "year"}
         for key, value in self.to_json().items():
             if key == "deadline":
@@ -492,6 +500,10 @@ class Filters:
             parts.append(_("заказчик «{name}»", name=self.customer))
         if self.regions:
             parts.append(", ".join(_(REGIONS[r]) for r in self.regions if r in REGIONS))
+        if self.categories:
+            from zakup.catalog import division_name
+
+            parts.append(", ".join(division_name(c, language()) or c for c in self.categories))
         if self.min_sum is not None:
             parts.append(_("от {sum} ₸", sum=f"{self.min_sum:,.0f}".replace(",", " ")))
         if self.max_sum is not None:
