@@ -17,9 +17,10 @@
   .filters-panel { border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin: 12px 0; }
   .fgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px 20px; }
   .fl { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
-  .fgrid input:not([type=checkbox]):not([type=range]), .fgrid select { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); font: inherit; font-size: 14px; width: 100%; min-width: 0; }
+  .fgrid input:not([type=checkbox]):not([type=radio]):not([type=range]), .fgrid select { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); font: inherit; font-size: 14px; width: 100%; min-width: 0; }
   .pair { display: flex; gap: 6px; }
   .check { display: flex; gap: 8px; align-items: flex-start; margin: 4px 0; color: var(--fg); font-size: 14px; }
+  .radio-list .check { align-items: center; }
   .open-now { font-weight: 600; }
   .filters-panel .hint { display: block; font-size: 12px; margin-top: 2px; }
   details.multi { position: relative; }
@@ -172,7 +173,7 @@
     .pair > * { flex: 1 1 0; min-width: 0; }
     .fl { font-size: 15px; margin-bottom: 6px; }
     /* 16px и выше: iPhone не увеличивает страницу при фокусе на поле. */
-    .fgrid input:not([type=checkbox]):not([type=range]), .fgrid select, details.multi summary,
+    .fgrid input:not([type=checkbox]):not([type=radio]):not([type=range]), .fgrid select, details.multi summary,
     .subscribe input, .subscribe select { font-size: 17px; min-height: 48px; padding: 10px 12px; border-radius: 10px; }
     details.multi summary { padding-right: 34px; line-height: 26px; }
     details.multi summary::after { top: 12px; right: 12px; }
@@ -352,8 +353,9 @@
       {{ multi("category", categories, f.categories, _("Все категории")) }}</div>
     <div data-chip="subject"><span class="fl">{{ _("Предмет закупки") }}</span>
       {{ multi("subject", subjects, f.subjects, _("Товары, работы, услуги")) }}</div>
-    <div data-chip="disable"><label class="fl" for="f-disable">{{ _("Признаки: организации инвалидов") }}</label>
-      <select id="f-disable" name="disable_person">{% for key, name in disable_options.items() %}<option value="{{ key }}" {% if f.disable_person == key %}selected{% endif %}>{{ _(name) }}</option>{% endfor %}</select></div>
+    <div data-chip="disable"><span class="fl">{{ _("Признаки: организации инвалидов") }}</span>
+      {# Список сразу, как у «Способа»: выбор один из трёх — переключатели. #}
+      <div class="radio-list">{% for key, name in disable_options.items() %}<label class="check"><input type="radio" name="disable_person" value="{{ key }}" {% if f.disable_person == key %}checked{% endif %}> {{ _(name) }}</label>{% endfor %}</div></div>
     <div data-chip="sum"><span class="fl">{{ _("Сумма") }} {{ _("лота") if lots else _("закупки") }}{{ _(", ₸, с — по") }}</span>
       <div class="pair">
         <input name="min_sum" value="{{ '%.0f'|format(f.min_sum) if f.min_sum is not none else '' }}" placeholder="{{ _("с") }}" inputmode="numeric" aria-label="{{ _("Сумма с") }}">

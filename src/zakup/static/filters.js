@@ -18,10 +18,12 @@
   // Шторку условия закрыли без «Применить» — выбранное в ней откатить, иначе оно тихо
   // применилось бы со следующим поиском.
   let snapshot = null;
-  const takeSnapshot = () => [...sheet.querySelectorAll("input, select")].map((f) => [f, f.type === "checkbox" ? f.checked : f.value]);
+  // Галочки и переключатели (radio) запоминаем по «отмечено», остальные поля — по значению.
+  const toggles = (f) => f.type === "checkbox" || f.type === "radio";
+  const takeSnapshot = () => [...sheet.querySelectorAll("input, select")].map((f) => [f, toggles(f) ? f.checked : f.value]);
   const restoreSnapshot = () => {
     for (const [field, value] of snapshot || []) {
-      if (field.type === "checkbox") field.checked = value; else field.value = value;
+      if (toggles(field)) field.checked = value; else field.value = value;
       if (field.type === "range") field.dispatchEvent(new Event("input"));
     }
     snapshot = null;
@@ -104,12 +106,12 @@
         const index = [...sheet.querySelectorAll("[data-all]")].indexOf(field);
         twin = fresh.querySelectorAll("[data-all]")[index];
       } else if (field.name) {
-        twin = field.type === "checkbox"
+        twin = toggles(field)
           ? fresh.querySelector(`[name="${field.name}"][value="${CSS.escape(field.value)}"]`)
           : fresh.querySelector(`[name="${field.name}"]`);
       }
       if (!twin) continue;
-      if (field.type === "checkbox") field.checked = twin.checked;
+      if (toggles(field)) field.checked = twin.checked;
       else if (field.type !== "hidden" || field.name === "sort") field.value = twin.value;
       if (field.type === "range") field.dispatchEvent(new Event("input"));
     }
@@ -285,6 +287,9 @@
     for (const group of sheet.querySelectorAll(".shown")) {
       for (const field of group.querySelectorAll("input, select")) {
         if (field.type === "checkbox") field.checked = false;
+        // Переключатель: «по умолчанию» — вариант с пустым значением (если его нет — ни один,
+        // тогда сервер возьмёт своё значение по умолчанию).
+        else if (field.type === "radio") field.checked = field.value === "";
         else if (field.type === "range") field.value = field === group.querySelector("input[type=range]") ? 0 : 100;
         else if (field.tagName === "SELECT") field.value = [...field.options].some((o) => o.value === "") ? "" : field.options[0].value;
         else field.value = "";
