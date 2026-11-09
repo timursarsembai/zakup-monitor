@@ -174,7 +174,8 @@ def refresh(conn: psycopg.Connection, client: Client, limit: int) -> int:
                       -- API портала отдаёт лоты с задержкой (до ~20 минут): пока в подробностях
                       -- нет лотов, перечитываем на каждом круге сборщика (раз в 2 минуты).
                       OR (NOT lots_ready AND details_fetched_at < now() - interval '1 minute'))
-               ORDER BY details_fetched_at NULLS FIRST, end_date
+               -- Сначала новые и те, где ещё нет лотов: они не видны на сайте.
+               ORDER BY details_fetched_at IS NOT NULL, lots_ready, details_fetched_at, end_date
                LIMIT %s""",
             (limit,),
         )
