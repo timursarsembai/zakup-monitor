@@ -159,6 +159,10 @@
   /* Компьютер: шапка — левая панель у края экрана; узкая (значки) — по кнопке «Свернуть»
      или сама на экране уже 1100 px. Телефон — нижняя панель и шторка «Ещё» (ниже). */
   .side-head, .side-gap, .side-view, .side-collapse, .brand img.brand-mark { display: none; }
+  /* Описание платформы: на телефоне — в шапке справа от логотипа, на компьютере — под ним. */
+  .brand-tag { font-size: 11px; line-height: 1.3; color: var(--muted); min-width: 0; flex: 1 1 auto;
+               display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  @media (max-width: 340px) { .brand-tag { display: none; } }
   @media (min-width: 761px) {
     header .main-nav a.nav-sub { display: flex; }
     :root { --side: 240px; }
@@ -169,7 +173,9 @@
              border-right: 1px solid var(--line); overflow-y: auto; overflow-x: hidden; }
     header .logout, header .tools { display: contents; }
     header .burger { display: none; }
-    .brand { order: 0; padding: 0 8px 14px; }
+    .brand { order: 0; padding: 0 8px 6px; }
+    .brand-tag { order: 0; flex: none; padding: 0 8px 12px; font-size: 12px; -webkit-line-clamp: 3; }
+    :root[data-side=mini] .brand-tag { display: none; }
     .main-nav { order: 1; flex-direction: column; gap: 2px; }
     .main-nav::before, .side-head { content: attr(data-head); display: block; font-size: 11px; text-transform: uppercase;
              letter-spacing: .05em; color: var(--muted); padding: 10px 10px 4px; }
@@ -275,6 +281,7 @@
 {% block header %}
 <header>
   <a href="{{ '/dashboard' if request.state.staff else '/' }}" class="brand" aria-label="{{ _("Tenderim — на главную") }}"><img class="logo-light-bg" src="/static/logo-tenderim.png" alt="Tenderim" width="173" height="30"><img class="logo-dark-bg" src="/static/logo-tenderim-light.png" alt="Tenderim" width="173" height="30"><img class="brand-mark" src="/static/icon-192.png" alt="" width="32" height="32"></a>
+  <span class="brand-tag">{{ _("Госзакупки Казахстана: поиск, уведомления и подбор товаров с ИИ") }}</span>
   {% set path = request.url.path %}
   <nav class="main-nav" aria-label="{{ _("Разделы") }}" data-head="{{ _("Закупки") }}">
     <a href="/announcements" data-search-open aria-controls="search-sheet" class="{{ 'on' if path in ('/', '/lots', '/announcements') or path.startswith('/lots/') or path.startswith('/a/') }}"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span>{{ _("nav:Закупки") }}</span></a>
