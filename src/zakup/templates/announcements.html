@@ -9,6 +9,7 @@
 {% block main %}
 {{ filter_form() }}
 
+<div data-results>
 {% set found %}{{ _("Найдено объявлений:") }} <b>{{ total }}</b>{% if deadline_date %} {{ _("· окончание") }} {{ "" if f.deadline == rule else _("по") ~ " " }}{{ deadline_date.strftime("%d.%m.%Y") }}{% endif %}{% endset %}
 {{ sort_bar(found) }}
 
@@ -33,4 +34,5 @@
   {% endfor %}
 </table></div>
 {{ pager() }}
+</div>
 {% endblock %}

@@ -4,6 +4,8 @@
 <details class="multi">
   <summary>{% set picked = [] %}{% for key, label in options.items() if key in chosen %}{% set __ = picked.append(_(label)) %}{% endfor %}{% if picked %}{{ picked|join(", ") }}{% else %}<span class="muted">{{ all_label }}</span>{% endif %}</summary>
   <div class="multi-list">
+    {# «Все …» — ничего не выбрано; поле без имени, в запрос не уходит. #}
+    <label class="check all-opt"><input type="checkbox" data-all {% if not chosen %}checked{% endif %}> {{ all_label }}</label>
     {% for key, label in options.items() %}
     <label class="check"><input type="checkbox" name="{{ name }}" value="{{ key }}" {% if key in chosen %}checked{% endif %}> {{ _(label) }}</label>
     {% endfor %}
@@ -58,6 +60,7 @@
     .flayout { grid-template-columns: minmax(0, 1fr); }
     .subscribe { padding: 14px 0 0; border-left: 0; border-top: 1px solid var(--line); }
   }
+  [data-results].loading { opacity: .45; transition: opacity .15s; pointer-events: none; }
   .filter-bar, .filter-open, .sheet-head, .chipbar, .sort-pick, .single-actions, .filter-backdrop { display: none; }
   /* Телефон: панель условий под шапкой (закреплена вместе с ней), шторки снизу. */
   @media (max-width: 760px) {
@@ -77,8 +80,11 @@
                         background: var(--accent); color: var(--on-accent); font-size: 11px; line-height: 18px; text-align: center; }
     .filter-backdrop:not([hidden]) { display: block; position: fixed; inset: 0; z-index: 79; background: rgb(0 0 0 / 45%); }
     /* Одно условие: снизу, только его поле. */
-    .filters-panel.open.single { inset: auto 0 0 0; max-height: 82vh; border-radius: 18px 18px 0 0; box-shadow: 0 -10px 30px rgb(0 0 0 / 25%);
-                                 padding-bottom: env(safe-area-inset-bottom); }
+    /* Шторки — над нижней панелью навигации, не перекрывая её. */
+    form.filters-panel.open { bottom: calc(58px + env(safe-area-inset-bottom)); }
+    .filter-backdrop:not([hidden]) { bottom: calc(58px + env(safe-area-inset-bottom)); }
+    .sortbar .sort-label { display: none; }
+    .filters-panel.open.single { inset: auto 0 calc(58px + env(safe-area-inset-bottom)) 0; max-height: calc(82vh - 58px); border-radius: 18px 18px 0 0; box-shadow: 0 -10px 30px rgb(0 0 0 / 25%); }
     .filters-panel.single .fgrid > div:not(.shown), .filters-panel.single .panel-actions,
     .filters-panel.single .subscribe, .filters-panel.single .sort-pick:not(.shown) { display: none; }
     .filters-panel.single[data-mode=subscribe] .subscribe { display: flex; padding-top: 0; border-top: 0; }
@@ -92,7 +98,9 @@
     .filters-panel.single .sort-pick.shown { display: flex; flex-direction: column; gap: 4px; padding-bottom: 16px; }
     .sort-option { text-align: left; padding: 14px 12px; border: 0; border-radius: 10px; background: none; font-size: 17px; color: var(--fg); }
     .sort-option.on { color: var(--accent); font-weight: 600; background: color-mix(in srgb, var(--accent) 10%, transparent); }
-    .filters-panel.single .multi-list { position: static; max-height: 50vh; overflow-y: auto; }
+    .filters-panel.single .multi-list { position: static; max-height: 50vh; overflow-y: auto; border: 0; padding: 0; }
+    /* В шторке список — сразу галочками, без строки-селекта над ним. */
+    .filters-panel.single details.multi > summary { display: none; }
   }
   @media (max-width: 760px) {
     .filter-bar { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 12px 0; }
@@ -225,6 +233,7 @@
   </div>
 </div>
 <div class="filter-backdrop" data-filter-backdrop hidden></div>
+<script src="/static/sortbar.js?v={{ asset_v }}" defer></script>
 <form method="get" action="/{{ scope }}" class="filters-panel" id="filters" aria-label="{{ _("Фильтр") }}">
   <div class="sheet-head"><b>{{ _("Фильтр") }}</b><button type="button" data-filter-close aria-label="{{ _("Закрыть") }}">✕</button></div>
   <input type="hidden" name="applied" value="1">
@@ -326,7 +335,7 @@
   </div>
   <div class="panel-actions">
     <button class="primary">{{ _("Найти") }}</button>
-    <a href="/{{ scope }}">{{ _("Сбросить") }}</a>
+    <a href="/{{ scope }}" data-reset-all>{{ _("Сбросить") }}</a>
     {% if lots %}<button data-paid data-feature="export" formaction="/export.xlsx" title="{{ _("Все найденные лоты в Excel") }}">Excel</button>{% endif %}
   </div>
   </div>
@@ -371,7 +380,7 @@
 <div class="sortbar" data-query="{{ query }}"{% if hidden %} data-hidden="1"{% endif %}>
   <div>{{ found }}</div>
   <div class="sortbar-controls">
-    <label class="muted">{{ _("Сортировка") }}
+    <label class="muted sort-label">{{ _("Сортировка") }}
       <select data-param="sort" aria-label="{{ _("Сортировка") }}">
         {% for key, name in sorts.items() %}<option value="{{ key }}" {% if f.sort == key %}selected{% endif %}>{{ _(name) }}</option>{% endfor %}
       </select></label>
@@ -385,7 +394,6 @@
       </select></label>
   </div>
 </div>
-<script src="/static/sortbar.js?v={{ asset_v }}"></script>
 {% endmacro %}
 
 {% macro pager() %}

@@ -9,6 +9,7 @@
 {% block main %}
 {{ filter_form() }}
 
+<div data-results>
 {% set found %}{{ _("Найдено лотов:") }} <b>{{ total }}</b>{% if deadline_date %} {{ _("· окончание") }} {{ "" if f.deadline == rule else _("по") ~ " " }}{{ deadline_date.strftime("%d.%m.%Y") }}{% endif %}{% endset %}
 {{ sort_bar(found) }}
 <p class="muted">{{ _("Открытых объявлений в базе:") }} {{ stats[0] }}{% if stats[1] %}{{ _(", ещё") }} {{ stats[1] }} {{ _("ждут загрузки подробностей — пока не попадают в фильтр") }}{% endif %}{% if stats[2] %}{{ _(". Обновлено") }} {{ (stats[2]|local).strftime("%d.%m %H:%M") }}{% endif %}.</p>
@@ -39,4 +40,5 @@
   {% endfor %}
 </table></div>
 {{ pager() }}
+</div>
 {% endblock %}

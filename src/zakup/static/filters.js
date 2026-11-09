@@ -30,21 +30,97 @@
     setTimeout(() => { for (const list of sheet.querySelectorAll(".shown details.multi")) list.open = true; });
     if (backdrop) backdrop.hidden = false;
   };
-  for (const chip of document.querySelectorAll("[data-chip-open]")) {
-    chip.addEventListener("click", () => openSheet(chip.dataset.chipOpen, chip.dataset.title || chip.getAttribute("aria-label") || chip.textContent.trim()));
-  }
-  backdrop?.addEventListener("click", closeSheet);
-  // «Только открытые», «Опубликованы сегодня» — переключаются сразу.
-  for (const chip of document.querySelectorAll("[data-chip-toggle]")) {
-    chip.addEventListener("click", () => {
-      const box = sheet.querySelector(`[name="${chip.dataset.chipToggle}"]`);
+  // Без перезагрузки: форма уходит в фоне, подменяются результаты и панель условий,
+  // адрес страницы обновляется («Назад» работает — перезагрузкой).
+  const chipbar = document.querySelector("[data-chipbar]");
+  const query = () => {
+    const params = new URLSearchParams();
+    for (const [key, value] of new FormData(sheet)) {
+      const field = sheet.querySelector(`[name="${key}"]`);
+      if (field && field.closest(".subscribe") && key !== "edit") continue;
+      params.append(key, value);
+    }
+    return params.toString();
+  };
+  // Поля формы — как в ответе сервера (после «Сбросить» и др.): значения, галочки, ползунки.
+  const syncForm = (fresh) => {
+    for (const field of sheet.querySelectorAll("input, select")) {
+      if (field.closest(".subscribe")) continue;
+      let twin = null;
+      if (field.hasAttribute("data-all")) {
+        const index = [...sheet.querySelectorAll("[data-all]")].indexOf(field);
+        twin = fresh.querySelectorAll("[data-all]")[index];
+      } else if (field.name) {
+        twin = field.type === "checkbox"
+          ? fresh.querySelector(`[name="${field.name}"][value="${CSS.escape(field.value)}"]`)
+          : fresh.querySelector(`[name="${field.name}"]`);
+      }
+      if (!twin) continue;
+      if (field.type === "checkbox") field.checked = twin.checked;
+      else if (field.type !== "hidden" || field.name === "sort") field.value = twin.value;
+      if (field.type === "range") field.dispatchEvent(new Event("input"));
+    }
+    for (const option of sheet.querySelectorAll("[data-sort-value]")) {
+      option.classList.toggle("on", option.dataset.sortValue === sheet.querySelector("[data-sort-field]").value);
+    }
+  };
+  const softApply = async (target) => {
+    const url = target || `${location.pathname}?${query()}`;
+    // Шторку закрываем, когда результаты уже на месте, — без «схлопывания» на полпути.
+    document.querySelector("[data-results]")?.classList.add("loading");
+    try {
+      const response = await fetch(url, { headers: { "X-Requested-With": "fetch" } });
+      if (!response.ok || response.redirected) throw new Error(String(response.status));
+      const doc = new DOMParser().parseFromString(await response.text(), "text/html");
+      const fresh = doc.querySelector("[data-results]");
+      const freshBar = doc.querySelector("[data-chipbar]");
+      if (!fresh) throw new Error("no results");
+      document.querySelector("[data-results]").replaceWith(fresh);
+      if (chipbar && freshBar) chipbar.innerHTML = freshBar.innerHTML;
+      const freshForm = doc.getElementById("filters");
+      if (freshForm) syncForm(freshForm);
+      history.pushState({ soft: true }, "", url);
+      closeSheet();
+      window.initSortbar?.();
+      window.applyRView?.();
+    } catch (e) {
+      location.href = url;  // не вышло — обычный переход
+    }
+  };
+  addEventListener("popstate", () => location.reload());
+  sheet.addEventListener("submit", (event) => {
+    // Подписка и выгрузка в Excel — обычной отправкой; поиск («Найти», «Применить», условия) — без перезагрузки.
+    if (event.submitter === subscribeButtonRef() || event.submitter?.hasAttribute("formaction")) return;
+    event.preventDefault();
+    // Обработчик ниже отключил бы поля подписки — здесь они и так не уходят в запрос.
+    event.stopImmediatePropagation();
+    softApply();
+  });
+  const subscribeButtonRef = () => sheet.querySelector(".subscribe button.primary");
+  chipbar?.addEventListener("click", (event) => {
+    const opener = event.target.closest("[data-chip-open]");
+    if (opener) {
+      openSheet(opener.dataset.chipOpen, opener.dataset.title || opener.getAttribute("aria-label") || opener.textContent.trim());
+      return;
+    }
+    // «Только открытые», «Опубликованы сегодня» — переключаются сразу.
+    const toggle = event.target.closest("[data-chip-toggle]");
+    if (toggle) {
+      const box = sheet.querySelector(`[name="${toggle.dataset.chipToggle}"]`);
       box.checked = !box.checked;
       sheet.requestSubmit();
-    });
-  }
+    }
+  });
+  backdrop?.addEventListener("click", closeSheet);
+  // «Сбросить» в полном фильтре — тоже без перезагрузки.
+  sheet.querySelector("[data-reset-all]")?.addEventListener("click", (event) => {
+    event.preventDefault();
+    softApply(event.currentTarget.getAttribute("href"));
+  });
   for (const option of sheet.querySelectorAll("[data-sort-value]")) {
     option.addEventListener("click", () => {
       sheet.querySelector("[data-sort-field]").value = option.dataset.sortValue;
+      for (const other of sheet.querySelectorAll("[data-sort-value]")) other.classList.toggle("on", other === option);
       sheet.requestSubmit();
     });
   }
@@ -87,6 +163,16 @@
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && sheet.classList.contains("open")) closeSheet();
   });
+  // «Все …» в списке: отмечено — снять остальные; отметили что-то — снять «Все».
+  for (const list of sheet.querySelectorAll(".multi-list")) {
+    const all = list.querySelector("[data-all]");
+    const items = [...list.querySelectorAll("input[type=checkbox]:not([data-all])")];
+    all?.addEventListener("change", () => {
+      if (all.checked) for (const item of items) item.checked = false;
+      else if (!items.some((i) => i.checked)) all.checked = true;
+    });
+    for (const item of items) item.addEventListener("change", () => { if (all) all.checked = !items.some((i) => i.checked); });
+  }
   // Выпадающие списки: клик мимо — закрыть.
   document.addEventListener("click", (event) => {
     for (const d of document.querySelectorAll("details.multi[open]")) if (!d.contains(event.target)) d.open = false;
