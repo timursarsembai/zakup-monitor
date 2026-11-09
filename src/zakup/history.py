@@ -157,7 +157,10 @@ def fresh(conn: psycopg.Connection, total: dict[str, int]) -> list[dict]:
 
 def overview(conn: psycopg.Connection) -> dict:
     """Для вкладки «Данные» в настройках."""
-    first, last = conn.execute("SELECT min(publish_date), max(publish_date) FROM announcements").fetchone()
+    # Начало — без единичных выбросов (у портала бывают объявления со старой датой публикации).
+    first, last = conn.execute(
+        """SELECT percentile_disc(0.001) WITHIN GROUP (ORDER BY publish_date), max(publish_date)
+           FROM announcements""").fetchone()
     size = conn.execute("SELECT pg_size_pretty(pg_database_size(current_database()))").fetchone()[0]
     tables = conn.execute(
         """SELECT c.relname, pg_size_pretty(pg_total_relation_size(c.oid))

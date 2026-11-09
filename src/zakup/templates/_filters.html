@@ -209,8 +209,11 @@
   .view-switch button[aria-pressed=true] { background: var(--accent); color: var(--on-accent); }
   .view-switch svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; }
   /* Иерархия: название — главное, сумма и срок — затем, заказчик и номера — мелко. */
-  table.results a.title { color: var(--fg); font-weight: 650; font-size: 15px; }
-  table.results a.title:hover { color: var(--accent); }
+  /* Название — ссылка цветом ссылок; при наведении — заливка, как у пунктов меню. */
+  table.results a.title { color: var(--accent); font-weight: 650; font-size: 15px; border-radius: 4px;
+                          padding: 0 2px; margin: 0 -2px; -webkit-box-decoration-break: clone; box-decoration-break: clone;
+                          transition: background-color .15s; }
+  table.results a.title:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
   .st { font-size: 13px; color: var(--muted); }
   .st.st-open { color: var(--ok); font-weight: 600; }
   .due { display: inline-block; margin-top: 3px; padding: 1px 8px; border-radius: 999px; font-size: 12px; background: color-mix(in srgb, var(--fg) 8%, transparent); color: var(--fg); white-space: nowrap; }
