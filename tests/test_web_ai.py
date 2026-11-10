@@ -3,7 +3,7 @@
 
 
 from tests.web_helpers import ORIGIN, _announcement_with_lots, _login
-from zakup import auth
+from zakup import auth, db
 
 
 def test_lot_page_research_section_and_start(client, conn, monkeypatch):
@@ -197,3 +197,21 @@ def test_each_client_sees_own_research_staff_sees_all_merged(client, conn, monke
     page = client.get("/lots/90/research").text
     assert "shop.kz/a" in page and "shop.kz/b" in page and page.count('href="https://shop.kz/same') == 2  # фото и название — один товар
     assert "Все поиски по лоту вместе: 2" in page
+
+
+def test_research_fragment_shows_offers_found_so_far(client, conn):
+    from psycopg.types.json import Jsonb
+
+    from zakup import details
+
+    db.upsert_announcement(conn, {"id": 9, "name_ru": "Столы", "end_date": "2099-01-01 09:00:00"})
+    details.save(conn, {"id": 9, "endDate": "2099-01-01 09:00:00", "Lots": [{"id": 90, "trdBuyId": 9, "nameRu": "Стол", "Plans": []}]})
+    owner = conn.execute("SELECT id FROM users WHERE email = 'owner@mail.kz'").fetchone()[0]
+    conn.execute("""INSERT INTO lot_research (lot_id, user_id, provider, region, status, started_at, result)
+                    VALUES (90, %s, 'claude_code', 'Актобе', 'running', now(), %s)""",
+                 (owner, Jsonb({"partial": True, "step": "Открываю mebel.kz", "items": [
+                     {"name": "Стол дубовый", "url": "https://mebel.kz/1", "seller": "Мебель", "price": 90000}]})))
+    conn.commit()
+    _login(client)
+    page = client.get("/lots/90/research").text
+    assert "Уже нашёл:" in page and "Стол дубовый" in page and "Открываю mebel.kz…" in page
