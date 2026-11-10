@@ -256,6 +256,14 @@
     event.preventDefault();
     softApply(link.getAttribute("href"));
   });
+  // «Выбранные фильтры» над результатами: крестик у условия и «Сбросить все» — без
+  // перезагрузки. Строка внутри [data-results] и перерисовывается — делегирование от document.
+  document.addEventListener("click", (event) => {
+    const link = event.target.closest("[data-filter-link]");
+    if (!link || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    event.preventDefault();
+    softApply(link.getAttribute("href"));
+  });
   // «Мои фильтры»: выбран один (как переключатель; повторное нажатие снимает выбор).
   // Компьютер — загружается сразу; телефон (шторка) — по «Применить».
   const loadSaved = (url, scope) => {

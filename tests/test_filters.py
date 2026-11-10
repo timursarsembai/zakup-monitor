@@ -525,3 +525,26 @@ def test_division_guessed_by_name_for_lots_without_enstru(conn):
     conn.execute("UPDATE lots SET enstru = '{\"170000\"}' WHERE id = 2000")
     details.codes(conn, [200])
     assert conn.execute("SELECT divisions, divisions_guessed FROM lots WHERE id = 2000").fetchone() == (["17"], False)
+
+
+def test_words_also_in_spec_text(conn):
+    _announcement(conn, 1)
+    conn.execute("INSERT INTO lot_specs (lot_id, file_url, text) VALUES (10, 'u', 'Корпус из нержавеющей стали AISI 304')")
+    plain = Filters(advance_min=0, q="нержавеющей")
+    assert _lot_ids(conn, plain) == []
+    assert _lot_ids(conn, replace(plain, in_specs=True)) == [10]
+    where, params = replace(plain, in_specs=True).where(NOW, "announcements")
+    assert [r[0] for r in conn.execute(f"SELECT a.id FROM announcements a WHERE {where}", params)] == [1]
+    assert Filters.from_form({"applied": ["1"], "q": ["x"], "in_specs": ["1"]}).in_specs
+    assert "in_specs=1" in replace(plain, in_specs=True).to_query()
+
+
+def test_selected_conditions_link_to_search_without_them():
+    f = Filters.from_form({"applied": ["1"], "q": ["стол"], "region": ["75", "71"], "open_now": ["1"],
+                           "min_sum": ["300000"], "sort": ["end"]})
+    items = dict(f.selected("lots"))
+    assert set(items) >= {"«стол»", "г. Алматы", "г. Астана", "только с открытым приёмом заявок", "от 300 000 ₸"}
+    without_almaty = items["г. Алматы"]
+    assert "region=71" in without_almaty and "region=75" not in without_almaty and "q=" in without_almaty
+    assert "sort=end" in without_almaty and "open_now=1" not in items["только с открытым приёмом заявок"]
+    assert Filters.from_form({"applied": ["1"]}).selected() == []

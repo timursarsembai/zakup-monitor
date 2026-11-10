@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "_seo.html" import seo_block with context %}
-{% from "_filters.html" import filter_form, filter_styles, pager, sort_bar with context %}
+{% from "_filters.html" import selected_row, filter_form, filter_styles, pager, sort_bar with context %}
 {% from "_marks.html" import mark_control, mark_styles %}
 {% block title %}{{ _("Лоты") }}{% endblock %}
 {% block style %}
@@ -11,6 +11,7 @@
 {{ filter_form() }}
 
 <div data-results>
+{{ selected_row() }}
 {% set found %}{{ _("Найдено лотов:") }} <b>{{ total }}</b>{% if deadline_date %} {{ _("· окончание") }} {{ "" if f.deadline == rule else _("по") ~ " " }}{{ deadline_date.strftime("%d.%m.%Y") }}{% endif %}{% endset %}
 {{ sort_bar(found) }}
 <p class="muted">{{ _("Открытых объявлений в базе:") }} {{ stats[0] }}{% if stats[1] %}{{ _(", ещё") }} {{ stats[1] }} {{ _("ждут загрузки подробностей — пока не попадают в фильтр") }}{% endif %}{% if stats[2] %}{{ _(". Обновлено") }} {{ (stats[2]|local).strftime("%d.%m %H:%M") }}{% endif %}.</p>

@@ -15,6 +15,13 @@
 
 {% macro filter_styles() %}
   .filters-panel { border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin: 12px 0; }
+  .selected-row { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; margin: 10px 0 4px; font-size: 13px; }
+  .sel-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 6px 3px 10px; border-radius: 999px;
+              background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--fg); }
+  .sel-chip > span[aria-hidden] { font-size: 15px; line-height: 1; color: var(--muted); }
+  .sel-chip:hover > span[aria-hidden] { color: var(--accent); }
+  .sel-reset { margin-left: 4px; }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
   .fgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px 20px; }
   .fl { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
   .fgrid input:not([type=checkbox]):not([type=radio]):not([type=range]), .fgrid select { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); font: inherit; font-size: 14px; width: 100%; min-width: 0; }
@@ -274,7 +281,7 @@
   "dates": _("Даты ✓") if f.start_from or f.start_to or f.itogi_from or f.itogi_to or (f.published_from and f.published_from != "today") or f.published_to else "",
   "year": short_list(f.years | map("string") | list) if f.years else "",
   "customer": f.customer[:18] if f.customer else "",
-  "words": ("«" ~ f.q[:16] ~ "»") if f.q else (_("без слов") if f.exclude else ""),
+  "words": ("«" ~ f.q[:16] ~ "»" ~ (" · " ~ _("и в ТС") if f.in_specs else "")) if f.q else (_("без слов") if f.exclude else ""),
   "number": f.number or f.lot_number or f.enstru,
 } %}
 {% set chip_names = [("region", _("Регион")), ("category", _("Категория")), ("sum", _("Сумма")), ("deadline", _("Срок")),
@@ -321,7 +328,8 @@
     </div>
     {% endif %}
     <div data-chip="words"><label class="fl" for="f-q">{{ _("Наименование или описание лота") if lots else _("Наименование объявления") }}</label>
-      <input id="f-q" name="q" value="{{ f.q }}" placeholder="{{ _("стол или стул -аренда") }}"></div>
+      <input id="f-q" name="q" value="{{ f.q }}" placeholder="{{ _("стол или стул -аренда") }}">
+      <label class="check"><input type="checkbox" name="in_specs" value="1" {% if f.in_specs %}checked{% endif %}> {{ _("Искать и в тексте техспецификации") }}</label></div>
     <div data-chip="words"><label class="fl" for="f-exclude">{{ _("Исключить слова") }}</label>
       <input id="f-exclude" name="exclude" value="{{ f.exclude }}" placeholder="{{ _("аренда, ремонт") }}"></div>
     <div data-chip="number"><label class="fl" for="f-number">{{ _("Номер объявления") }}</label>
@@ -454,6 +462,19 @@
   </div>
 </form>
 <script src="/static/filters.js?v={{ asset_v }}"></script>
+{% endmacro %}
+
+{# Строка «Выбранные фильтры»: каждое условие — с крестиком (тот же поиск без него), и
+   «Сбросить все» — поиск без условий. Внутри [data-results]: обновляется без перезагрузки. #}
+{% macro selected_row() %}
+{% set chosen = f.selected(scope) %}
+{% if chosen %}
+<div class="selected-row" aria-label="{{ _("Выбранные фильтры") }}">
+  <span class="muted">{{ _("Выбранные фильтры:") }}</span>
+  {% for label, href in chosen %}<a class="sel-chip" href="{{ href }}" data-filter-link title="{{ _("Убрать условие") }}">{{ label }} <span aria-hidden="true">×</span><span class="sr-only">{{ _("убрать") }}</span></a>{% endfor %}
+  <a class="sel-reset" href="/{{ scope }}?applied=1&amp;sort={{ f.sort }}" data-filter-link>{{ _("Сбросить все") }}</a>
+</div>
+{% endif %}
 {% endmacro %}
 
 {% macro sort_bar(found) %}

@@ -124,6 +124,9 @@ _ANNOUNCEMENT_ORDER = {
     "published": "a.publish_date DESC NULLS LAST, a.id DESC",
 }
 DEADLINE_RULE = "rule"
+# Выражение индекса lot_specs_text_tsv (миграция 0024) — в запросах ровно так же, иначе индекс
+# не используется.
+SPEC_TSV = "to_tsvector('russian', coalesce(s.text, ''))"
 # «Окончание с» = сегодня: сдвигается каждый день, как и правило срока.
 TODAY = "today"
 
@@ -146,6 +149,8 @@ def fin_years(today: date) -> list[int]:
 @dataclass
 class Filters:
     q: str = ""
+    # Слова искать и в тексте техспецификации лота (lot_specs, индекс миграции 0024).
+    in_specs: bool = False
     exclude: str = ""
     number: str = ""
     lot_number: str = ""
@@ -236,6 +241,7 @@ class Filters:
         disable = one("disable_person")
         return cls(
             q=one("q"),
+            in_specs=one("in_specs") == "1",
             exclude=one("exclude"),
             number=one("number"),
             lot_number=one("lot_number"),
@@ -451,8 +457,14 @@ class Filters:
         # Слова ищем и в русских названиях (с морфологией), и в казахских.
         tsv, tsv_kk = ("l.tsv", "l.tsv_kk") if lots else ("a.tsv", "a.tsv_kk")
         if self.q:
+            in_specs = ""
+            if self.in_specs:
+                # Текст техспецификации (только у лотов, где он разобран) — по индексу 0024.
+                spec_lots = f"""SELECT s.lot_id FROM lot_specs s WHERE {SPEC_TSV} @@ websearch_to_tsquery('russian', %(q)s)"""
+                in_specs = (f" OR l.id IN ({spec_lots})" if lots else
+                            f" OR a.id IN (SELECT l2.trd_buy_id FROM lots l2 WHERE l2.id IN ({spec_lots}))")
             clauses.append(f"""({tsv} @@ websearch_to_tsquery('russian', %(q)s)
-                                OR {tsv_kk} @@ websearch_to_tsquery('simple', %(q)s))""")
+                                OR {tsv_kk} @@ websearch_to_tsquery('simple', %(q)s){in_specs})""")
             params["q"] = _OR.sub(" or ", _OR_KK.sub(" or ", self.q))
         if words := self.exclude.replace(",", " ").split():
             # Любое из слов исключает запись.
@@ -497,12 +509,78 @@ class Filters:
         orders = _LOT_ORDER if scope == "lots" else _ANNOUNCEMENT_ORDER
         return orders.get(self.sort, orders["advance"])
 
+    def selected(self, scope: str = "lots") -> list[tuple[str, str]]:
+        """Заданные условия для строки «Выбранные фильтры»: (подпись, ссылка на тот же поиск
+        без этого условия). Без условия = как будто поле не заполнено (applied=1)."""
+        _ = gettext
+        items: list[tuple[str, str]] = []
+
+        def add(label: str, **reset: Any) -> None:
+            items.append((label, replace(self, **reset).to_query(scope)))
+
+        money = lambda v: f"{v:,.0f}".replace(",", " ")  # noqa: E731
+        if self.q:
+            add(f"«{self.q}»" + (" " + _("и в техспецификации") if self.in_specs else ""), q="", in_specs=False)
+        if self.exclude:
+            add(_("без слов «{words}»", words=self.exclude), exclude="")
+        if self.number:
+            add(_("объявление № {number}", number=self.number), number="")
+        if self.lot_number:
+            add(_("лот № {number}", number=self.lot_number), lot_number="")
+        if self.enstru:
+            add(f"ЕНС ТРУ {self.enstru}", enstru="")
+        if self.customer:
+            add(_("заказчик «{name}»", name=self.customer), customer="")
+        for region in self.regions:
+            add(_(REGIONS.get(region, region)), regions=[r for r in self.regions if r != region])
+        if self.categories:
+            from zakup.catalog import division_name
+
+            for code in self.categories:
+                add(division_name(code, language()) or code, categories=[c for c in self.categories if c != code])
+        if self.statuses or self.stages:
+            names = [_(STAGES[s]) for s in self.stages if s in STAGES]
+            names += [_(STATUS_NAMES[s]) for s in self.statuses if s in STATUS_NAMES]
+            add(_("Статус") + ": " + ", ".join(names), statuses=[], stages=[])
+        if self.disable_person:
+            add(_("среди организаций инвалидов") if self.disable_person == "only"
+                else _("без закупок среди организаций инвалидов"), disable_person="")
+        if self.methods:
+            add(", ".join(_(METHODS[m][0]) for m in self.methods if m in METHODS), methods=[])
+        if self.subjects:
+            add(", ".join(_(SUBJECTS[s]) for s in self.subjects if s in SUBJECTS), subjects=[])
+        if self.years:
+            add(_("финансовый год {years}", years=", ".join(map(str, self.years))), years=[])
+        if self.min_sum is not None or self.max_sum is not None:
+            label = " ".join(filter(None, (
+                _("от {sum} ₸", sum=money(self.min_sum)) if self.min_sum is not None else "",
+                _("до {sum} ₸", sum=money(self.max_sum)) if self.max_sum is not None else "")))
+            add(label, min_sum=None, max_sum=None)
+        if self.deadline:
+            add(_("окончание в течение 2 рабочих дней") if self.deadline == DEADLINE_RULE
+                else _("окончание по {date}", date=self.deadline), deadline="")
+        if self.end_from == TODAY:
+            add(_("только с открытым приёмом заявок"), end_from="")
+        elif self.end_from:
+            add(f"{_('окончание')} {self.end_from} — …", end_from="")
+        if self.published_from == TODAY:
+            add(_("только опубликованные сегодня"), published_from="")
+        if self.start_from or self.start_to or self.itogi_from or self.itogi_to or self.published_to \
+                or (self.published_from and self.published_from != TODAY):
+            add(_("Даты"), start_from="", start_to="", itogi_from="", itogi_to="", published_to="",
+                published_from=TODAY if self.published_from == TODAY else "")
+        if self.advance_only or (self.advance_min, self.advance_max) != (0, 100):
+            add(_("с авансом") if self.advance_only and (self.advance_min, self.advance_max) == (0, 100)
+                else _("аванс {low}–{high}%", low=self.advance_min, high=self.advance_max),
+                advance_only=False, advance_min=0, advance_max=100)
+        return items
+
     def describe(self) -> str:
         """Условия фильтра словами — на языке интерфейса."""
         _ = gettext
         parts = []
         if self.q:
-            parts.append(f"«{self.q}»")
+            parts.append(f"«{self.q}»" + (" " + _("и в техспецификации") if self.in_specs else ""))
         if self.exclude:
             parts.append(_("без слов «{words}»", words=self.exclude))
         if self.number:
