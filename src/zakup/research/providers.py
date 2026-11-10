@@ -6,6 +6,7 @@ import logging
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 from collections.abc import Callable
@@ -114,9 +115,26 @@ def _stream_items(text: str) -> list[dict[str, Any]]:
     return found
 
 
+REPORT_TOOL = "mcp__zakup__report_offer"
+REPORT_SERVER = os.path.join(os.path.dirname(__file__), "report_mcp.py")
+
+
+def _step(block: dict[str, Any]) -> str | None:
+    """Что ИИ делает сейчас — по вызову инструмента: строка для страницы лота."""
+    data = block.get("input") or {}
+    if block.get("name") == "WebSearch" and data.get("query"):
+        return "Ищу: " + str(data["query"])[:80]
+    if block.get("name") == "WebFetch" and data.get("url"):
+        host = str(data["url"]).split("/")[2] if "://" in str(data["url"]) else str(data["url"])
+        return "Открываю " + host[:60]
+    return None
+
+
 def _run_streaming(command: list[str], workdir: str, env: dict[str, str],
-                   on_item: Callable[[dict[str, Any]], None]) -> dict[str, Any]:
-    """Claude Code с потоком событий (stream-json): найденное по ходу — в on_item сразу,
+                   on_item: Callable[[dict[str, Any]], None],
+                   on_step: Callable[[str], None] | None = None) -> dict[str, Any]:
+    """Claude Code с потоком событий (stream-json): найденное по ходу (вызовы report_offer,
+    запасной путь — строки ITEM в тексте) — в on_item сразу; что ИИ делает — в on_step;
     итог — событие result (в нём тот же structured_output, что и без потока)."""
     process = subprocess.Popen(command, cwd=workdir, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                text=True, env=env)
@@ -137,12 +155,20 @@ def _run_streaming(command: list[str], workdir: str, env: dict[str, str],
                 continue
             if event.get("type") == "assistant":
                 for block in (event.get("message") or {}).get("content") or []:
+                    found, step = [], None
                     if block.get("type") == "text":
-                        for item in _stream_items(block.get("text") or ""):
-                            try:
-                                on_item(item)
-                            except Exception as exc:  # noqa: BLE001 — показ по ходу не должен ронять поиск
-                                logger.warning("streamed item: %s", exc)
+                        found = _stream_items(block.get("text") or "")
+                    elif block.get("type") == "tool_use" and block.get("name") == REPORT_TOOL:
+                        found = [block.get("input") or {}]
+                    elif block.get("type") == "tool_use":
+                        step = _step(block)
+                    try:  # показ по ходу не должен ронять сам поиск
+                        for item in found:
+                            on_item(item)
+                        if step and on_step:
+                            on_step(step)
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("streamed event: %s", exc)
             elif event.get("type") == "result":
                 result = event
         process.wait()
@@ -156,7 +182,8 @@ def _run_streaming(command: list[str], workdir: str, env: dict[str, str],
 
 
 def _claude_code(prompt: str, model: str, schema: dict | None = None,
-                 web: bool = True, on_item: Callable[[dict[str, Any]], None] | None = None) -> dict[str, Any]:
+                 web: bool = True, on_item: Callable[[dict[str, Any]], None] | None = None,
+                 on_step: Callable[[str], None] | None = None) -> dict[str, Any]:
     binary = shutil.which("claude") or os.path.expanduser("~/.local/bin/claude")
     with tempfile.TemporaryDirectory(prefix="zakup-research-") as workdir:
         # Только веб-поиск и чтение страниц: ни файлов, ни команд.
@@ -176,7 +203,11 @@ def _claude_code(prompt: str, model: str, schema: dict | None = None,
         if on_item is not None:
             stream = list(command)
             stream[stream.index("--output-format") + 1] = "stream-json"
-            output = _run_streaming(stream + ["--verbose"], workdir, env, on_item)
+            # Инструмент «нашёл предложение» (report_mcp.py): только он, без других MCP.
+            stream[stream.index("--allowedTools") + 1] += "," + REPORT_TOOL
+            server = {"mcpServers": {"zakup": {"command": sys.executable, "args": ["-I", REPORT_SERVER]}}}
+            output = _run_streaming(stream + ["--verbose", "--mcp-config", json.dumps(server)],
+                                    workdir, env, on_item, on_step)
         else:
             try:
                 done = subprocess.run(command, cwd=workdir, capture_output=True, text=True,

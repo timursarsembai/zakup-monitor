@@ -8,6 +8,7 @@
   <p><span class="spinner"></span> {% if job.base_id %}{{ _("Ищу ещё предложения — найденные ниже останутся, новые добавятся.") }}{% elif job.status == "queued" %}{{ _("В очереди") }}{% if job.ahead %}{{ _(": впереди") }} {{ job.ahead }}{% endif %}…{% else %}{{ _("Ищу товары по спецификации — первые предложения появятся через полминуту-минуту, весь поиск — 2–5 минут…") }}{% endif %}
     <span class="muted">{{ _("· регион:") }} {{ job.region }}{% if job.whole_kz %} {{ _("и весь Казахстан") }}{% endif %}</span></p>
   {% set partial = job.result["items"] if job.status == "running" and job.result and job.result.partial else [] %}
+  {% if job.status == "running" and job.result and job.result.step %}<p class="muted step">{{ job.result.step }}…</p>{% endif %}
   {% if partial %}
   {# Найдено по ходу поиска (zakup.research.queue._partial_saver): итог по схеме заменит. #}
   <div class="partial-box">

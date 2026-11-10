@@ -317,14 +317,19 @@ def test_streaming_items_reach_callback_and_result_is_final(monkeypatch, tmp_pat
         {"type": "system", "subtype": "init"},
         {"type": "assistant", "message": {"content": [{"type": "text", "text":
             'Нашёл:\nITEM {"name": "Диван", "url": "https://shop.kz/1", "price": 100}\nITEM {битый'}]}},
+        {"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "name": "WebFetch", "input": {"url": "https://mebel.kz/divany"}},
+            {"type": "tool_use", "name": "mcp__zakup__report_offer", "input": {"name": "Диван 2", "url": "https://mebel.kz/2"}}]}},
         {"type": "result", "subtype": "success", "structured_output": {"items": []}, "total_cost_usd": 0.01},
     ]
     script = tmp_path / "fake.py"
     script.write_text("import sys\nfor line in sys.argv[1:]:\n    print(line, flush=True)\n")
-    got = []
+    got, steps = [], []
     output = prov._run_streaming([sys.executable, str(script), *map(_json.dumps, events)],
-                                 str(tmp_path), {}, got.append)
-    assert got == [{"name": "Диван", "url": "https://shop.kz/1", "price": 100}]
+                                 str(tmp_path), {}, got.append, steps.append)
+    assert got == [{"name": "Диван", "url": "https://shop.kz/1", "price": 100},
+                   {"name": "Диван 2", "url": "https://mebel.kz/2"}]
+    assert steps == ["Открываю mebel.kz"]
     assert output["structured_output"] == {"items": []} and output["total_cost_usd"] == 0.01
 
 
@@ -335,7 +340,8 @@ def test_found_items_are_shown_while_search_runs(conn, monkeypatch):
     url = os.environ["TEST_DATABASE_URL"]
     seen_while_running = []
 
-    def fake(prompt, model, on_item=None, **_):
+    def fake(prompt, model, on_item=None, on_step=None, **_):
+        on_step("Ищу: стол")
         on_item({"name": "Стол", "url": "https://a.kz/1", "price": 90000, "in_region": True})
         on_item({"name": "Стол", "url": "https://a.kz/1", "price": 90000})  # повтор — один раз
         on_item({"name": "Плохая ссылка", "url": "javascript:alert(1)"})  # ссылки не http — нет
@@ -349,5 +355,17 @@ def test_found_items_are_shown_while_search_runs(conn, monkeypatch):
     research.work(url, ["claude_code"], once=True)
     status, partial = seen_while_running[0]
     assert status == "running" and partial["partial"] and [i["url"] for i in partial["items"]] == ["https://a.kz/1"]
+    assert partial["step"] == "Ищу: стол"
     final = research.latest(conn, 90)["result"]
     assert not final.get("partial") and final["items"][0]["name"] == "Стол итоговый"
+
+
+def test_report_mcp_server_answers_protocol():
+    from zakup.research import report_mcp
+
+    init = report_mcp.answer({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}})
+    assert init["result"]["protocolVersion"] == "2025-06-18" and "tools" in init["result"]["capabilities"]
+    assert report_mcp.answer({"jsonrpc": "2.0", "method": "notifications/initialized"}) is None
+    tools = report_mcp.answer({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})["result"]["tools"]
+    assert [t["name"] for t in tools] == ["report_offer"]
+    assert report_mcp.answer({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {}})["result"]["content"]
