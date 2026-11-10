@@ -45,7 +45,7 @@ def test_queue_runs_once_and_stores_result(conn, monkeypatch):
     user = _lot(conn)
     job = research.enqueue(conn, user, 90, "г.Актобе", True)
     assert research.enqueue(conn, user, 90, "г.Актобе", True) == job  # одна активная на лот
-    monkeypatch.setattr(research.providers, "_claude_code", lambda prompt, model: {
+    monkeypatch.setattr(research.providers, "_claude_code", lambda prompt, model, **_: {
         "summary": "ok", "region_searched": "Актобе",
         "items": [{"name": "Стол", "url": "https://m.kz/1", "in_region": True, "unit_price": 80000}]})
     research.work(os.environ["TEST_DATABASE_URL"], ["claude_code"], once=True)
@@ -109,7 +109,7 @@ def test_find_more_extends_saved_result(conn, monkeypatch):
              "items": [{"name": "Стол 1", "url": "https://a.kz/1", "in_region": True, "unit_price": 90000}]}
     calls = []
 
-    def fake(prompt, model):
+    def fake(prompt, model, **_):
         calls.append(prompt)
         return first if len(calls) == 1 else (
             {"items": [{"name": "Стол 1", "url": "https://a.kz/1", "unit_price": 90000},
@@ -305,3 +305,49 @@ def test_client_sources_wait_for_review_and_stay_short(conn):
     assert "evil.kz" in {r[1] for r in sources.listing(conn, user, staff=False)}
     conn.execute("UPDATE sources SET checked = true WHERE domain = 'evil.kz'")
     assert "evil.kz" in sources.for_prompt(conn)
+
+
+def test_streaming_items_reach_callback_and_result_is_final(monkeypatch, tmp_path):
+    import json as _json
+    import sys
+
+    from zakup.research import providers as prov
+
+    events = [
+        {"type": "system", "subtype": "init"},
+        {"type": "assistant", "message": {"content": [{"type": "text", "text":
+            'Нашёл:\nITEM {"name": "Диван", "url": "https://shop.kz/1", "price": 100}\nITEM {битый'}]}},
+        {"type": "result", "subtype": "success", "structured_output": {"items": []}, "total_cost_usd": 0.01},
+    ]
+    script = tmp_path / "fake.py"
+    script.write_text("import sys\nfor line in sys.argv[1:]:\n    print(line, flush=True)\n")
+    got = []
+    output = prov._run_streaming([sys.executable, str(script), *map(_json.dumps, events)],
+                                 str(tmp_path), {}, got.append)
+    assert got == [{"name": "Диван", "url": "https://shop.kz/1", "price": 100}]
+    assert output["structured_output"] == {"items": []} and output["total_cost_usd"] == 0.01
+
+
+def test_found_items_are_shown_while_search_runs(conn, monkeypatch):
+    import psycopg as _psycopg
+
+    user = _lot(conn)
+    url = os.environ["TEST_DATABASE_URL"]
+    seen_while_running = []
+
+    def fake(prompt, model, on_item=None, **_):
+        on_item({"name": "Стол", "url": "https://a.kz/1", "price": 90000, "in_region": True})
+        on_item({"name": "Стол", "url": "https://a.kz/1", "price": 90000})  # повтор — один раз
+        on_item({"name": "Плохая ссылка", "url": "javascript:alert(1)"})  # ссылки не http — нет
+        with _psycopg.connect(url) as other:
+            seen_while_running.append(other.execute(
+                "SELECT status, result FROM lot_research ORDER BY id DESC LIMIT 1").fetchone())
+        return {"summary": "итог", "region_searched": "Актобе",
+                "items": [{"name": "Стол итоговый", "url": "https://a.kz/1", "unit_price": 90000, "in_region": True}]}
+    monkeypatch.setattr(research.providers, "_claude_code", fake)
+    research.enqueue(conn, user, 90, "Актобе", True)
+    research.work(url, ["claude_code"], once=True)
+    status, partial = seen_while_running[0]
+    assert status == "running" and partial["partial"] and [i["url"] for i in partial["items"]] == ["https://a.kz/1"]
+    final = research.latest(conn, 90)["result"]
+    assert not final.get("partial") and final["items"][0]["name"] == "Стол итоговый"

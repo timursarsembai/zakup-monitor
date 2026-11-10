@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import tempfile
 import threading
+from collections.abc import Callable
 from typing import Any
 
 import httpx
@@ -97,8 +98,65 @@ def reset_usage() -> None:
 _ENV_KEEP = {"PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "SHELL", "TERM", "XDG_RUNTIME_DIR"}
 
 
+def _stream_items(text: str) -> list[dict[str, Any]]:
+    """Строки «ITEM {json}» из текста модели — предложения, найденные по ходу поиска."""
+    found = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line.startswith("ITEM "):
+            continue
+        try:
+            item = json.loads(line[5:])
+        except ValueError:
+            continue
+        if isinstance(item, dict):
+            found.append(item)
+    return found
+
+
+def _run_streaming(command: list[str], workdir: str, env: dict[str, str],
+                   on_item: Callable[[dict[str, Any]], None]) -> dict[str, Any]:
+    """Claude Code с потоком событий (stream-json): найденное по ходу — в on_item сразу,
+    итог — событие result (в нём тот же structured_output, что и без потока)."""
+    process = subprocess.Popen(command, cwd=workdir, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                               text=True, env=env)
+    killed = threading.Event()
+
+    def kill() -> None:
+        killed.set()
+        process.kill()
+
+    timer = threading.Timer(CLAUDE_TIMEOUT, kill)
+    timer.start()
+    result: dict[str, Any] = {}
+    try:
+        for line in process.stdout:
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            if event.get("type") == "assistant":
+                for block in (event.get("message") or {}).get("content") or []:
+                    if block.get("type") == "text":
+                        for item in _stream_items(block.get("text") or ""):
+                            try:
+                                on_item(item)
+                            except Exception as exc:  # noqa: BLE001 — показ по ходу не должен ронять поиск
+                                logger.warning("streamed item: %s", exc)
+            elif event.get("type") == "result":
+                result = event
+        process.wait()
+    finally:
+        timer.cancel()
+    if killed.is_set():
+        raise ResearchError("Claude не уложился в 15 минут")
+    if not result:
+        raise ResearchError(f"Claude Code завершился без ответа: {process.stderr.read()[-300:]}")
+    return result
+
+
 def _claude_code(prompt: str, model: str, schema: dict | None = None,
-                 web: bool = True) -> dict[str, Any]:
+                 web: bool = True, on_item: Callable[[dict[str, Any]], None] | None = None) -> dict[str, Any]:
     binary = shutil.which("claude") or os.path.expanduser("~/.local/bin/claude")
     with tempfile.TemporaryDirectory(prefix="zakup-research-") as workdir:
         # Только веб-поиск и чтение страниц: ни файлов, ни команд.
@@ -113,17 +171,23 @@ def _claude_code(prompt: str, model: str, schema: dict | None = None,
             "--settings", json.dumps(_LOCAL_DENY),
             "--max-turns", "60" if web else "3", "--json-schema", json.dumps(schema or RESULT_SCHEMA),
         ]
-        try:
-            # Пароль базы и ключ шифрования нужны службе, а не Claude Code.
-            env = {k: v for k, v in os.environ.items() if k in _ENV_KEEP}
-            done = subprocess.run(command, cwd=workdir, capture_output=True, text=True,
-                                  timeout=CLAUDE_TIMEOUT, env=env)
-        except subprocess.TimeoutExpired:
-            raise ResearchError("Claude не уложился в 15 минут") from None
-    try:
-        output = json.loads(done.stdout)
-    except json.JSONDecodeError:
-        raise ResearchError(f"Claude Code вернул не JSON: {done.stderr[-300:] or done.stdout[-300:]}") from None
+        # Пароль базы и ключ шифрования нужны службе, а не Claude Code.
+        env = {k: v for k, v in os.environ.items() if k in _ENV_KEEP}
+        if on_item is not None:
+            stream = list(command)
+            stream[stream.index("--output-format") + 1] = "stream-json"
+            output = _run_streaming(stream + ["--verbose"], workdir, env, on_item)
+        else:
+            try:
+                done = subprocess.run(command, cwd=workdir, capture_output=True, text=True,
+                                      timeout=CLAUDE_TIMEOUT, env=env)
+            except subprocess.TimeoutExpired:
+                raise ResearchError("Claude не уложился в 15 минут") from None
+            try:
+                output = json.loads(done.stdout)
+            except json.JSONDecodeError:
+                raise ResearchError(
+                    f"Claude Code вернул не JSON: {done.stderr[-300:] or done.stdout[-300:]}") from None
     if output.get("is_error") or not output.get("structured_output"):
         raise ResearchError(f"Claude Code: {str(output.get('result') or output.get('subtype'))[:300]}")
     # Во сколько обошёлся бы запуск по API: считаем себестоимость запроса для тарифов.

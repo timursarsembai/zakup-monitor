@@ -54,6 +54,16 @@
   table.research .plus { color: var(--ok); font-weight: 600; }
   table.research .minus { color: var(--bad); font-weight: 600; }
   .research-box h3 { font-size: 15px; margin: 16px 0 6px; }
+  .partial-box { border: 1px dashed var(--line); border-radius: 12px; padding: 10px 14px; margin: 8px 0 14px; }
+  .partial-list { list-style: none; margin: 6px 0 0; padding: 0; }
+  .partial-list li { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 6px 0; border-top: 1px solid var(--line); animation: appear .4s ease; }
+  .partial-list li:first-child { border-top: 0; }
+  .partial-list img { width: 44px; height: 44px; object-fit: contain; border-radius: 6px; background: #fff; }
+  .partial-list li > span { display: grid; min-width: 0; }
+  .partial-list li > span a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .partial-list li > span .muted { font-size: 13px; }
+  @keyframes appear { from { opacity: 0; transform: translateY(4px); } }
+  @media (prefers-reduced-motion: reduce) { .partial-list li { animation: none; } }
   .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin 1s linear infinite; vertical-align: -2px; }
   @keyframes spin { to { transform: rotate(360deg); } }
   .r-switch { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; margin: 8px 0; }

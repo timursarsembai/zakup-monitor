@@ -180,6 +180,25 @@ def _job(conn: psycopg.Connection, job_id: int) -> dict[str, Any] | None:
     return dict(zip(keys, row, strict=True))
 
 
+def _partial_saver(conn: psycopg.Connection, job: dict[str, Any]):
+    """Предложения, найденные по ходу поиска, — сразу в result задачи «в работе» (с пометкой
+    partial): страница лота показывает их, пока поиск идёт. Итог по схеме потом заменит."""
+    items: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    def save(item: dict[str, Any]) -> None:
+        for clean_item in clean({"items": [item]}).get("items", []):
+            if clean_item["url"] in seen:
+                continue
+            seen.add(clean_item["url"])
+            items.append(clean_item)
+            conn.execute("UPDATE lot_research SET result = %s WHERE id = %s AND status = 'running'",
+                         (Jsonb({"items": items, "partial": True}), job["id"]))
+            conn.commit()
+
+    return save
+
+
 def run_job(conn: psycopg.Connection, job: dict[str, Any]) -> dict[str, Any]:
     context = lot_context(conn, job["lot_id"])
     if context is None:
@@ -195,7 +214,7 @@ def run_job(conn: psycopg.Connection, job: dict[str, Any]) -> dict[str, Any]:
     # Поиск идёт минутами: не держим транзакцию открытой.
     conn.commit()
     if job["provider"] == "claude_code":
-        found = clean(prov._claude_code(prompt, job["model"]))
+        found = clean(prov._claude_code(prompt, job["model"], on_item=_partial_saver(conn, job)))
     else:
         runner = prov._anthropic if job["provider"] == "anthropic" else prov._openai
         found = clean(runner(prompt, job["model"], key))

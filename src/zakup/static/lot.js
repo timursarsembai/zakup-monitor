@@ -72,7 +72,7 @@ const PAGE = document.querySelector("[data-lot-page]");
   // Вид «таблица / плитка» — в app.js (общий для всех страниц); фрагмент обновился — применить заново.
   const applyRView = () => window.applyRView && window.applyRView();
   applyRView();
-  // Пока поиск идёт — обновляем результат раз в 10 секунд.
+  // Пока поиск идёт — обновляем раз в 4 секунды: найденное по ходу появляется сразу.
   const research = document.querySelector("[data-research]");
   const poll = async () => {
     const status = research.querySelector("[data-research-status]")?.dataset.researchStatus;
@@ -87,8 +87,8 @@ const PAGE = document.querySelector("[data-lot-page]");
       if (response.ok) { research.innerHTML = await response.text(); applyRView(); }
     } catch {}
     const now = research.querySelector("[data-research-status]")?.dataset.researchStatus;
-    if (now === "queued" || now === "running") setTimeout(poll, 10000);
+    if (now === "queued" || now === "running") setTimeout(poll, 4000);
     else document.querySelector(".research-form .primary")?.removeAttribute("disabled");
   };
-  setTimeout(poll, 10000);
+  setTimeout(poll, 4000);
 })();
