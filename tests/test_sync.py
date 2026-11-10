@@ -163,3 +163,30 @@ def test_only_one_active_history_run(conn):
         conn.execute("INSERT INTO backfill_runs (since) VALUES ('2026-09-01')")
     conn.rollback()
     assert first and history.start(conn, date(2026, 9, 1)) is None
+
+
+def test_details_retry_announcement_after_deadlock(conn, monkeypatch):
+    import psycopg
+
+    from zakup import details
+
+    class Portal:
+        def graphql(self, query):
+            return {"TrdBuy": [{"id": 5, "nameKz": "x", "Lots": []}, {"id": 6, "nameKz": "y", "Lots": []}]}
+
+    for i in (5, 6):
+        db.upsert_announcement(conn, {"id": i, "name_ru": "Реагенты", "end_date": "2099-01-01 09:00:00"})
+    conn.commit()
+    real, calls = details.save, []
+
+    def save(conn, item):
+        calls.append(item["id"])
+        real(conn, item)
+        if calls == [5, 6]:  # встречная служба держит лоты: база отменила вторую запись
+            raise psycopg.errors.DeadlockDetected("deadlock detected")
+
+    monkeypatch.setattr(details, "save", save)
+    assert details.refresh(conn, Portal(), 10) == 2
+    assert calls == [5, 6, 6]
+    # Первое объявление сохранено своей транзакцией, откат второго его не задел.
+    assert conn.execute("SELECT count(*) FROM announcements WHERE detail ? 'nameKz'").fetchone()[0] == 2

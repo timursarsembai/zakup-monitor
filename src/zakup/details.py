@@ -313,6 +313,19 @@ def refresh_finished(conn: psycopg.Connection, client: Client, limit: int) -> in
     return _fetch(conn, client, ids)
 
 
+def _save_retrying(conn: psycopg.Connection, item: dict[str, Any]) -> None:
+    """Одно объявление — одна транзакция: лоты держим недолго. Подробности открытых и
+    завершённых (worker и archive) и повторный проход REST пишут в одни лоты; встречную
+    блокировку (DeadlockDetected) база снимает, отменив одну сторону, — её повторяем."""
+    try:
+        save(conn, item)
+    except psycopg.errors.DeadlockDetected:
+        conn.rollback()
+        logger.warning("details of %s: deadlock, retrying", item.get("id"))
+        save(conn, item)
+    conn.commit()
+
+
 def _fetch(conn: psycopg.Connection, client: Client, ids: list[int]) -> int:
     conn.commit()  # ждём портал без открытой транзакции (выборка ids выше её открыла)
     done = 0
@@ -321,7 +334,7 @@ def _fetch(conn: psycopg.Connection, client: Client, ids: list[int]) -> int:
         data = client.graphql(BATCH_QUERY % {"limit": len(batch), "ids": json.dumps(batch)})
         found = data.get("TrdBuy") or []
         for item in found:
-            save(conn, item)
+            _save_retrying(conn, item)
         # Объявления, которых GraphQL не вернул, не перечитываем по кругу до завтра.
         missing = set(batch) - {int(item["id"]) for item in found}
         if missing:
