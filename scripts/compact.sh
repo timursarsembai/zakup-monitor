@@ -36,5 +36,7 @@ text="Сжатие таблиц базы — ${result} за ${seconds} с.
 Объявления: ${before_ann} → $(size announcements)
 Вся база: ${before_db} → $(db_size)"
 echo "$text"
+# Вывод — в журнал службы (journalctl --user -u zakup-compact): видно, если сообщение не ушло.
 docker compose run --rm --no-deps -e COMPACT_TEXT="$text" --entrypoint python worker \
-  -c "import os; from zakup import notify; notify.send(os.environ['COMPACT_TEXT'])" >/dev/null 2>&1
+  -c "import os; from zakup import notify; print('telegram:', notify.send(os.environ['COMPACT_TEXT']))" 2>&1 \
+  | grep -v "^ Container"
