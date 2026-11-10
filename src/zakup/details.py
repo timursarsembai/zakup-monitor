@@ -132,7 +132,7 @@ def save(conn: psycopg.Connection, item: dict[str, Any]) -> None:
                customer_name_ru = coalesce(%(customer_name_ru)s, customer_name_ru),
                detail = %(detail)s, details_fetched_at = now(), lots_ready = %(lots_ready)s,
                -- Когда лоты пришли впервые (справа — прежнее значение lots_ready): замер задержки.
-               lots_ready_at = CASE WHEN %(lots_ready)s AND NOT lots_ready THEN now() ELSE lots_ready_at END,
+               lots_ready_at = CASE WHEN %(lots_ready)s AND lots_ready_at IS NULL THEN now() ELSE lots_ready_at END,
                details_update_date = coalesce(%(last_update_date)s, last_update_date)
            WHERE id = %(id)s""",
         {**fields, "detail": Jsonb(item), "lots_ready": bool(lots)},
@@ -167,14 +167,53 @@ def codes(conn: psycopg.Connection, announcement_ids: list[int]) -> None:
                  {"ids": announcement_ids})
     conn.execute(
         """UPDATE lots l SET regions = codes2(coalesce(nullif(l.kato, '{}'), a.kato)),
-                             divisions = codes2(l.enstru)
+                             divisions = codes2(l.enstru), divisions_guessed = false
            FROM announcements a WHERE a.id = l.trd_buy_id AND l.trd_buy_id = ANY(%(ids)s)""",
         {"ids": announcement_ids})
+    guess_divisions(conn, "l.trd_buy_id = ANY(%(ids)s)", {"ids": announcement_ids})
+    _announcement_divisions(conn, announcement_ids)
+
+
+def _announcement_divisions(conn: psycopg.Connection, announcement_ids: list[int]) -> None:
+    """Разделы объявления — все разделы его лотов (и определённые по названию)."""
     conn.execute(
-        """UPDATE announcements a SET divisions = (SELECT codes2(array_agg(c)) FROM lots l, unnest(l.enstru) c
+        """UPDATE announcements a SET divisions = (SELECT codes2(array_agg(c)) FROM lots l, unnest(l.divisions) c
                                                    WHERE l.trd_buy_id = a.id)
            WHERE a.id = ANY(%(ids)s)""",
         {"ids": announcement_ids})
+
+
+# Надёжное название: столько лотов с кодом и такая доля их в одном разделе.
+NAME_MIN_LOTS = 3
+NAME_MIN_SHARE = 0.7
+
+
+def refresh_name_divisions(conn: psycopg.Connection) -> int:
+    """Таблица «название → раздел» по лотам с настоящим кодом ЕНС ТРУ (миграция 0023)."""
+    conn.execute("DELETE FROM name_divisions")
+    count = conn.execute(
+        """INSERT INTO name_divisions (name, division, lots, share)
+           SELECT n, d, c, c::real / total FROM (
+               SELECT n, d, count(*) AS c, sum(count(*)) OVER (PARTITION BY n) AS total,
+                      row_number() OVER (PARTITION BY n ORDER BY count(*) DESC, d) AS rk
+               FROM (SELECT lower(btrim(name_ru)) AS n, left(enstru[1], 2) AS d FROM lots
+                     WHERE enstru IS NOT NULL AND enstru <> '{}' AND name_ru IS NOT NULL) coded
+               GROUP BY n, d) ranked
+           WHERE rk = 1 AND total >= %(min_lots)s AND c::real / total >= %(min_share)s""",
+        {"min_lots": NAME_MIN_LOTS, "min_share": NAME_MIN_SHARE}).rowcount
+    conn.commit()
+    return count
+
+
+def guess_divisions(conn: psycopg.Connection, where: str = "true", params: dict | None = None) -> int:
+    """Лотам без кода ЕНС ТРУ — раздел по названию (только изменившиеся строки). where —
+    условие на лоты l (alias), например «l.trd_buy_id = ANY(%(ids)s)»."""
+    return conn.execute(
+        f"""UPDATE lots l SET divisions = ARRAY[nd.division], divisions_guessed = true
+            FROM name_divisions nd
+            WHERE nd.name = lower(btrim(l.name_ru)) AND (l.enstru IS NULL OR l.enstru = '{{}}')
+              AND l.divisions IS DISTINCT FROM ARRAY[nd.division] AND {where}""",
+        params or {}).rowcount
 
 
 def fill_codes(conn: psycopg.Connection, batch: int = 2000) -> int:
@@ -191,6 +230,23 @@ def fill_codes(conn: psycopg.Connection, batch: int = 2000) -> int:
         conn.execute("""UPDATE lots l SET regions = codes2(coalesce(nullif(l.kato, '{}'),
                             (SELECT a.kato FROM announcements a WHERE a.id = l.trd_buy_id))),
                             divisions = codes2(l.enstru) WHERE l.id = ANY(%s)""", (ids,))
+        conn.commit()
+        done += len(ids)
+    # Разделы по названию: таблицу — заново, лотам без кода — только изменившееся, пачками.
+    refresh_name_divisions(conn)
+    while ids := [r[0] for r in conn.execute(
+            """SELECT l.id FROM lots l JOIN name_divisions nd ON nd.name = lower(btrim(l.name_ru))
+               WHERE (l.enstru IS NULL OR l.enstru = '{}') AND l.divisions IS DISTINCT FROM ARRAY[nd.division]
+               LIMIT %s""", (batch,))]:
+        guess_divisions(conn, "l.id = ANY(%(ids)s)", {"ids": ids})
+        # Лоты уже были в базе: раздел появился задним числом — подписки с категорией не
+        # должны прислать их как новые.
+        from zakup import matcher
+
+        matcher.mark_seen(conn, ids)
+        announcements = [r[0] for r in conn.execute(
+            "SELECT DISTINCT trd_buy_id FROM lots WHERE id = ANY(%s) AND trd_buy_id IS NOT NULL", (ids,))]
+        _announcement_divisions(conn, announcements)
         conn.commit()
         done += len(ids)
     return done

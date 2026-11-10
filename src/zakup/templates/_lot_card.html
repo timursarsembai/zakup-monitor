@@ -128,7 +128,10 @@
     {% else %}
     <p style="margin:10px 0 0">{{ _("Закупка не состоялась") }}{% if r.reason %} {{ _("в связи с") }} {{ r.reason }}{% endif %}.</p>
     {% endif %}
-    {% if r.offers %}
+    {% if r.offers and not request.state.paid %}
+    {# Все участники с ценами — по подписке; победитель и цена открыты всем. #}
+    <p class="muted" style="margin:8px 0 0">{{ _("Участников:") }} {{ r.offers | length }} · <button type="button" class="link-button" data-paid data-feature="results_offers">{{ _("Все участники с ценами") }} 🔒</button></p>
+    {% elif r.offers %}
     <div class="table-wrap" style="margin-top:10px"><table>
       <tr><th>№</th><th>{{ _("Поставщик") }}</th><th>{{ _("БИН/ИИН") }}</th><th>{{ _("Цена за ед., ₸") }}</th><th>{{ _("Сумма, ₸") }}</th><th>{{ _("Подана") }}</th></tr>
       {% for o in r.offers %}

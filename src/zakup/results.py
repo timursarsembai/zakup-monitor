@@ -172,7 +172,10 @@ def _save_protocol(conn: psycopg.Connection, detail: dict, url: str) -> int:
                    winner_name = excluded.winner_name, winner_total = excluded.winner_total,
                    second_bin = excluded.second_bin, second_name = excluded.second_name,
                    offers = excluded.offers, protocol_url = excluded.protocol_url,
-                   parsed_at = now(), result_date = coalesce(lot_results.result_date, excluded.result_date)""",
+                   parsed_at = now(),
+                   -- Дата итогов из подробностей, если уже известна; иначе — прежняя.
+                   result_date = coalesce((SELECT a.itogi_date FROM lots l JOIN announcements a ON a.id = l.trd_buy_id
+                                           WHERE l.id = excluded.lot_id), lot_results.result_date)""",
             (lot_id, result["outcome"], result.get("reason"), result.get("winner_bin"),
              result.get("winner_name"), winner and winner["total"], result.get("second_bin"),
              result.get("second_name"), Jsonb(result["offers"]), url, lot_id),

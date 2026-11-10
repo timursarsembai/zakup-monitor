@@ -363,7 +363,12 @@ def test_organization_pages_for_customer_and_supplier(client, conn):
     assert client.get("/org/990740009999").status_code == 404
     assert client.get("/org/abc").status_code == 404
     lot = client.get("/lots/9001").text
-    assert f'href="/org/{customer}"' in lot and f'href="/org/{person}">ИП Иванов</a>' in lot
+    # Гостю — победитель и число участников; все участники с ценами — по подписке.
+    assert f'href="/org/{customer}"' in lot and f'href="/org/{person}">ИП Иванов</a>' not in lot
+    assert "Все участники с ценами" in lot
+    _login(client)
+    assert f'href="/org/{person}">ИП Иванов</a>' in client.get("/lots/9001").text
+    client.post("/logout", headers=ORIGIN)
     from zakup import orgs
     orgs.refresh_directory(conn)
     index = client.get("/sitemap.xml").text
@@ -609,6 +614,9 @@ def test_results_page_filters_summary_and_paid_export(client, conn):
     assert "ТОО Победа" not in client.get("/results?region=71").text
     assert "ТОО Победа" in client.get("/results?category=17&winner=победа").text
     assert "Найдено итогов: <b>0</b>" in client.get("/results?outcome=failed").text
+    # С фильтром по победителю несостоявшиеся не в выборке: долю не показываем (не «0%»).
+    assert "не состоялись (0)" in client.get("/results?winner=победа").text
+    assert "—</b><span>не состоялись" in client.get("/results?winner=победа").text.replace("\n", "")
     assert client.get("/results?period=evil&sort=x;drop&page=-3&min_sum=abc").status_code == 200
     # Excel — только по подписке; администратору (тестовый вход) — можно.
     assert client.get("/results/export.xlsx", follow_redirects=False).status_code in (302, 303, 401, 402, 403)
@@ -639,3 +647,9 @@ def test_suppliers_by_name_when_lot_has_no_enstru(conn):
     assert s["level"] == "name" and {r["bin"] for r in s["rest"]} == {"333333333333", "444444444444"}
     winner = next(r for r in s["rest"] if r["bin"] == "333333333333")
     assert winner["wins"] == 1 and round(float(winner["discount"]), 2) == 0.10
+
+
+def test_xlsx_text_drops_control_characters():
+    from zakup.web.core import xlsx_text
+
+    assert xlsx_text("Стол\x0bдубовый\x00") == "Столдубовый" and xlsx_text(5) == 5

@@ -507,3 +507,21 @@ def test_lots_ready_at_set_once_when_lots_arrive(conn):
     _announcement(conn, 7)
     assert conn.execute("SELECT lots_ready_at FROM announcements WHERE id = 7").fetchone()[0] == first
     assert history.lots_delay(conn)["count"] >= 0
+
+
+def test_division_guessed_by_name_for_lots_without_enstru(conn):
+    from zakup import details
+
+    for i in range(3):  # три лота «Диван» с кодом мебели
+        _announcement(conn, 100 + i, lots=[{"id": 1000 + i, "amount": 500000, "prepayment": 30, "kato": ["751410000"],
+                                            "name": "Диван"}])
+        conn.execute("UPDATE lots SET enstru = '{\"310112\"}' WHERE id = %s", (1000 + i,))
+    _announcement(conn, 200, lots=[{"id": 2000, "amount": 500000, "prepayment": 30, "kato": ["751410000"], "name": "Диван "}])
+    details.fill_codes(conn)
+    assert conn.execute("SELECT divisions, divisions_guessed FROM lots WHERE id = 2000").fetchone() == (["31"], True)
+    assert conn.execute("SELECT divisions FROM announcements WHERE id = 200").fetchone() == (["31"],)
+    assert 2000 in _lot_ids(conn, Filters(advance_min=0, disable_person="", categories=["31"]))
+    # Настоящий код из подробностей заменяет догадку.
+    conn.execute("UPDATE lots SET enstru = '{\"170000\"}' WHERE id = 2000")
+    details.codes(conn, [200])
+    assert conn.execute("SELECT divisions, divisions_guessed FROM lots WHERE id = 2000").fetchone() == (["17"], False)

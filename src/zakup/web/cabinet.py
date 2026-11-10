@@ -67,10 +67,12 @@ def export(request: Request, user: Paid):
                   "Победитель", "Сумма победителя, ₸", "Ссылка"])
     for row in rows:
         end = row[5].astimezone(PORTAL_TZ).replace(tzinfo=None) if row[5] else None
-        sheet.append([row[0], row[1], row[2], row[3], row[4], end, row[6], row[7], row[8],
+        from zakup.web.core import xlsx_text
+
+        sheet.append([xlsx_text(v) for v in [row[0], row[1], row[2], row[3], row[4], end, row[6], row[7], row[8],
                       row[9], row[10], row[11], row[12], row[13],
                       ", ".join(templates.env.globals["region_names"](row[14])), row[15], row[16],
-                      f"{SITE_URL}/lots/{row[18]}"])
+                      f"{SITE_URL}/lots/{row[18]}"]])
         # Названия с портала пишет кто угодно: «=HYPERLINK(…)» Excel выполнил бы как
         # формулу. Такие ячейки — простым текстом.
         for cell in sheet[sheet.max_row]:

@@ -181,11 +181,16 @@ def lots_delay(conn: psycopg.Connection) -> dict[str, Any]:
     """Через сколько минут после начала приёма заявок и после появления объявления в базе
     к нам приходят лоты (за сутки): медиана, 90% и худший случай."""
     row = conn.execute(
+        # Лоты, пришедшие раньше начала приёма, — «сразу» (0), а не минус. Объявления, которые
+        # мы увидели больше чем через час после публикации (были в базе до замера, миграция
+        # 0022 проставила им время миграции), — не считаем: исказили бы «после появления у нас».
         """WITH d AS (
-               SELECT extract(epoch FROM lots_ready_at - greatest(start_date, publish_date)) / 60 AS after_start,
-                      extract(epoch FROM lots_ready_at - first_seen_at) / 60 AS after_seen
+               SELECT greatest(0, extract(epoch FROM lots_ready_at - greatest(start_date, publish_date)) / 60)
+                          AS after_start,
+                      greatest(0, extract(epoch FROM lots_ready_at - first_seen_at) / 60) AS after_seen
                FROM announcements
-               WHERE lots_ready_at > now() - interval '1 day' AND first_seen_at > now() - interval '2 days')
+               WHERE lots_ready_at > now() - interval '1 day'
+                 AND first_seen_at < publish_date + interval '1 hour')
            SELECT count(*),
                   percentile_cont(0.5) WITHIN GROUP (ORDER BY after_start),
                   percentile_cont(0.9) WITHIN GROUP (ORDER BY after_start), max(after_start),

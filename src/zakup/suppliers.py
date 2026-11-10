@@ -69,20 +69,25 @@ def _available(conn: psycopg.Connection, code: str) -> dict[str, int]:
 NAME_LOTS = 2000
 
 
-NAME_TTL = 900
-_name_cache: dict[int, tuple[float, list[dict[str, Any]]]] = {}
+NAME_TTL = 1800
+NAME_CACHE = 5000
+_name_cache: dict[tuple[str, str], tuple[float, list[dict[str, Any]]]] = {}
 
 
 def _by_name(conn: psycopg.Connection, lot_id: int, region: str) -> list[dict[str, Any]]:
-    """Подбор по названию держим 15 минут: считается по тысячам итогов (~0,4 с), а меняется
-    медленно. Копии строк — вызывающий режет снижение цены для гостей."""
-    hit = _name_cache.get(lot_id)
+    """Подбор по названию держим 30 минут: считается по тысячам итогов (~0,4 с), а меняется
+    медленно. Ключ — название и регион: у тысяч лотов одинаковые названия («Диван»), так
+    повторный расчёт редок. Копии строк — вызывающий режет снижение цены для гостей."""
+    name = conn.execute("SELECT lower(btrim(name_ru)) FROM lots WHERE id = %s", (lot_id,)).fetchone()
+    key = ((name or [""])[0] or "", region)
+    hit = _name_cache.get(key)
     if hit and hit[0] > time.monotonic():
         return [dict(row) for row in hit[1]]
     rows = _by_name_query(conn, lot_id, region)
-    if len(_name_cache) > 2000:
-        _name_cache.clear()
-    _name_cache[lot_id] = (time.monotonic() + NAME_TTL, rows)
+    if len(_name_cache) >= NAME_CACHE:  # самые старые — вон (словарь помнит порядок вставки)
+        for old_key in list(_name_cache)[:NAME_CACHE // 5]:
+            del _name_cache[old_key]
+    _name_cache[key] = (time.monotonic() + NAME_TTL, rows)
     return [dict(row) for row in rows]
 
 

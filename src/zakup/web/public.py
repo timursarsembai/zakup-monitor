@@ -64,6 +64,7 @@ from zakup.web.core import (
     logger,
     same_origin,
     templates,
+    xlsx_text,
 )
 
 router = APIRouter()
@@ -439,6 +440,8 @@ def results_page(request: Request, user: Viewer, page: int = 1):
         rows, total = outcomes.search(conn, f, page, now)
         summary = outcomes.summary_cached(conn, f, now)
     pages = min((total + outcomes.PAGE_SIZE - 1) // outcomes.PAGE_SIZE, outcomes.MAX_PAGE)
+    if total and page > pages:  # страница за концом списка — на последнюю
+        return RedirectResponse(f"/results?{urlencode(f.query())}&page={pages}", status_code=303)
     return templates.TemplateResponse(request, "results.html", {
         "f": f, "rows": rows, "total": total, "page": page, "pages": pages, "s": summary,
         "query": urlencode(f.query()), "periods": outcomes.PERIODS, "outcomes": outcomes.OUTCOMES,
@@ -447,6 +450,7 @@ def results_page(request: Request, user: Viewer, page: int = 1):
 
 
 RESULTS_EXPORT_LIMIT = 10_000
+
 
 
 @router.get("/results/export.xlsx")
@@ -467,12 +471,12 @@ def results_export(request: Request, user: Paid):
     region_names = templates.env.globals["region_name"]
     for r in rows:
         date = r["date"].astimezone(PORTAL_TZ).replace(tzinfo=None) if r["date"] else None
-        sheet.append([date, r["number_anno"], r["lot_number"], r["name_ru"], r["customer"], r["customer_bin"],
+        sheet.append([xlsx_text(v) for v in [date, r["number_anno"], r["lot_number"], r["name_ru"], r["customer"], r["customer_bin"],
                       ", ".join(filter(None, (region_names(c) for c in r["regions"] or []))), r["amount"],
                       "Победитель определён" if r["outcome"] == "winner" else "Не состоялась",
                       r["winner_name"], r["winner_bin"], r["winner_total"],
                       round(float(r["discount"]) * 100, 1) if r["discount"] is not None else None,
-                      r["offers"], r["reason"], f"{SITE_URL}/lots/{r['id']}"])
+                      r["offers"], r["reason"], f"{SITE_URL}/lots/{r['id']}"]])
         for cell in sheet[sheet.max_row]:  # «=…» из названий с портала — текстом, не формулой
             if cell.data_type == "f":
                 cell.data_type = "s"

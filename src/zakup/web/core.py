@@ -88,6 +88,15 @@ def _money(value) -> str:
 
 
 templates.env.filters["money"] = _money
+
+
+def xlsx_text(value):
+    """Текст с портала — без управляющих символов: openpyxl на них падает (вся выгрузка — 500)."""
+    if isinstance(value, str):
+        from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
+
+        return ILLEGAL_CHARACTERS_RE.sub("", value)
+    return value
 # Целые числа с пробелами по тысячам: 12 345.
 templates.env.filters["count"] = lambda value: f"{int(value or 0):,}".replace(",", " ")
 

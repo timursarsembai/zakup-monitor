@@ -136,7 +136,9 @@ def _run_streaming(command: list[str], workdir: str, env: dict[str, str],
     """Claude Code с потоком событий (stream-json): найденное по ходу (вызовы report_offer,
     запасной путь — строки ITEM в тексте) — в on_item сразу; что ИИ делает — в on_step;
     итог — событие result (в нём тот же structured_output, что и без потока)."""
-    process = subprocess.Popen(command, cwd=workdir, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    # stderr — в файл: канал, который никто не читает, переполнился бы и остановил Claude.
+    errors = tempfile.TemporaryFile(mode="w+")
+    process = subprocess.Popen(command, cwd=workdir, stdout=subprocess.PIPE, stderr=errors,
                                text=True, env=env)
     killed = threading.Event()
 
@@ -176,8 +178,11 @@ def _run_streaming(command: list[str], workdir: str, env: dict[str, str],
         timer.cancel()
     if killed.is_set():
         raise ResearchError("Claude не уложился в 15 минут")
+    errors.seek(0)
+    tail = errors.read()[-300:]
+    errors.close()
     if not result:
-        raise ResearchError(f"Claude Code завершился без ответа: {process.stderr.read()[-300:]}")
+        raise ResearchError(f"Claude Code завершился без ответа: {tail}")
     return result
 
 

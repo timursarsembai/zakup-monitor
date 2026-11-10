@@ -180,21 +180,33 @@ def _job(conn: psycopg.Connection, job_id: int) -> dict[str, Any] | None:
     return dict(zip(keys, row, strict=True))
 
 
-def _partial_saver(conn: psycopg.Connection, job: dict[str, Any]):
+# Найденного по ходу показываем не больше стольких: зациклившаяся модель или чужая страница,
+# подталкивающая её вызывать инструмент без конца, не раздуют запись.
+PARTIAL_MAX = 40
+
+
+def _partial_saver(conn: psycopg.Connection, job: dict[str, Any], base: dict[str, Any] | None = None):
     """Предложения, найденные по ходу поиска, — сразу в result задачи «в работе» (с пометкой
     partial): страница лота показывает их, пока поиск идёт. Итог по схеме потом заменит."""
     items: list[dict[str, Any]] = []
-    seen: set[str] = set()
+    # «Найти ещё»: уже найденное прежде показано ниже — повторно сюда не берём.
+    seen: set[str] = {i.get("url") for i in (base or {}).get("items", [])}
     state = {"step": ""}
 
     def write() -> None:
-        conn.execute("UPDATE lot_research SET result = %s WHERE id = %s AND status = 'running'",
-                     (Jsonb({"items": items, "partial": True, "step": state["step"]}), job["id"]))
-        conn.commit()
+        try:
+            conn.execute("UPDATE lot_research SET result = %s WHERE id = %s AND status = 'running'",
+                         (Jsonb({"items": items, "partial": True, "step": state["step"]}), job["id"]))
+            conn.commit()
+        except psycopg.Error:
+            # Сбой записи не должен оставить соединение в оборванной транзакции: итог поиска
+            # потом пишется через него же.
+            conn.rollback()
+            raise
 
     def save(item: dict[str, Any]) -> None:
         for clean_item in clean({"items": [item]}).get("items", []):
-            if clean_item["url"] in seen:
+            if clean_item["url"] in seen or len(items) >= PARTIAL_MAX:
                 continue
             seen.add(clean_item["url"])
             items.append(clean_item)
@@ -223,7 +235,7 @@ def run_job(conn: psycopg.Connection, job: dict[str, Any]) -> dict[str, Any]:
     # Поиск идёт минутами: не держим транзакцию открытой.
     conn.commit()
     if job["provider"] == "claude_code":
-        saver = _partial_saver(conn, job)
+        saver = _partial_saver(conn, job, base)
         found = clean(prov._claude_code(prompt, job["model"], on_item=saver, on_step=saver.step))
     else:
         runner = prov._anthropic if job["provider"] == "anthropic" else prov._openai
@@ -276,32 +288,36 @@ def _light_once(conn: psycopg.Connection, providers: list[str]) -> bool:
 
 
 def _light_lane(database_url: str, providers: list[str]) -> None:
+    """Одно соединение на дорожку (не новое каждую секунду); оборвалось — новое."""
     from zakup import db
 
     while True:
         try:
             with db.connect(database_url) as conn:
-                while _light_once(conn, providers):
-                    pass
+                while True:
+                    while _light_once(conn, providers):
+                        pass
+                    time.sleep(1)
         except Exception as exc:  # noqa: BLE001 — дорожка не должна умирать от одной ошибки
             logger.warning("light lane: %s", exc)
-        time.sleep(1)
+            time.sleep(5)
 
 
 def _research_lane(database_url: str, providers: list[str]) -> None:
     from zakup import db
 
     while True:
-        job = None
         try:
             with db.connect(database_url) as conn:
-                _reap(conn, providers, False)
-                if job := _take(conn, providers):
-                    _run(conn, job)
+                while True:
+                    _reap(conn, providers, False)
+                    if job := _take(conn, providers):
+                        _run(conn, job)
+                    else:
+                        time.sleep(2)
         except Exception as exc:  # noqa: BLE001
             logger.warning("research lane: %s", exc)
-        if not job:
-            time.sleep(2)
+            time.sleep(5)
 
 
 def _reap(conn: psycopg.Connection, providers: list[str], first: bool) -> None:
@@ -320,7 +336,7 @@ def _reap(conn: psycopg.Connection, providers: list[str], first: bool) -> None:
     for table in ("spec_summaries", "supplier_questions"):
         conn.execute(
             f"""UPDATE {table} SET status = 'error', error = 'прервано'
-                WHERE status = 'running' AND started_at < now() - interval '10 minutes'"""
+                WHERE status = 'running' AND started_at < now() - interval '20 minutes'"""
         )
     conn.commit()
 

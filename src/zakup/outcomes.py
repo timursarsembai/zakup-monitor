@@ -153,7 +153,7 @@ def summary(conn: psycopg.Connection, f: ResultFilters, now: datetime) -> dict[s
                    coalesce(sum(l.amount) FILTER (WHERE {DISCOUNT} IS NOT NULL), 0),
                    coalesce(sum(r.winner_total) FILTER (WHERE {DISCOUNT} IS NOT NULL), 0),
                    percentile_cont(0.5) WITHIN GROUP (ORDER BY {DISCOUNT}),
-                   avg(jsonb_array_length(r.offers)) FILTER (WHERE r.outcome = 'winner'),
+                   avg(jsonb_array_length(r.offers)) FILTER (WHERE r.outcome = 'winner' AND r.offers <> '[]'),
                    count(*) FILTER (WHERE r.outcome = 'winner' AND jsonb_array_length(r.offers) = 1)
             FROM {SOURCE} WHERE {where}""", params).fetchone()
     winners = conn.execute(
@@ -162,7 +162,11 @@ def summary(conn: psycopg.Connection, f: ResultFilters, now: datetime) -> dict[s
             GROUP BY 1 ORDER BY 3 DESC, 4 DESC LIMIT 5""", params).fetchall()
     return {"won": won, "failed": failed, "total": won + failed, "plan": plan, "paid": paid,
             "saved": plan - paid, "median": median, "offers": offers,
-            "single": single / won if won else None, "failed_share": failed / (won + failed) if won + failed else None,
+            "single": single / won if won else None,
+            # С фильтром по победителю или снижению несостоявшиеся не попадают в выборку —
+            # доля была бы всегда 0: не показываем.
+            "failed_share": (failed / (won + failed) if won + failed else None)
+            if not (f.winner or f.discount) else None,
             "winners": winners}
 
 

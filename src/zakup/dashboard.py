@@ -172,8 +172,14 @@ def _competition(conn) -> dict[str, Any]:
     from zakup import outcomes
 
     now = datetime.now(UTC)
-    data["results_by_division"] = outcomes.by_group(conn, "divisions", 90, now)
-    data["results_by_region"] = outcomes.by_group(conn, "regions", 90, now, limit=20)
+    # Только коды, которые понимает фильтр «Итогов»: иначе ссылка открыла бы итоги без фильтра.
+    from zakup import catalog
+    from zakup.filters import REGIONS
+
+    data["results_by_division"] = [r for r in outcomes.by_group(conn, "divisions", 90, now, limit=20)
+                                   if r[0] in catalog.DIVISIONS][:12]
+    data["results_by_region"] = [r for r in outcomes.by_group(conn, "regions", 90, now, limit=30)
+                                 if r[0] in REGIONS][:20]
     return data
 
 
