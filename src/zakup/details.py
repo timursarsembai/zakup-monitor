@@ -246,6 +246,9 @@ def fill_codes(conn: psycopg.Connection, batch: int = 2000) -> int:
         matcher.mark_seen(conn, ids)
         announcements = [r[0] for r in conn.execute(
             "SELECT DISTINCT trd_buy_id FROM lots WHERE id = ANY(%s) AND trd_buy_id IS NOT NULL", (ids,))]
+        # Лоты и объявления — разными транзакциями: подробности (save) блокируют их в обратном
+        # порядке (объявление, потом лоты), вместе здесь получилась бы встречная блокировка.
+        conn.commit()
         _announcement_divisions(conn, announcements)
         conn.commit()
         done += len(ids)
