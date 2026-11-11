@@ -469,6 +469,8 @@ def test_lot_page_shows_competitors_and_suppliers(client, conn):
     # По подписке — цены участников в таких же лотах (диван 802; стул 803 — другой код).
     exact = client.get("/lots/8010?sup=code").text.split("Конкуренты и поставщики", 1)[1]
     assert "Его цены за ед." in exact and "data-sup-history" in exact and 'href="/lots/8020#results"' in exact
+    # Плитка: те же цены списком внутри карточки участника.
+    assert exact.count('href="/lots/8020#results"') % 2 == 0 and exact.count('class="s-hist-cards"') == exact.count('class="sup-hist"')
     assert "900 000" in exact and "✓ выиграл" in exact and "проиграл" in exact and "/lots/8030#" not in exact
     # У ИП — ИИН, у ТОО — БИН.
     assert "ИИН 651114400549" in client.get("/org/651114400549").text

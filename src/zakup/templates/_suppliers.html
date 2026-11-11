@@ -35,6 +35,16 @@
       {% else %}<span class="muted">—</span>{% endif %}</td>{% endif %}
     {% if not here %}{% set names = (r.regions or []) | map("region_name_filter") | select | list %}
     <td class="s-regions" data-label="{{ _("Регионы поставки") }}">{{ names[:3] | join(", ") }}{% if names|length > 3 %} {{ _("и ещё") }} {{ names|length - 3 }}{% endif %}</td>{% endif %}
+    {% if prices and r.history %}{% set h = r.history %}
+    {# Плитка: те же цены коротким списком внутри карточки (таблица в сетке карточек рвала страницу). #}
+    <td class="s-hist-cards"><ul>
+      {% for x in h.rows %}
+      <li><a href="/lots/{{ x.lot }}#results">{{ pick(x.name_ru, x.name_kz) or x.lot }}</a> · <span class="muted">{{ (x.date|local).strftime("%d.%m.%Y") if x.date else "—" }}</span>
+        <div><b>{{ unit(x.unit) }} ₸</b> <span class="muted">({{ _("план") }} {{ unit(x.plan_unit) }}, {{ qty(x.count) }} {{ (pick(x.unit_ru, x.unit_kz) or "")|lower }})</span></div>
+        <div class="res-{{ x.result }}">{{ {"won": _("✓ выиграл"), "lost": _("проиграл"), "failed": _("не состоялась")}[x.result] }}</div></li>
+      {% endfor %}
+    </ul>{% if h.total > h.rows|length %}<a class="muted" href="/org/{{ r.bin }}?tab=history">{{ _("Вся история участия →") }}</a>{% endif %}</td>
+    {% endif %}
     <td class="s-link"><a href="/org/{{ r.bin }}">{{ _("Контакты →") }}</a></td>
   </tr>
   {% if prices and r.history %}{% set h = r.history %}
@@ -126,12 +136,14 @@
   [data-rview=cards] table.sup-table td.s-name, [data-rview=cards] table.sup-table td.s-regions { flex: 1 1 100%; font-weight: 600; }
   [data-rview=cards] table.sup-table td.s-regions { font-weight: 400; }
   [data-rview=cards] table.sup-table td.s-link { flex: 1 1 100%; text-align: right; }
-  /* История цен под участником: в плитке — на всю ширину, внутри — обычная таблица. */
-  [data-rview=cards] table.sup-table tr.sup-hist { grid-column: 1 / -1; display: block; padding: 0; border: 0; }
-  [data-rview=cards] table.sup-table tr.sup-hist[hidden] { display: none; }
-  [data-rview=cards] table.sup-table tr.sup-hist > td { display: block; border-radius: 12px; }
-  [data-rview=cards] table.sup-table table.sup-hist-table { display: table; min-width: 0 !important; }
-  [data-rview=cards] table.sup-table table.sup-hist-table tbody { display: table-row-group; }
-  [data-rview=cards] table.sup-table table.sup-hist-table tr, [data-rview=cards] table.sup-table table.sup-hist-table tr:first-child:has(th) { display: table-row; border: 0; padding: 0; }
-  [data-rview=cards] table.sup-table table.sup-hist-table td { display: table-cell; padding: 4px 8px; font-weight: 400; }
+  /* История цен: в таблице — строкой под участником; в плитке — списком внутри его карточки
+     (раскрытая карточка растёт вниз, соседние не тянутся). */
+  table.sup-table td.s-hist-cards { display: none; }
+  table.sup-table td.s-hist-cards ul { list-style: none; margin: 0; padding: 0; max-height: 360px; overflow-y: auto; }
+  table.sup-table td.s-hist-cards li { padding: 6px 0; border-top: 1px solid var(--line); font-size: 13px; }
+  table.sup-table td.s-hist-cards .res-won { color: var(--ok); font-weight: 600; }
+  table.sup-table td.s-hist-cards .res-failed, table.sup-table td.s-hist-cards .res-lost { color: var(--muted); }
+  [data-rview=cards] table.sup-table tr { align-self: start; }
+  [data-rview=cards] table.sup-table tr.sup-hist { display: none !important; }
+  [data-rview=cards] table.sup-table tr.hist-open td.s-hist-cards { display: block; flex: 1 1 100%; }
 {% endmacro %}

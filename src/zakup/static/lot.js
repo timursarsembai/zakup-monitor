@@ -194,5 +194,6 @@ document.addEventListener("click", (event) => {
   const row = button.closest("tr")?.nextElementSibling;
   if (!row || !row.classList.contains("sup-hist")) return;
   row.hidden = !row.hidden;
+  button.closest("tr").classList.toggle("hist-open", !row.hidden);  // плитка: список внутри карточки
   button.setAttribute("aria-expanded", String(!row.hidden));
 });
