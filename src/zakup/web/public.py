@@ -6,6 +6,7 @@ import io
 import json
 import threading
 import time
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from importlib.resources import files
 from typing import Annotated, Any
@@ -573,6 +574,8 @@ def lot_rows(conn, shown: str, params: dict) -> list[tuple]:
 def lots_search(request: Request, user: Viewer, page: int = 1, per_page: int = PAGE_SIZE):
     form = parse_qs(request.url.query)
     current = Filters.from_form(form, staff=request.state.staff)
+    if not request.state.paid:  # «цена выше рынка» — по подписке
+        current = replace(current, market_above=0)
     page = min(max(page, 1), MAX_PAGE)
     per_page = _per_page(per_page)
     now = datetime.now(UTC)
@@ -605,6 +608,8 @@ def lots_search(request: Request, user: Viewer, page: int = 1, per_page: int = P
 def announcements_search(request: Request, user: Viewer, page: int = 1, per_page: int = PAGE_SIZE):
     form = parse_qs(request.url.query)
     current = Filters.from_form(form, staff=request.state.staff)
+    if not request.state.paid:  # «цена выше рынка» — по подписке
+        current = replace(current, market_above=0)
     page = min(max(page, 1), MAX_PAGE)
     per_page = _per_page(per_page)
     now = datetime.now(UTC)

@@ -101,6 +101,9 @@ METHODS = {
 }
 METHOD_NAMES = {i: name for name, ids in METHODS.values() for i in ids}
 SUBJECTS = {1: "Товары", 2: "Работы", 3: "Услуги"}
+REPEATS = {"": "Все", "any": "Повторная закупка", "failed": "Повторная: прошлая не состоялась"}
+OWN_SUPPLIER = {"": "Все", "hide": "Скрыть заказчиков со «своим» поставщиком",
+                "only": "Только заказчики со «своим» поставщиком"}
 DISABLE_PERSON = {"only": "Только среди организаций инвалидов", "exclude": "Без них", "": "Все"}
 SORTS = {
     "advance": "Аванс, потом срок",
@@ -182,6 +185,17 @@ class Filters:
     # Размер аванса, % от суммы: 0–100 — без ограничения.
     advance_min: int = 30
     advance_max: int = 100
+    # Оценки лота (таблица lot_scores, zakup.scores):
+    # плановая цена за единицу выше цены победителей на N% и больше (0 — без условия);
+    market_above: int = 0
+    # повторная закупка: "any" — заказчик уже объявлял этот лот, "failed" — и прошлая не состоялась;
+    repeat: str = ""
+    # «свой поставщик» заказчика по такому товару: "hide" — скрыть, "only" — только такие;
+    own_supplier: str = ""
+    # доля несостоявшихся закупок заказчика не больше N% (100 — без условия);
+    customer_failed_max: int = 100
+    # денег на заморозку (обеспечение заявки и договора с авансом) не больше, ₸.
+    freeze_max: Decimal | None = None
     sort: str = "advance"
 
     @classmethod
@@ -200,7 +214,7 @@ class Filters:
 
     def to_json(self) -> dict[str, Any]:
         data = asdict(self)
-        for key in ("min_sum", "max_sum"):
+        for key in ("min_sum", "max_sum", "freeze_max"):
             data[key] = str(data[key]) if data[key] is not None else None
         return data
 
@@ -208,7 +222,7 @@ class Filters:
     def from_json(cls, data: dict[str, Any] | None) -> "Filters":
         data = dict(data or {})
         known = {k: v for k, v in data.items() if k in cls.__dataclass_fields__}
-        for key in ("min_sum", "max_sum"):
+        for key in ("min_sum", "max_sum", "freeze_max"):
             if key in known:
                 known[key] = _decimal(known[key])
         # Сохранённые до 2026-11-08 подписки: аванс не ограничивали.
@@ -277,6 +291,11 @@ class Filters:
             advance_only=one("advance_only") == "1",
             advance_min=_percent(one("advance_min"), 0),
             advance_max=_percent(one("advance_max"), 100),
+            market_above=_percent(one("market_above"), 0),
+            repeat=one("repeat") if one("repeat") in REPEATS else "",
+            own_supplier=one("own_supplier") if one("own_supplier") in OWN_SUPPLIER else "",
+            customer_failed_max=_percent(one("customer_failed_max"), 100),
+            freeze_max=_decimal(one("freeze_max")),
             sort=one("sort") if one("sort") in SORTS else "advance",
         )
 
@@ -289,6 +308,8 @@ class Filters:
                  self.end_from,  # «Только с открытым приёмом» (и «Окончание с») — тоже условие
                  self.itogi_from or self.itogi_to,
                  self.advance_only or self.advance_min > 0 or self.advance_max < 100,
+                 self.market_above, self.repeat, self.own_supplier, self.customer_failed_max < 100,
+                 self.freeze_max is not None,
                  self.statuses or (self.stages and self.stages != ["open"])]
         return sum(1 for flag in flags if flag)
 
@@ -337,7 +358,7 @@ class Filters:
             clauses.insert(0, "l.trd_buy_id = a.id")
         params: dict[str, Any] = {"now": now}
         for part in (self._where_kind, self._where_ids, self._where_place_and_sum,
-                     self._where_dates, self._where_advance, self._where_words):
+                     self._where_dates, self._where_advance, self._where_words, self._where_scores):
             part(clauses, params, lots, now)
         return " AND ".join(clauses) or "true", params
 
@@ -451,6 +472,52 @@ class Filters:
         if high < 100:
             clauses.append(f"coalesce({prepayment}, 0) <= %(advance_max)s")
             params["advance_max"] = high
+
+    def _where_scores(self, clauses: list[str], params: dict[str, Any], lots: bool, now: datetime) -> None:
+        """Оценки лота (lot_scores). Лоты без оценок (служба ещё не посчитала) под условия
+        «выше рынка», «повторная», «только свой поставщик», «надёжность», «заморозка» не
+        попадают; под «скрыть своего поставщика» — попадают."""
+        need = []
+        if self.market_above:
+            need.append("s.market_diff >= %(market_above)s")
+            params["market_above"] = self.market_above / 100
+        if self.repeat == "any":
+            need.append("s.repeats > 0")
+        elif self.repeat == "failed":
+            need.append("s.repeats_failed > 0")
+        if self.own_supplier == "only":
+            need.append("s.same_winner_bin IS NOT NULL")
+        if self.customer_failed_max < 100:
+            need.append("coalesce(s.customer_failed_share, 0) <= %(customer_failed_max)s")
+            params["customer_failed_max"] = self.customer_failed_max / 100
+        if self.freeze_max is not None:
+            need.append("coalesce(s.freeze_total, 0) <= %(freeze_max)s")
+            params["freeze_max"] = self.freeze_max
+        # Объявление — если условию отвечает хотя бы один его лот.
+        source = ("lot_scores s WHERE s.lot_id = l.id" if lots else
+                  "lots l2 JOIN lot_scores s ON s.lot_id = l2.id WHERE l2.trd_buy_id = a.id")
+        if need:
+            clauses.append(f"EXISTS (SELECT 1 FROM {source} AND {' AND '.join(need)})")
+        if self.own_supplier == "hide":
+            clauses.append(f"NOT EXISTS (SELECT 1 FROM {source} AND s.same_winner_bin IS NOT NULL)")
+
+    def score_labels(self) -> list[tuple[str, dict[str, Any]]]:
+        """Условия по оценкам лота словами и чем их сбросить (для selected и describe)."""
+        _ = gettext
+        items = []
+        if self.market_above:
+            items.append((_("цена выше рынка на {pct}%+", pct=self.market_above), {"market_above": 0}))
+        if self.repeat:
+            items.append((_(REPEATS[self.repeat]).lower(), {"repeat": ""}))
+        if self.own_supplier:
+            items.append((_(OWN_SUPPLIER[self.own_supplier]).lower(), {"own_supplier": ""}))
+        if self.customer_failed_max < 100:
+            items.append((_("у заказчика не состоялось не больше {pct}%", pct=self.customer_failed_max),
+                          {"customer_failed_max": 100}))
+        if self.freeze_max is not None:
+            items.append((_("заморозить не больше {sum} ₸", sum=f"{self.freeze_max:,.0f}".replace(",", " ")),
+                          {"freeze_max": None}))
+        return items
 
     def _where_words(self, clauses: list[str], params: dict[str, Any], lots: bool, now: datetime) -> None:
         """Слова (рус. с морфологией и каз.) и слова-исключения."""
@@ -579,6 +646,8 @@ class Filters:
             add(_("с авансом") if self.advance_only and (self.advance_min, self.advance_max) == (0, 100)
                 else _("аванс {low}–{high}%", low=self.advance_min, high=self.advance_max),
                 advance_only=False, advance_min=0, advance_max=100)
+        for label, reset in self.score_labels():
+            add(label, **reset)
         return items
 
     def describe(self) -> str:
@@ -640,6 +709,7 @@ class Filters:
             parts.append(_("с авансом"))
         if (self.advance_min, self.advance_max) != (0, 100):
             parts.append(_("аванс {low}–{high}%", low=self.advance_min, high=self.advance_max))
+        parts += [label for label, _reset in self.score_labels()]
         return "; ".join(parts)
 
 

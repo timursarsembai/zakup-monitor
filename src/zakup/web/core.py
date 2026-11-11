@@ -41,7 +41,9 @@ from zakup.filters import (
     METHOD_NAMES,
     METHODS,
     OPEN_STATUSES,
+    OWN_SUPPLIER,
     REGIONS,
+    REPEATS,
     SORTS,
     STAGES,
     STATUS_NAMES,
@@ -469,6 +471,8 @@ def _search_context(request: Request, current: Filters, scope: str, total: int, 
         "years": fin_years(today),
         "sorts": SORTS,
         "disable_options": DISABLE_PERSON,
+        "repeat_options": REPEATS,
+        "own_supplier_options": OWN_SUPPLIER,
         # Ссылки на другую страницу поиска, сортировку и страницы — из самого фильтра,
         # а не из адреса: на первом заходе адрес пустой, а действуют значения по умолчанию.
         "query": urlsplit(current.to_query(scope)).query

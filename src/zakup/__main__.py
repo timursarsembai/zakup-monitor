@@ -45,6 +45,8 @@ def _parser() -> argparse.ArgumentParser:
     sub.add_parser("tidy", help="база регионов по IP (раз в месяц) и чистка старой статистики посещений")
     sub.add_parser("nightly", help="ночной ревьюер: отчёт владельцу за сутки (на хосте)")
     sub.add_parser("bot", help="Telegram-бот: привязка чатов (работает постоянно)")
+    scores_cmd = sub.add_parser("scores", help="оценки открытых лотов для фильтров поиска (lot_scores)")
+    scores_cmd.add_argument("--loop", action="store_true", help="работать постоянно")
     specs_cmd = sub.add_parser("specs", help="заранее разобрать техспецификации открытых лотов")
     specs_cmd.add_argument("--limit", type=int, default=200)
     specs_cmd.add_argument("--loop", action="store_true", help="работать постоянно")
@@ -162,6 +164,7 @@ LOCAL = {
     "migrate": _migrate, "payments": _payments, "autofix": _autofix, "tidy": _tidy, "nightly": _nightly,
     "client-bot": _client_bot, "bot": _bot, "research": _research, "add-user": _add_user,
     "specs": lambda args: _specs(args.limit, args.loop),
+    "scores": lambda args: _scores(args.loop),
     "set-password": lambda args: _set_password(args.email),
 }
 
@@ -196,6 +199,12 @@ def _with_portal(args) -> int:
             return _sync(conn, client, args.max_pages)
     finally:
         client.close()
+
+
+def _scores(loop: bool) -> int:
+    from zakup import scores
+
+    return scores.run(config.database_url(), loop)
 
 
 SPECS_BATCH = 50

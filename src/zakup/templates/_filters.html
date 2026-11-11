@@ -27,6 +27,8 @@
   .fl { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
   .fgrid input:not([type=checkbox]):not([type=radio]):not([type=range]), .fgrid select { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); font: inherit; font-size: 14px; width: 100%; min-width: 0; }
   .pair { display: flex; gap: 6px; }
+  .scores label.sel { display: block; font-size: 13px; color: var(--muted); margin-top: 8px; }
+  .scores label.sel select, .scores label.sel input, .scores label.sel .link-button { margin-top: 3px; }
   .check { display: flex; gap: 8px; align-items: flex-start; margin: 4px 0; color: var(--fg); font-size: 14px; }
   .radio-list .check { align-items: center; }
   .open-now { font-weight: 600; }
@@ -238,11 +240,12 @@
   "customer": f.customer[:18] if f.customer else "",
   "words": ("«" ~ f.q[:16] ~ "»" ~ (" · " ~ _("и в ТС") if f.in_specs else "")) if f.q else (_("без слов") if f.exclude else ""),
   "number": f.number or f.lot_number or f.enstru,
+  "scores": (_("Оценки") ~ " · " ~ f.score_labels()|length) if f.score_labels() else "",
 } %}
 {% set chip_names = [("region", _("Регион")), ("category", _("Категория")), ("sum", _("Сумма")), ("deadline", _("Срок")),
   ("open_now", _("Только открытые")), ("today_only", _("Опубликованы сегодня")), ("status", _("Статус")), ("advance", _("Аванс")),
   ("disable", _("Инвалиды")), ("method", _("Способ")), ("subject", _("Предмет")), ("words", _("Слова")),
-  ("customer", _("Заказчик")), ("dates", _("Даты")), ("year", _("Фин. год")), ("number", _("Номер, ЕНС ТРУ"))] %}
+  ("customer", _("Заказчик")), ("dates", _("Даты")), ("year", _("Фин. год")), ("number", _("Номер, ЕНС ТРУ")), ("scores", _("Выгода и риски"))] %}
 <div class="chipbar" data-chipbar>
   <div class="chip-fixed">
     <button type="button" class="chip-icon" data-chip-open="sort" aria-label="{{ _("Сортировка") }}" title="{{ _("Сортировка") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4v16M3 8l4-4 4 4M17 20V4M13 16l4 4 4-4"/></svg></button>
@@ -351,6 +354,23 @@
         <button type="button" data-preset="30,100">{{ _("от 30%") }}</button>
         <button type="button" data-preset="0,0">{{ _("без аванса") }}</button>
       </div>
+    </div>
+
+    <div class="scores" data-chip="scores"><span class="fl">{{ _("Выгода и риски") }}</span>
+      <span class="muted hint">{{ _("Те же оценки, что на странице лота; новые лоты оцениваются в течение часа.") }}</span>
+      <label class="sel">{{ _("Цена за единицу выше рынка") }}
+        {% if request.state.paid %}<select name="market_above">{% for v in (0, 10, 20, 30, 50) %}<option value="{{ v }}" {% if f.market_above == v %}selected{% endif %}>{{ _("не важно") if not v else _("на {pct}% и больше", pct=v) }}</option>{% endfor %}</select>
+        {% else %}<button type="button" class="link-button" data-paid data-feature="market_filter">{{ _("по подписке") }} 🔒</button>{% endif %}</label>
+      <label class="sel">{{ _("Повторная закупка") }}
+        <select name="repeat">{% for v, name in repeat_options.items() %}<option value="{{ v }}" {% if f.repeat == v %}selected{% endif %}>{{ _(name) }}</option>{% endfor %}</select></label>
+      <label class="sel">{{ _("«Свой» поставщик у заказчика") }}
+        <select name="own_supplier">{% for v, name in own_supplier_options.items() %}<option value="{{ v }}" {% if f.own_supplier == v %}selected{% endif %}>{{ _(name) }}</option>{% endfor %}</select></label>
+      <span class="muted hint">{{ _("Такой товар у заказчика почти всегда выигрывает один и тот же поставщик.") }}</span>
+      <label class="sel">{{ _("Несостоявшихся закупок у заказчика") }}
+        <select name="customer_failed_max">{% for v in (100, 50, 30, 10) %}<option value="{{ v }}" {% if f.customer_failed_max == v %}selected{% endif %}>{{ _("не важно") if v == 100 else _("не больше {pct}%", pct=v) }}</option>{% endfor %}</select></label>
+      <label class="sel">{{ _("Заморозить денег не больше, ₸") }}
+        <input type="text" inputmode="numeric" name="freeze_max" value="{{ '{:.0f}'.format(f.freeze_max) if f.freeze_max is not none else '' }}" placeholder="{{ _("например, 100 000") }}"></label>
+      <span class="muted hint">{{ _("Обеспечение заявки и договора с авансом — от плановой суммы лота.") }}</span>
     </div>
 
     <div data-chip="dates"><span class="fl">{{ _("Начало приема заявок с — по") }}</span>
