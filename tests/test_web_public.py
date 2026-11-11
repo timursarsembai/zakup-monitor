@@ -30,6 +30,9 @@ def test_announcement_page_shows_lots_and_loads_spec(client, conn, monkeypatch):
     for text in ("Приобретение столика", "88448423-ЗЦП1", "аванс 30%", "г.Қонаев, мкр.5",
                  "Проект договора", "Техническая спецификация", "data-end="):
         assert text in page.text
+    # Техспецификация лота — на странице лота, в объявлении — ссылка туда.
+    assert 'class="spec"' not in page.text and "Подробнее о лоте" in page.text
+    assert 'class="spec" open' in client.get("/lots/5").text
     monkeypatch.setattr(spec, "get", lambda conn, lot_id, url: (None, "портал недоступен"))
     assert "Обновить" in client.get("/a/77/lots/5/spec").text
     monkeypatch.setattr(spec, "get", lambda conn, lot_id, url: ("Столик, дерево", None))
@@ -92,7 +95,8 @@ def test_announcements_page_lot_page_and_portal_fields(client, conn):
     assert "Бумага А4" not in client.get("/lots?applied=1&deadline_mode=&year=2025").text
     assert "Бумага А4" in client.get("/lots?applied=1&deadline_mode=&enstru=1712").text
     lot = client.get("/lots/5001").text
-    assert "Бумага А4" in lot and "/a/500" in lot and "Другие лоты этого объявления (1)" in lot
+    assert "Бумага А4" in lot and "/a/500" in lot and "Другие лоты (1)" in lot
+    assert 'data-tab="research"' in lot and 'data-panel="others"' in lot  # разделы — вкладками
     assert "/lots/5002" in lot
     workbook = client.get("/export.xlsx?applied=1&deadline_mode=")
     assert workbook.status_code == 200 and workbook.content[:2] == b"PK"

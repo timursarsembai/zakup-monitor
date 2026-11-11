@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_lot_card.html" import lot_styles, lot_card, lot_winners with context %}
+{% from "_lot_card.html" import lot_styles, lot_card, lot_spec, lot_winners with context %}
 {% from "_share.html" import share_buttons, share_styles with context %}
 {% from "_suppliers.html" import suppliers_block, suppliers_styles with context %}
 {% block title %}{{ loc(lot) }} — {{ _("лот") }} {{ lot.lotNumber or lot.id }}{% endblock %}
@@ -124,8 +124,22 @@
 
 {{ share_buttons("/lots/" ~ lot.id, portal_url ~ "?tab=lots", loc(lot) ~ " — " ~ _("лот") ~ " " ~ (lot.lotNumber or lot.id)) }}
 {{ lot_card(lot, link=false) }}
-{% if rivals %}{{ suppliers_block(rivals, lot.id, request.state.paid, rivals_shown) }}{% endif %}
 
+{# Разделы лота — вкладками, а не одной простынёй. Старые ссылки #research, #suppliers,
+   #results открывают нужную вкладку (lot.js). #}
+{% set has_spec = spec_file(lot) %}
+{% set has_results = lot.id in results or (end and end < now) %}
+<nav class="tabs lot-tabs" role="tablist" aria-label="{{ _("Разделы лота") }}">
+  {% if has_spec %}<button type="button" role="tab" data-tab="spec">{{ _("Техспецификация") }}</button>{% endif %}
+  <button type="button" role="tab" data-tab="research">{{ _("Поиск товаров") }}</button>
+  {% if rivals %}<button type="button" role="tab" data-tab="suppliers">{{ _("Конкуренты и поставщики") }}</button>{% endif %}
+  {% if has_results %}<button type="button" role="tab" data-tab="results">{{ _("Итоги") }}</button>{% endif %}
+  {% if others %}<button type="button" role="tab" data-tab="others">{{ _("Другие лоты") }} ({{ others|length }})</button>{% endif %}
+</nav>
+
+{% if has_spec %}<div data-panel="spec" id="spec">{{ lot_spec(lot, open=true) }}</div>{% endif %}
+
+<div data-panel="research" hidden>
 <section class="research-box" id="research">
   <h2 style="margin-top:0">{{ _("Поиск товаров с ИИ") }}</h2>
   {% if lot_info %}
@@ -143,16 +157,21 @@
   {% endif %}
   {% set lot_id = lot.id %}<div data-research data-src="/lots/{{ lot.id }}/research">{% include "research_fragment.html" %}</div>
 </section>
+</div>
 
+{% if rivals %}<div data-panel="suppliers" hidden>{{ suppliers_block(rivals, lot.id, request.state.paid, rivals_shown) }}</div>{% endif %}
+
+{% if has_results %}<div data-panel="results" id="results" hidden>
 {% if lot.id in results %}
-<h2 id="results">{{ _("Итоги") }}</h2>
 {{ lot_winners(lot, results[lot.id]) }}
 {% elif end and end < now %}
 <p class="muted">{{ _("Итоги по лоту ещё не опубликованы.") }}</p>
 {% endif %}
 
+</div>{% endif %}
+
+{% if others %}<div data-panel="others" hidden>
 {% if others %}
-<h2>{{ _("Другие лоты этого объявления (") }}{{ others|length }})</h2>
 <div class="table-wrap"><table>
   <tr><th>{{ _("Лот") }}</th><th>{{ _("Наименование") }}</th><th>{{ _("Кол-во") }}</th><th>{{ _("Цена за ед., ₸") }}</th><th>{{ _("Сумма, ₸") }}</th><th>{{ _("Аванс") }}</th><th>{{ _("Статус") }}</th></tr>
   {% for o in others %}
@@ -170,6 +189,8 @@
   {% endfor %}
 </table></div>
 {% endif %}
+
+</div>{% endif %}
 
 <p class="muted" style="margin-top:24px">{{ _("Данные с портала обновлены") }} {{ (fetched_at|local).strftime("%d.%m.%Y %H:%M") if fetched_at else "—" }}. <a href="{{ portal_url }}" target="_blank" rel="noopener">{{ _("Объявление на портале ↗") }}</a></p>
 <dialog class="search-confirm" id="search-confirm" aria-labelledby="sc-title">

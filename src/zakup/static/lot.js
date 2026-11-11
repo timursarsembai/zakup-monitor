@@ -92,3 +92,36 @@ const PAGE = document.querySelector("[data-lot-page]");
   };
   setTimeout(poll, 4000);
 })();
+
+// Разделы лота — вкладки. Ссылки с #research, #suppliers, #results (и на любой элемент
+// внутри вкладки) открывают нужную вкладку; выбранная — в адресе, чтобы «Назад» и ссылка
+// вели туда же.
+(() => {
+  const tabs = [...document.querySelectorAll(".lot-tabs [data-tab]")];
+  if (!tabs.length) return;
+  const panels = [...document.querySelectorAll("[data-panel]")];
+  const show = (name) => {
+    for (const tab of tabs) tab.setAttribute("aria-selected", String(tab.dataset.tab === name));
+    for (const panel of panels) panel.hidden = panel.dataset.panel !== name;
+    tabs.find((tab) => tab.dataset.tab === name)?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  };
+  const fromHash = () => {
+    const id = decodeURIComponent(location.hash.slice(1));
+    if (!id) return null;
+    if (tabs.some((tab) => tab.dataset.tab === id)) return id;
+    return document.getElementById(id)?.closest("[data-panel]")?.dataset.panel || null;
+  };
+  for (const tab of tabs) {
+    tab.addEventListener("click", () => {
+      show(tab.dataset.tab);
+      history.replaceState(null, "", "#" + tab.dataset.tab);
+    });
+  }
+  const initial = fromHash();
+  show(initial || tabs[0].dataset.tab);
+  // Ссылка вела на элемент внутри вкладки (например, #lot-123): после показа — к нему.
+  if (initial && location.hash.length > 1 && !tabs.some((tab) => "#" + tab.dataset.tab === location.hash)) {
+    document.getElementById(decodeURIComponent(location.hash.slice(1)))?.scrollIntoView();
+  }
+  addEventListener("hashchange", () => { const name = fromHash(); if (name) show(name); });
+})();

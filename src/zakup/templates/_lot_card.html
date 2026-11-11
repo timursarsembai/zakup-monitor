@@ -65,7 +65,23 @@
   }
 {% endmacro %}
 
-{% macro lot_card(lot, link=true) %}
+{# Техспецификация лота: выжимка ИИ и полный текст (текст из базы — сразу, иначе догружается). #}
+{% macro lot_spec(lot, open=false) %}
+    {% if spec_file(lot) %}
+    {% set cached = specs.get(lot.id) %}
+    {# Текст уже в базе — показываем сразу; нет — догружаем с портала из браузера. #}
+    <details class="spec" {% if open %}open{% endif %} data-src="/a/{{ a.id }}/lots/{{ lot.id }}/spec"{% if cached and cached[0] %} data-loaded="1"{% endif %}>
+      <summary>{{ _("Техническая спецификация") }}</summary>
+      <div class="spec-body">{% if cached and cached[0] %}{% set s = summaries.get(lot.id) %}
+        <div class="summary-box" data-summary data-src="/lots/{{ lot.id }}/spec-summary">
+          {% if s %}{% include "summary_fragment.html" %}{% else %}<button type="button" class="summary-btn" data-summary-start data-paid data-feature="spec_summary">📋 {{ _("Кратко: главное в таблице (ИИ)") }}</button>{% endif %}
+        </div>
+        <details class="spec-full" {% if not (s and s.status == "done") %}open{% endif %}><summary>{{ _("Полный текст") }}</summary>{{ spec_text(pick(cached[0], cached[2])) }}</details><p><a href="{{ spec_file(lot) | safe_url }}" target="_blank" rel="noopener">{{ _("Скачать файл спецификации") }}</a></p>{% else %}<p class="muted">{{ _("Загружаю…") }}</p>{% endif %}</div>
+    </details>
+    {% endif %}
+{% endmacro %}
+
+{% macro lot_card(lot, link=true, spec=false) %}
   {% set i = info[lot.id] %}
   {% set plan = (lot.Plans or [])|first %}
   <div class="lot" id="lot-{{ lot.id }}">
@@ -96,17 +112,9 @@
     </dl>
     {% set r = results.get(lot.id) %}
     {% if r %}<p style="margin:10px 0 0">{% if r.outcome == "winner" %}{{ _("🏁 Победитель:") }} <b>{{ r.winner_name }}</b>{% if r.winner_total is not none %} — {{ r.winner_total | money }} ₸{% endif %}{% if company_bin and r.winner_bin == company_bin %} <span class="badge hot">{{ _("это вы") }}</span>{% endif %}{% else %}{{ _("🏁 Не состоялась") }}{% if r.reason %} {{ _("в связи с") }} {{ r.reason }}{% endif %}{% endif %} <span class="muted">{{ _("· предложений:") }} {{ r.offers|length }}</span></p>{% endif %}
-    {% if spec_file(lot) %}
-    {% set cached = specs.get(lot.id) %}
-    {# Текст уже в базе — показываем сразу; нет — догружаем с портала из браузера. #}
-    <details class="spec" data-src="/a/{{ a.id }}/lots/{{ lot.id }}/spec"{% if cached and cached[0] %} data-loaded="1"{% endif %}>
-      <summary>{{ _("Техническая спецификация") }}</summary>
-      <div class="spec-body">{% if cached and cached[0] %}{% set s = summaries.get(lot.id) %}
-        <div class="summary-box" data-summary data-src="/lots/{{ lot.id }}/spec-summary">
-          {% if s %}{% include "summary_fragment.html" %}{% else %}<button type="button" class="summary-btn" data-summary-start data-paid data-feature="spec_summary">📋 {{ _("Кратко: главное в таблице (ИИ)") }}</button>{% endif %}
-        </div>
-        <details class="spec-full" {% if not (s and s.status == "done") %}open{% endif %}><summary>{{ _("Полный текст") }}</summary>{{ spec_text(pick(cached[0], cached[2])) }}</details><p><a href="{{ spec_file(lot) | safe_url }}" target="_blank" rel="noopener">{{ _("Скачать файл спецификации") }}</a></p>{% else %}<p class="muted">{{ _("Загружаю…") }}</p>{% endif %}</div>
-    </details>
+    {% if spec %}{{ lot_spec(lot) }}{% elif link %}
+    {# Страница объявления: техспецификация, выжимка и поиск товаров — на странице лота. #}
+    <p style="margin:10px 0 0"><a class="more-link" href="/lots/{{ lot.id }}">{{ _("Подробнее о лоте: техспецификация, поиск товаров, конкуренты →") }}</a></p>
     {% endif %}
   </div>
 {% endmacro %}

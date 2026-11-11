@@ -47,6 +47,8 @@
     spec.addEventListener("toggle", () => {
       if (spec.open && !spec.dataset.loaded) { spec.dataset.loaded = "1"; loadSpec(spec, false); }
     });
+    // Раскрыта сразу (вкладка «Техспецификация» на странице лота) — грузим без нажатия.
+    if (spec.open && !spec.dataset.loaded) { spec.dataset.loaded = "1"; loadSpec(spec, false); }
   }
   // На телефоне — системное меню «Поделиться», на компьютере — копирование ссылки.
   for (const button of document.querySelectorAll("[data-share]")) {
