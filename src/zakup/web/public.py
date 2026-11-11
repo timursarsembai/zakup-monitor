@@ -674,7 +674,7 @@ def _lot_numbers(conn, lot_id: int) -> tuple[dict | None, dict, list]:
                    "repeats": lot_insights.repeats(conn, lot_id, facts),
                    "market": lot_insights.market(conn, lot_id, facts),
                    "customer": lot_insights.customer(conn, facts),
-                   "deposit_terms": (facts["securities"], facts["method"], facts["amount"], facts["prepayment"])}
+                   "deposit_terms": {key: facts[key] for key in ("securities", "method", "amount", "prepayment", "subject")}}
         where, params = lot_insights.similar_where(facts, datetime.now(UTC))
         similar = lot_rows(conn, f"""SELECT l.id, row_number() OVER (ORDER BY a.end_date, l.id) AS n
                                     FROM lots l, announcements a WHERE {where}
@@ -710,8 +710,8 @@ def lot_page(request: Request, user: Viewer, lot_id: int, background: Background
             bid = bids.compute(conn, lot_id, items)
         bid_advice = bids.of(conn, lot_id) if request.state.paid else None
         # Сколько заморозить: от плановой суммы; по подписке — и при обычной цене заявки.
-        deposits = securities.for_lot(*insight["deposit_terms"],
-                                      price=bid["prices"]["usual"] if bid and request.state.paid else None) \
+        deposits = securities.for_lot(**insight["deposit_terms"],
+                                      prices=bid["prices"] if bid and request.state.paid else None) \
             if insight.get("deposit_terms") else None
         similar_marks = marks.of_user(conn, user, [row[0] for row in similar]) if user and similar else {}
     if user:

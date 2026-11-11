@@ -76,10 +76,11 @@ def test_advice_queue_bilingual(conn, monkeypatch):
 def test_lot_page_bid_tab_paid_only(client, conn):
     _similar(conn, [0.1] * 16)
     page = client.get("/lots/90").text
-    assert 'data-tab="bid"' in page and 'data-feature="bid_price"' in page and "360 000" not in page
+    # Цены заявки — по подписке (порог демпинга 360 000 — открытый, он в карточке лота).
+    assert 'data-tab="bid"' in page and 'data-feature="bid_price"' in page and 'class="bid-table"' not in page
     _login(client)
     page = client.get("/lots/90").text
-    assert "360 000.00" in page and "data-advice-start" in page
+    assert 'class="bid-table"' in page and "<b>360 000.00</b>" in page and "data-advice-start" in page
     response = client.post("/lots/90/bid-advice", headers=ORIGIN)
     assert response.json()["status"] == "queued"
     assert "ИИ разбирает цифры" in client.get("/lots/90/bid-advice").text

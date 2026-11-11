@@ -154,11 +154,15 @@
     <div>{{ _("Аванс") }}<b class="{{ 'good' if i.prepayment and i.prepayment >= 30 }}">{{ ('%g'|format(i.prepayment)) ~ "%" if i.prepayment else _("нет") }}</b></div>
     {% if deposits %}{% set d = deposits %}
     {% if d.bid %}<div>{{ _("Обеспечение заявки") }} ({{ '%g'|format(d.bid_pct) }}%)<b>{{ d.bid | money }} ₸</b>{{ _("возвращают после итогов") }}</div>{% endif %}
-    {% if d.contract_max %}<div>{{ _("Обеспечение договора") }} ({{ '%g'|format(d.contract_pct) }}%{% if d.advance_pct %} + {{ _("аванс") }} {{ '%g'|format(d.advance_pct) }}%{% endif %})<b>{% if d.contract_at_price %}≈ {{ d.contract_at_price | money }} ₸{% else %}{{ _("до") }} {{ d.contract_max | money }} ₸{% endif %}</b>{% if d.contract_at_price %}{{ _("при обычной цене заявки; не больше") }} {{ d.contract_max | money }} ₸{% else %}{{ _("от суммы договора — вашей цены") }}{% endif %}</div>{% endif %}
+    {% if d.contract_max %}<div>{{ _("Обеспечение договора") }} ({{ '%g'|format(d.contract_pct) }}%{% if d.advance_pct %} + {{ _("аванс") }} {{ '%g'|format(d.advance_pct) }}%{% endif %})<b>{% if d.contract_at_price %}≈ {{ d.contract_at_price | money }} ₸{% else %}{{ _("до") }} {{ d.contract_max | money }} ₸{% endif %}</b>{% if d.contract_at_price %}{{ _("при обычной цене заявки") }}{% if d.by_price.usual.anti %} ({{ _("в т.ч. антидемпинг") }} {{ d.by_price.usual.anti | money }} ₸){% else %}{{ _("; не больше") }} {{ d.contract_max | money }} ₸{% endif %}{% else %}{{ _("от суммы договора — вашей цены") }}{% endif %}</div>{% endif %}
+    {% if d.dumping and d.dumping.floor %}<div>{{ _("Порог демпинга") }} (−{{ d.dumping.pct }}%)<b>{{ d.dumping.floor | money }} ₸</b>{{ _("ниже — внести антидемпинговую сумму") if d.dumping.allowed else _("ниже — заявку отклонят") }}</div>{% endif %}
     {% endif %}
     {% if i.supply_date %}<div>{{ _("Срок поставки") }}<span style="display:block;color:var(--fg)">{{ i.supply_date[:90] }}{% if i.supply_date|length > 90 %}…{% endif %}</span></div>{% endif %}
   </div>
-  {% if deposits %}<p class="muted note" style="margin:10px 0 0;font-size:13px">{{ _("Обеспечение — проценты") }} {{ _("из документов объявления") if deposits.source == "documents" else _("по способу закупки (документы ещё не разобраны)") }}.{% if deposits.advance_pct %} {{ _("При авансе к обеспечению договора добавляется сумма, равная авансу.") }}{% endif %} {{ _("При сильном снижении цены по статье 13 Закона может понадобиться дополнительная сумма.") }}</p>{% endif %}
+  {% if deposits %}<p class="muted note" style="margin:10px 0 0;font-size:13px">{{ _("Обеспечение — проценты") }} {{ _("из документов объявления") if deposits.source == "documents" else _("по способу закупки (документы ещё не разобраны)") }}.{% if deposits.advance_pct %} {{ _("При авансе к обеспечению договора добавляется обеспечение аванса, равное авансу.") }}{% endif %}
+    {% if deposits.dumping and deposits.dumping.floor and deposits.dumping.allowed %}{{ _("Цену ниже порога демпинга можно подать, но после победы вместе с обеспечением договора нужно внести антидемпинговую сумму: порог минус ваша цена (ст. 13 Закона).") }}
+    {% elif deposits.dumping and deposits.dumping.works %}{{ _("Порог демпинга у работ зависит от их вида: СМР — 2% от сметы, текущий ремонт — 20%, проектирование — 10% (п. 85–89 Правил).") }}{% endif %}
+    {{ _("Поставщики из реестра казахстанских товаропроизводителей обеспечение договора и аванса не вносят.") }}</p>{% endif %}
   {% if li.repeats %}{% set r = li.repeats %}<p class="alert">🔁 {{ _("Этот лот заказчик уже объявлял:") }} {{ r.rows|length }} {{ _("раз(а)") }}{% if r.failed %}, {{ _("не состоялось:") }} {{ r.failed }}{% endif %}. <a href="#customer" data-tab-link="customer">{{ _("Подробнее") }}</a></p>{% endif %}
   {% if li.history and li.history.same_winner %}{% set w = li.history.same_winner %}<p class="alert">⚠ {{ _("Такой товар у этого заказчика почти всегда выигрывает один поставщик:") }} <a href="/org/{{ w.bin }}">{{ w.name }}</a> — {{ w.wins }} {{ _("из") }} {{ w.of }}.</p>{% endif %}
 </section>
@@ -209,14 +213,16 @@
   <p class="muted">{{ _("По итогам похожих закупок за год") }} ({{ _(bid.level_label) }}, {{ _("лотов с победителем:") }} {{ bid.won }}).
     {% if not bid.reliable %}<b>{{ _("Похожих итогов мало — оценка ориентировочная.") }}</b>{% endif %}</p>
   <div class="table-wrap"><table class="bid-table">
-    <tr><th></th><th class="num">{{ _("Снижение") }}</th><th class="num">{{ _("Цена заявки, ₸") }}</th>{% if bid.cost %}<th class="num">{{ _("Маржа, ₸") }}</th>{% endif %}</tr>
+    {% set freeze = deposits.by_price if deposits and deposits.by_price else {} %}
+    <tr><th></th><th class="num">{{ _("Снижение") }}</th><th class="num">{{ _("Цена заявки, ₸") }}</th>{% if bid.cost %}<th class="num">{{ _("Маржа, ₸") }}</th>{% endif %}{% if freeze %}<th class="num">{{ _("Заморозить после победы, ₸") }}</th>{% endif %}</tr>
     {% for key, q, label, hint in (("careful", "low", _("Осторожная"), _("выше, чем у 3 из 4 победителей")),
                                    ("usual", "median", _("Обычная"), _("как у половины победителей")),
                                    ("bold", "high", _("Агрессивная"), _("ниже, чем у 3 из 4 победителей"))) %}
     <tr{% if key == "usual" %} class="bid-main"{% endif %}><td>{{ label }}<div class="muted">{{ hint }}</div></td>
       <td class="num">{{ "%.1f" | format(bid[q] * 100) }}%</td>
       <td class="num"><b>{{ bid.prices[key] | money }}</b></td>
-      {% if bid.cost %}<td class="num {{ 'neg' if bid.margins[key] < 0 }}">{{ bid.margins[key] | money }}</td>{% endif %}</tr>
+      {% if bid.cost %}<td class="num {{ 'neg' if bid.margins[key] < 0 }}">{{ bid.margins[key] | money }}</td>{% endif %}
+      {% if freeze %}{% set f = freeze[key] %}<td class="num">{% if f.rejected %}<span class="neg">{{ _("ниже порога демпинга — отклонят") }}</span>{% else %}<b>{{ f.total | money }}</b>{% if f.anti %}<div class="muted">{{ _("в т.ч. антидемпинг") }} {{ f.anti | money }}</div>{% endif %}{% endif %}</td>{% endif %}</tr>
     {% endfor %}
   </table></div>
   <ul class="bid-facts">
@@ -228,7 +234,7 @@
     {% else %}<li class="muted">{{ _("Маржа появится, когда поиск товаров найдёт товар с ценой.") }}</li>{% endif %}
   </ul>
   <div data-bid-advice data-src="/lots/{{ lot.id }}/bid-advice">{% set advice = bid_advice %}{% include "bid_advice_fragment.html" %}</div>
-  <p class="muted note">{{ _("Цифры — статистика прошлых итогов, а не гарантия победы. Не опускайтесь ниже себестоимости с доставкой и налогами; при сильном демпинге заказчик может запросить обоснование цены.") }}</p>
+  <p class="muted note">{{ _("Цифры — статистика прошлых итогов, а не гарантия победы. Не опускайтесь ниже себестоимости с доставкой и налогами.") }}{% if freeze %} {{ _("«Заморозить» — обеспечение договора, аванса и антидемпинговая сумма (если цена ниже порога демпинга); всё возвращают после исполнения договора.") }}{% endif %}</p>
   {% elif request.state.paid %}
   <p class="muted">{{ _("Похожих завершённых закупок пока нет — посчитать цену не из чего.") }}</p>
   {% else %}
