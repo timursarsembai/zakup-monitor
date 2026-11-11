@@ -76,6 +76,7 @@ def _summary_part(raw: dict[str, Any]) -> dict[str, Any]:
         "params": [{"name": str(p.get("name") or "")[:80], "value": str(p.get("value") or "")[:200]}
                    for p in (raw.get("params") or []) if isinstance(p, dict)][:20],
         "requirements": _strings(raw.get("requirements"))[:10],
+        "risks": _strings(raw.get("risks"))[:8],
     }
 
 

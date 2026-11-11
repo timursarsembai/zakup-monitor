@@ -9,6 +9,8 @@
   {# На казахском — казахская версия, если ИИ её дал (у старых выжимок только русская). #}
   {% set r = s.result.kk if lang() == "kk" and s.result.kk else s.result %}
   {% if r.item %}<p><b>{{ r.item }}</b></p>{% endif %}
+  {% if r.risks %}<div class="risks"><b>⚠ {{ _("На что обратить внимание") }}</b>
+    <ul>{% for x in r.risks %}<li>{{ x }}</li>{% endfor %}</ul></div>{% endif %}
   {% if r.params %}<div class="table-wrap"><table class="summary-table">
     {% for p in r.params %}<tr><th>{{ p.name }}</th><td>{{ p.value }}</td></tr>{% endfor %}
   </table></div>{% endif %}
