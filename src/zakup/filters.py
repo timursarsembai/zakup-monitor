@@ -457,14 +457,20 @@ class Filters:
         # Слова ищем и в русских названиях (с морфологией), и в казахских.
         tsv, tsv_kk = ("l.tsv", "l.tsv_kk") if lots else ("a.tsv", "a.tsv_kk")
         if self.q:
-            in_specs = ""
+            words = f"""({tsv} @@ websearch_to_tsquery('russian', %(q)s)
+                         OR {tsv_kk} @@ websearch_to_tsquery('simple', %(q)s))"""
             if self.in_specs:
-                # Текст техспецификации (только у лотов, где он разобран) — по индексу 0024.
-                spec_lots = f"""SELECT s.lot_id FROM lot_specs s WHERE {SPEC_TSV} @@ websearch_to_tsquery('russian', %(q)s)"""
-                in_specs = (f" OR l.id IN ({spec_lots})" if lots else
-                            f" OR a.id IN (SELECT l2.trd_buy_id FROM lots l2 WHERE l2.id IN ({spec_lots}))")
-            clauses.append(f"""({tsv} @@ websearch_to_tsquery('russian', %(q)s)
-                                OR {tsv_kk} @@ websearch_to_tsquery('simple', %(q)s){in_specs})""")
+                # И текст техспецификации (индекс 0024). Одним списком id: «или» между
+                # названием и спецификацией в соединении читало всю таблицу (4 с), а так
+                # обе выборки идут по своим индексам.
+                spec = f"SELECT s.lot_id FROM lot_specs s WHERE {SPEC_TSV} @@ websearch_to_tsquery('russian', %(q)s)"
+                if lots:
+                    clauses.append(f"""l.id IN (SELECT l.id FROM lots l WHERE {words} UNION {spec})""")
+                else:
+                    clauses.append(f"""a.id IN (SELECT a.id FROM announcements a WHERE {words}
+                                                UNION SELECT l2.trd_buy_id FROM lots l2 WHERE l2.id IN ({spec}))""")
+            else:
+                clauses.append(words)
             params["q"] = _OR.sub(" or ", _OR_KK.sub(" or ", self.q))
         if words := self.exclude.replace(",", " ").split():
             # Любое из слов исключает запись.
