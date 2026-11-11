@@ -361,6 +361,8 @@ def test_organization_pages_for_customer_and_supplier(client, conn):
     assert '"taxID": "990740001111"' in page and "/a/900" in client.get(f"/org/{customer}?tab=buys").text
     seller = client.get(f"/org/{supplier}").text
     assert "Главные заказчики" in seller and f'href="/org/{customer}"' in seller
+    # За год: столбики по месяцам и доли (в тестовых данных — один выигранный лот).
+    assert "побед <b>1</b>" in seller and "Регионы поставки" not in seller  # у лота нет региона
     assert "/lots/9001" in client.get(f"/org/{supplier}?tab=wins").text
     # У ИП (по ИИН) — тоже страница: участие в закупках; неизвестный БИН — 404.
     assert "ИП Иванов" in client.get(f"/org/{person}").text

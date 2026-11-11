@@ -52,6 +52,12 @@
   .chart-legend { display: flex; gap: 14px; font-size: 13px; color: var(--muted); margin-top: 4px; }
   .chart-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; background: var(--accent); }
   .chart-legend i.b { background: var(--muted); opacity: .45; }
+  .shares { display: grid; gap: 8px; max-width: 760px; }
+  .share { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(80px, 1fr) auto; gap: 10px; align-items: center; font-size: 14px; }
+  .share-bar { height: 8px; border-radius: 4px; background: color-mix(in srgb, var(--muted) 18%, transparent); overflow: hidden; }
+  .share-bar i { display: block; height: 100%; background: var(--accent); border-radius: 4px; }
+  .share-n { white-space: nowrap; color: var(--muted); font-variant-numeric: tabular-nums; } .share-n b { color: var(--fg); }
+  @media (max-width: 560px) { .share { grid-template-columns: 1fr auto; } .share-bar { grid-column: 1 / -1; grid-row: 2; } }
   .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 0 28px; }
   /* Плитка: строки таблицы — карточки, подписи столбцов — над значениями. */
   [data-rview=cards] { overflow: visible; }
@@ -72,19 +78,27 @@
 {# Ссылка на эту же вкладку с другими параметрами (сортировка, фильтр, страница). #}
 {% macro tab_url(tab) %}{% set q = {"tab": tab} %}{% for k, v in kwargs.items() if v %}{% set __ = q.update({k: v}) %}{% endfor %}/org/{{ o.bin }}{% if q.tab != "overview" or q|length > 1 %}?{{ q | urlencode }}{% endif %}{% endmacro %}
 {# Столбики по дням (последние 30): series — [(значения, класс, название)]. #}
-{% macro bars(days, series) %}
+{% macro bars(days, series, fmt="%d.%m", every=5) %}
 {% set W, H = 600, 130 %}{% set n = days|length %}{% set slot = W / n %}{% set groups = series|length %}
 {% set peak = [1] %}{% for values, cls, label in series %}{% set __ = peak.append(values|max) %}{% endfor %}{% set top = peak|max %}
 <svg class="org-chart" viewBox="0 0 {{ W }} {{ H + 18 }}" role="img" aria-label="{{ series|map(attribute=2)|join(", ") }}">
   <text x="0" y="9">{{ top }}</text>
   {% for values, cls, label in series %}{% set g = loop.index0 %}{% for v in values %}{% set h = ((v / top) * (H - 14)) if v else 0 %}
-  <rect class="{{ cls }}" x="{{ '%.1f'|format(loop.index0 * slot + slot * 0.12 + g * slot * 0.76 / groups) }}" y="{{ '%.1f'|format(H - h) }}" width="{{ '%.1f'|format(slot * 0.76 / groups) }}" height="{{ '%.1f'|format(h) }}" rx="1.5"><title>{{ days[loop.index0].strftime("%d.%m") }}: {{ v }} — {{ label }}</title></rect>
+  <rect class="{{ cls }}" x="{{ '%.1f'|format(loop.index0 * slot + slot * 0.12 + g * slot * 0.76 / groups) }}" y="{{ '%.1f'|format(H - h) }}" width="{{ '%.1f'|format(slot * 0.76 / groups) }}" height="{{ '%.1f'|format(h) }}" rx="1.5"><title>{{ days[loop.index0].strftime(fmt) }}: {{ v }} — {{ label }}</title></rect>
   {% endfor %}{% endfor %}
-  {% for d in days %}{% if loop.index0 % 5 == 0 or loop.last %}<text x="{{ '%.1f'|format(loop.index0 * slot + slot / 2) }}" y="{{ H + 13 }}" text-anchor="middle">{{ d.strftime("%d.%m") }}</text>{% endif %}{% endfor %}
+  {% for d in days %}{% if loop.index0 % every == 0 or (loop.last and loop.index0 % every >= every / 2) %}<text x="{{ '%.1f'|format(loop.index0 * slot + slot / 2) }}" y="{{ H + 13 }}" text-anchor="middle">{{ d.strftime(fmt) }}</text>{% endif %}{% endfor %}
 </svg>
 <div class="chart-legend">{% for values, cls, label in series %}<span><i class="{{ cls }}"></i>{{ label }} · {{ values|sum }}</span>{% endfor %}</div>
 {% endmacro %}
 {% macro divisions(rows) %}<div class="chips-row">{% for c in rows %}{% if division_name(c.code) %}<a href="/category/{{ c.code }}">{{ division_name(c.code) }} · {{ c.lots }}</a>{% endif %}{% endfor %}</div>{% endmacro %}
+{# Доли в процентах полосками: kind — "division" (раздел ЕНС ТРУ) или "region". #}
+{% macro shares(rows, kind, amount=false) %}{# доли — от всех лотов; строк показано не больше 8 #}
+<div class="shares">{% for r in rows %}{% set label = division_name(r.code) if kind == "division" else region_name(r.code) %}{% if label %}
+  <div class="share"><span class="share-name">{% if kind == "division" %}<a href="/category/{{ r.code }}">{{ label }}</a>{% else %}{{ label }}{% endif %}</span>
+    <span class="share-bar"><i style="width:{{ '%.1f'|format(r.share * 100) }}%"></i></span>
+    <span class="share-n"><b>{{ (r.share * 100) | round | int }}%</b> · {% if kind == "region" %}{{ _("заявок") }} {{ r.lots }}{% if r.wins %}, {{ _("побед") }} {{ r.wins }}{% endif %}{% else %}{{ r.lots }}{% if amount and r.amount %} · {{ r.amount | money }} ₸{% endif %}{% endif %}</span></div>
+{% endif %}{% endfor %}</div>
+{% endmacro %}
 {% macro pager(total, page, pages) %}{% if pages > 1 %}<div class="pager">{% if page > 1 %}<a href="{{ tab_url(o.tab, sort=o.get("sort"), customer=o.get("customer"), result=o.get("result"), page=page - 1) }}">← {{ _("Назад") }}</a>{% endif %}<span class="muted">{{ _("стр.") }} {{ page }} {{ _("из") }} {{ pages }} · {{ total }}</span>{% if page < pages %}<a href="{{ tab_url(o.tab, sort=o.get("sort"), customer=o.get("customer"), result=o.get("result"), page=page + 1) }}">{{ _("Дальше") }} →</a>{% endif %}</div>{% endif %}{% endmacro %}
 {% macro announcements_table(rows) %}
 <div class="table-wrap" data-rview-box><table class="org-table">
@@ -135,6 +149,18 @@
 </nav>
 
 {% if o.tab == "overview" %}
+  {% if o.months %}{% set y = o.year %}
+  <h2>{{ _("Участие по месяцам") if o.months|length > 1 else _("Участие") }}</h2>
+  <p class="muted">{{ _("С %s") | format(o.year_since.strftime("%m.%Y")) }}: {{ _("заявок") }} <b>{{ y.offers }}</b>, {{ _("побед") }} <b>{{ y.wins }}</b>{% if y.offers %} ({{ (y.wins / y.offers * 100) | round | int }}%){% endif %}{% if y.amount %} {{ _("на") }} <b>{{ y.amount | money }} ₸</b>{% endif %}.</p>
+  {% if o.months|length > 1 %}{{ bars(o.months|map(attribute=0)|list, [(o.months|map(attribute=1)|list, "b", _("заявки")), (o.months|map(attribute=2)|list, "a", _("победы"))], "%m.%Y", 1 if o.months|length <= 6 else 3) }}{% endif %}
+  {% endif %}
+  {% if o.win_divisions or o.offer_divisions %}
+  <div class="cols">
+    {% if o.win_divisions %}<section><h2>{{ _("Что выигрывает") }}</h2>{{ shares(o.win_divisions, "division", true) }}</section>{% endif %}
+    {% if o.offer_divisions %}<section><h2>{{ _("В чём участвует") }}</h2>{{ shares(o.offer_divisions, "division") }}</section>{% endif %}
+  </div>
+  {% endif %}
+  {% if o.offer_regions %}<h2>{{ _("Регионы поставки") }}</h2>{{ shares(o.offer_regions, "region") }}{% endif %}
   {% if o.dynamics %}
   <h2>{{ _("Динамика участия за 30 дней") }}</h2>
   {{ bars(o.dynamics|map(attribute=0)|list, [(o.dynamics|map(attribute=1)|list, "b", _("заявки")), (o.dynamics|map(attribute=2)|list, "a", _("победы"))]) }}
@@ -143,7 +169,7 @@
   <h2>{{ _("Объявленные закупки за 30 дней") }}</h2>
   {{ bars(o.buy_dynamics|map(attribute=0)|list, [(o.buy_dynamics|map(attribute=1)|list, "a", _("объявления"))]) }}
   {% endif %}
-  {% if o.sells_divisions %}<h2>{{ _("Что поставляет") }}</h2>{{ divisions(o.sells_divisions) }}{% endif %}
+  {% if o.sells_divisions and not o.win_divisions %}<h2>{{ _("Что поставляет") }}</h2>{{ divisions(o.sells_divisions) }}{% endif %}
   {% if o.buys_divisions or o.buys_names %}
   <h2>{{ _("Что чаще всего покупает") }}</h2>
   {% if o.buys_divisions %}{{ divisions(o.buys_divisions) }}{% endif %}

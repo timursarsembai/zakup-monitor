@@ -9,7 +9,7 @@
 import re
 import threading
 import time
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import psycopg
@@ -134,6 +134,7 @@ def _overview(conn, params, data, args, now) -> dict[str, Any]:
                 WHERE {_offered_sql()} AND o->>'bin' = %(b)s GROUP BY 1""", params).fetchall()
         by_day = {day: (n, w) for day, n, w in rows}
         out["dynamics"] = [(d, *by_day.get(d, (0, 0))) for d in days]
+        out.update(_seller_year(conn, params, now))
     if data["buyer"]["total"]:
         rows = conn.execute(
             """SELECT (publish_date AT TIME ZONE 'Asia/Almaty')::date, count(*) FROM announcements
@@ -151,13 +152,60 @@ def _overview(conn, params, data, args, now) -> dict[str, Any]:
             FROM lots WHERE customer_bin = %(b)s AND name_ru IS NOT NULL
             GROUP BY lower(name_ru) HAVING count(*) > 1 ORDER BY 3 DESC, 4 DESC LIMIT 12""", params)
         out["their_winners"] = _their_winners(conn, params, 5)
-    if data["seller"]["wins"]:
+    if data["seller"]["wins"] and not out.get("win_divisions"):  # за год пусто — за всё время
         out["sells_divisions"] = _rows(conn, """
             SELECT left(l.enstru[1], 2) AS code, count(*) AS lots, coalesce(sum(r.winner_total), 0) AS amount
             FROM lot_results r JOIN lots l ON l.id = r.lot_id
             WHERE r.winner_bin = %(b)s AND r.outcome = 'winner' AND cardinality(l.enstru) > 0
             GROUP BY 1 ORDER BY 2 DESC, 3 DESC LIMIT 8""", params)
         out["their_customers"] = _their_customers(conn, params, 5)
+    return out
+
+
+MONTHS = 12
+def _seller_year(conn, params, now) -> dict[str, Any]:
+    """Поставщик за год: заявки и победы по месяцам (с месяца, с которого у нас есть итоги),
+    в чём участвует и что выигрывает — разделы ЕНС ТРУ в процентах, регионы поставки.
+    Месяц — по окончанию приёма заявок: дата итогов у догруженных лотов — день загрузки.
+    График — с первого месяца, где он участвовал.
+    Доли — от всех его лотов, а не от показанных строк."""
+    local = now.astimezone(PORTAL_TZ)
+    months = []
+    y, m = local.year, local.month
+    for _ in range(MONTHS):
+        months.append(date(y, m, 1))
+        y, m = (y, m - 1) if m > 1 else (y - 1, 12)
+    months.sort()
+    query = {**params, "since": datetime.combine(months[0], datetime.min.time(), PORTAL_TZ)}
+    base = f"""FROM lot_results r JOIN lots l ON l.id = r.lot_id JOIN announcements a ON a.id = l.trd_buy_id
+               WHERE {_offered_sql()} AND a.end_date >= %(since)s"""
+    won = "r.outcome = 'winner' AND r.winner_bin = %(b)s"
+    by_month = {row[0]: row[1:] for row in conn.execute(
+        f"""SELECT date_trunc('month', a.end_date AT TIME ZONE 'Asia/Almaty')::date, count(*),
+                   count(*) FILTER (WHERE {won}) {base} GROUP BY 1""", query)}
+    # С первого месяца, где он участвовал (история в базе неполная — не рисуем пустые месяцы до неё).
+    months = [d for d in months if d >= min(by_month, default=months[-1])]
+    out: dict[str, Any] = {"months": [(d, *by_month.get(d, (0, 0))) for d in months]}
+    out["year"] = dict(zip(("offers", "wins", "amount"), conn.execute(
+        f"SELECT count(*), count(*) FILTER (WHERE {won}), coalesce(sum(r.winner_total) FILTER (WHERE {won}), 0) {base}",
+        query).fetchone(), strict=True))
+    out["year_since"] = months[0]
+
+    def shares(source: str, key: str, condition: str = "true") -> list[dict[str, Any]]:
+        rows = _rows(conn, f"""SELECT {key} AS code, count(*) AS lots, count(*) FILTER (WHERE {won}) AS wins,
+                                      coalesce(sum(r.winner_total) FILTER (WHERE {won}), 0) AS amount,
+                                      sum(count(*)) OVER () AS total
+                               {source} AND {condition} GROUP BY 1 ORDER BY 2 DESC LIMIT 8""", query)
+        for r in rows:
+            r["share"] = r["lots"] / r["total"] if r["total"] else 0
+        return rows
+
+    division = "left(l.enstru[1], 2)"
+    out["offer_divisions"] = shares(base, division, "cardinality(l.enstru) > 0")
+    out["win_divisions"] = shares(base, division, f"cardinality(l.enstru) > 0 AND {won}")
+    # Регионы — все регионы поставки лота (lots.regions), как в фильтрах; лот в двух регионах —
+    # в обоих.
+    out["offer_regions"] = shares(base.replace("WHERE", ", unnest(l.regions) reg WHERE", 1), "reg")
     return out
 
 
