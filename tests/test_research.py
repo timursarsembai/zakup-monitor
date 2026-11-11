@@ -141,13 +141,16 @@ def test_spec_summary_queue_and_cache(conn, monkeypatch):
     def fake(prompt, model, schema=None, web=True):
         calls.append((model, web, "Стол дубовый 120х60" in prompt))
         return {"item": "Стол дубовый", "params": [{"name": "Размер", "value": "120×60"}],
-                "requirements": ["Гарантия 12 мес."]}
+                "requirements": ["Гарантия 12 мес."],
+                "kk": {"item": "Емен үстел", "params": [{"name": "Өлшемі", "value": "120×60"}],
+                       "requirements": ["Кепілдік 12 ай"]}}
     monkeypatch.setattr(research.providers, "_claude_code", fake)
     assert research.request_summary(conn, 90) == "queued"
     research.work(os.environ["TEST_DATABASE_URL"], ["claude_code"], once=True)
     assert calls == [("haiku", False, True)]
     summary = research.summary_of(conn, 90)
     assert summary["status"] == "done" and summary["result"]["params"][0]["value"] == "120×60"
+    assert summary["result"]["kk"]["item"] == "Емен үстел"
     assert research.request_summary(conn, 90) == "done"  # готовая — повторно не ставится
 
 

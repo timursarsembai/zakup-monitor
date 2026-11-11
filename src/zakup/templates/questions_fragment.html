@@ -2,8 +2,9 @@
 {% elif q.status in ("queued", "running") %}<p data-q-status="{{ q.status }}"><span class="spinner"></span> {{ _("ИИ составляет вопросы по техспецификации и описанию товара — обычно 10–30 секунд.") }}</p>
 {% elif q.status == "error" %}<p class="bad" data-q-status="error">{{ _("Не получилось:") }} {{ q.error }}</p>
 {% else %}<div data-q-status="done">
+  {% set qr = q.result.kk if lang() == "kk" and q.result.kk else q.result %}
   {% for key, title in (("confirm", _("Подтвердить: совпадает со спецификацией")), ("clarify", _("Уточнить: не совпадает или не указано")), ("terms", _("Цена, наличие, поставка и документы"))) %}
-  {% if q.result[key] %}<h3>{{ title }}</h3>
-  <ol class="q-list">{% for item in q.result[key] %}<li><label><input type="checkbox"> <span>{{ item }}</span></label></li>{% endfor %}</ol>{% endif %}
+  {% if qr[key] %}<h3>{{ title }}</h3>
+  <ol class="q-list">{% for item in qr[key] %}<li><label><input type="checkbox"> <span>{{ item }}</span></label></li>{% endfor %}</ol>{% endif %}
   {% endfor %}
 </div>{% endif %}

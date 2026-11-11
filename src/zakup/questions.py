@@ -14,14 +14,13 @@ from zakup import research
 
 logger = logging.getLogger(__name__)
 
+PARTS = ("confirm", "clarify", "terms")
+_LISTS = {part: {"type": "array", "items": {"type": "string"}} for part in PARTS}
+# Чек-лист сразу на двух языках: kk — те же вопросы по-казахски (по языку интерфейса).
 SCHEMA = {
     "type": "object",
-    "properties": {
-        "confirm": {"type": "array", "items": {"type": "string"}},
-        "clarify": {"type": "array", "items": {"type": "string"}},
-        "terms": {"type": "array", "items": {"type": "string"}},
-    },
-    "required": ["confirm", "clarify", "terms"],
+    "properties": {**_LISTS, "kk": {"type": "object", "properties": _LISTS, "required": list(PARTS)}},
+    "required": [*PARTS, "kk"],
 }
 PROMPT = """Ты помогаешь поставщику на госзакупках Казахстана. Он нашёл товар у продавца и
 будет ему звонить или писать в WhatsApp. Составь чек-лист вопросов к продавцу.
@@ -53,7 +52,9 @@ PROMPT = """Ты помогаешь поставщику на госзакупк
 - terms — цена актуальна ли (на сайте может быть старая), цена за {count} {unit}
   и скидка за объём, наличие и срок поставки, доставка до места поставки,
   документы (сертификаты, СТ РК/ГОСТ, гарантия), счёт-фактура и НДС, условия оплаты.
-Не больше 10 вопросов в списке. Пиши по-русски, ничего не выдумывай."""
+Не больше 10 вопросов в списке. Пиши по-русски, ничего не выдумывай.
+Затем в kk — те же три списка на казахском языке, вопрос в вопрос: числа, единицы, марки и
+стандарты не меняй."""
 
 
 def item(conn: psycopg.Connection, lot_id: int, url: str, owner: int | None = None) -> dict[str, Any] | None:
@@ -110,8 +111,15 @@ def _ask(conn: psycopg.Connection, lot_id: int, url: str, provider: str, model: 
         raw = research.providers._anthropic(prompt, model, key, schema=SCHEMA, web=False)
     else:
         raw = research.providers._openai(prompt, model, key, schema=SCHEMA, web=False)
+    result: dict[str, Any] = _lists(raw)
+    if isinstance(raw.get("kk"), dict) and any(raw["kk"].get(part) for part in PARTS):
+        result["kk"] = _lists(raw["kk"])
+    return result
+
+
+def _lists(raw: dict[str, Any]) -> dict[str, list[str]]:
     return {part: [str(q).strip()[:300] for q in raw.get(part) or [] if str(q).strip()][:12]
-            for part in ("confirm", "clarify", "terms")}
+            for part in PARTS}
 
 
 def work_one(conn: psycopg.Connection, providers: list[str]) -> bool:

@@ -123,17 +123,20 @@ ITEM {{"name": "...", "seller": "...", "city": "...", "in_region": true, "price"
 """
 
 
+_SUMMARY_FIELDS = {
+    "item": {"type": "string"},
+    "params": {"type": "array", "items": {
+        "type": "object",
+        "properties": {"name": {"type": "string"}, "value": {"type": "string"}},
+        "required": ["name", "value"]}},
+    "requirements": {"type": "array", "items": {"type": "string"}},
+}
+# Выжимка сразу на двух языках: kk — то же по-казахски (сайт показывает по языку интерфейса).
 SUMMARY_SCHEMA = {
     "type": "object",
-    "properties": {
-        "item": {"type": "string"},
-        "params": {"type": "array", "items": {
-            "type": "object",
-            "properties": {"name": {"type": "string"}, "value": {"type": "string"}},
-            "required": ["name", "value"]}},
-        "requirements": {"type": "array", "items": {"type": "string"}},
-    },
-    "required": ["item", "params", "requirements"],
+    "properties": {**_SUMMARY_FIELDS,
+                   "kk": {"type": "object", "properties": _SUMMARY_FIELDS, "required": list(_SUMMARY_FIELDS)}},
+    "required": ["item", "params", "requirements", "kk"],
 }
 
 
@@ -151,7 +154,9 @@ SUMMARY_PROMPT = """Сделай краткую выжимку техничес�
   мощность, комплектация и т.п.), коротко, не больше 15, без воды;
 - requirements — прочие требования одной строкой каждое: гарантия, упаковка,
   стандарты (ГОСТ/СТ РК), сертификаты, сроки и условия поставки; не больше 8.
-Пиши по-русски, ничего не выдумывай: только то, что есть в тексте."""
+Пиши по-русски, ничего не выдумывай: только то, что есть в тексте.
+Затем в kk — то же самое на казахском языке (item, params, requirements): термины — как на
+портале goszakup.gov.kz, числа, единицы измерения, марки и стандарты (ГОСТ, СТ РК) не меняй."""
 
 
 def build_prompt(context: dict[str, Any], region: str, whole_kz: bool,

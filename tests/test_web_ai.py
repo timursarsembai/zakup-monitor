@@ -70,10 +70,14 @@ def test_spec_summary_shown_in_lot_card(client, conn):
     assert "Кратко: главное в таблице" in page
     assert client.post("/lots/90/spec-summary", headers=ORIGIN).json() == {"status": "queued"}
     conn.execute("""UPDATE spec_summaries SET status = 'done', result =
-        '{"item": "Стол", "params": [{"name": "Материал", "value": "дуб"}], "requirements": []}'""")
+        '{"item": "Стол", "params": [{"name": "Материал", "value": "дуб"}], "requirements": [],
+          "kk": {"item": "Үстел", "params": [{"name": "Материалы", "value": "емен"}], "requirements": []}}'""")
     conn.commit()
     page = client.get("/lots/90").text
-    assert "Материал" in page and "дуб" in page
+    assert "Материал" in page and "дуб" in page and "емен" not in page
+    client.get("/lang/kk")  # на казахском — казахская версия выжимки
+    page = client.get("/lots/90").text
+    assert "Материалы" in page and "емен" in page
 
 
 def test_research_list_margin_falls_back_to_partial_fit(client, conn):

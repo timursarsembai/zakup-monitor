@@ -64,6 +64,13 @@ def _summarize(conn: psycopg.Connection, lot_id: int, provider: str, model: str)
         raw = prov._anthropic(prompt, model, key, schema=SUMMARY_SCHEMA, web=False)
     else:
         raw = prov._openai(prompt, model, key, schema=SUMMARY_SCHEMA, web=False)
+    result = _summary_part(raw)
+    if isinstance(raw.get("kk"), dict) and raw["kk"].get("item"):
+        result["kk"] = _summary_part(raw["kk"])  # казахская версия — для интерфейса на казахском
+    return result
+
+
+def _summary_part(raw: dict[str, Any]) -> dict[str, Any]:
     return {
         "item": str(raw.get("item") or "")[:300],
         "params": [{"name": str(p.get("name") or "")[:80], "value": str(p.get("value") or "")[:200]}
