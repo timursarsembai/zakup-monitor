@@ -72,3 +72,11 @@ def test_products_page_staff_only(client, conn):
     page = client.get("/products?q=стол&sort=price").text
     assert "Стол дубовый" in page and "Материал: дуб" in page and "цена на" in page
     assert "Ничего не нашлось" in client.get("/products?q=диван").text
+
+
+def test_candidates_include_own_lot_finds_with_other_words(conn):
+    _lot(conn)
+    products.remember(conn, 90, [{"name": "Утюг Philips", "url": "https://a.kz/iron", "price": 9000, "price_unit": "шт"}])
+    products.remember(conn, 90, [{"name": "Утюг дорогой", "url": "https://a.kz/iron2", "price": 900000, "price_unit": "шт"}])
+    rows = products.candidates(conn, 90, "Электроутюг", max_price=100000)
+    assert [r["url"] for r in rows] == ["https://a.kz/iron"]  # дороже цены лота — не предлагаем

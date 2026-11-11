@@ -119,22 +119,24 @@ def candidates(conn: psycopg.Connection, lot_id: int, name: str, exclude: list[s
     (если он известен у обоих), в наличии, дешевле цены лота за единицу (дороже — модели всё
     равно велено не брать; цену за упаковку не знаем — такие оставляем); сначала самые
     похожие и свежие."""
-    words = _words(name)
-    if not words:
-        return []
+    words = _words(name) or "-"
     division = _division(conn, lot_id)
     cursor = conn.execute(
         """SELECT url, name, seller, city, price, price_unit, specs, checked_at,
                   checked_at > now() - make_interval(days => %(fresh)s) AS fresh
            FROM product_catalog
-           WHERE available AND tsv @@ to_tsquery('russian', %(words)s)
-             AND (%(division)s::text IS NULL OR division IS NULL OR division = %(division)s)
+           WHERE available
+             -- те же слова названия в том же разделе — или уже находили для этого же лота
+             -- («Электроутюг» в лоте, «Утюг» у продавца)
+             AND ((tsv @@ to_tsquery('russian', %(words)s)
+                   AND (%(division)s::text IS NULL OR division IS NULL OR division = %(division)s))
+                  OR %(lot)s = ANY(lots))
              AND NOT (url_key = ANY(%(exclude)s))
              AND (%(max_price)s::numeric IS NULL OR price IS NULL OR price_unit NOT IN ('', 'шт')
                   OR price < %(max_price)s::numeric)
-           ORDER BY ts_rank(tsv, to_tsquery('russian', %(words)s)) DESC, checked_at DESC
+           ORDER BY %(lot)s = ANY(lots) DESC, ts_rank(tsv, to_tsquery('russian', %(words)s)) DESC, checked_at DESC
            LIMIT %(limit)s""",
-        {"words": words, "division": division, "fresh": FRESH_DAYS, "limit": limit, "max_price": max_price,
+        {"words": words, "lot": lot_id, "division": division, "fresh": FRESH_DAYS, "limit": limit, "max_price": max_price,
          "exclude": [url_key(u) for u in exclude or []]})
     names = [column.name for column in cursor.description]
     return [dict(zip(names, row, strict=True)) for row in cursor.fetchall()]
