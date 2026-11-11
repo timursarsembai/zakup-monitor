@@ -146,6 +146,7 @@ services:
         condition: service_started
     entrypoint: ["zakup", "specs", "--loop"]
     environment: *db-env
+    cpus: 1.0  # разбор PDF грузит процессор — не отнимать его у сайта и базы
     mem_limit: 512m  # разбор PDF — в отдельном процессе, до ~200 МБ (zakup.spec)
     logging: *logging
 
@@ -161,6 +162,7 @@ services:
         condition: service_started
     entrypoint: ["zakup", "securities", "--loop"]
     environment: *db-env
+    cpus: 0.5  # разбор PDF грузит процессор — не отнимать его у сайта и базы
     mem_limit: 512m  # разбор PDF — в отдельном процессе, до ~200 МБ
     logging: *logging
 
