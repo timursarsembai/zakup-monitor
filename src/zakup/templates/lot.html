@@ -2,6 +2,7 @@
 {% from "_lot_card.html" import lot_styles, lot_card, lot_spec, lot_winners with context %}
 {% from "_share.html" import share_buttons, share_styles with context %}
 {% from "_suppliers.html" import suppliers_block, suppliers_styles with context %}
+{% from "_lots_table.html" import lots_table, view_switch, results_styles with context %}
 {% block title %}{{ loc(lot) }} — {{ _("лот") }} {{ lot.lotNumber or lot.id }}{% endblock %}
 {% block description %}{% set facts = [] %}{% if lot.get("amount") is not none %}{% set __ = facts.append(_("Сумма") ~ " " ~ (lot.amount | money) ~ " ₸") %}{% endif %}{% if end %}{% set __ = facts.append(_("приём заявок до") ~ " " ~ (end|local).strftime("%d.%m.%Y %H:%M")) %}{% endif %}{{ _("Госзакупка") }}: {{ loc(lot) }}. {{ _("Заказчик") }}: {{ loc(lot, "customerNameRu") or "—" }}.{% if facts %} {{ facts | join(", ") }}.{% endif %}{% endblock %}
 {% block og_image %}{{ site_url }}/og/lot/{{ lot.id }}.png{% endblock %}
@@ -108,6 +109,16 @@
   .advice-text { background: color-mix(in srgb, var(--accent) 7%, transparent); border-left: 3px solid var(--accent); padding: 10px 14px; border-radius: 6px; line-height: 1.5; }
   .proposal-table td.ok { color: var(--ok); white-space: nowrap; } .proposal-table td.check { color: #b26a00; white-space: nowrap; }
   .q-list input { margin-top: 4px; flex: none; } .q-list input:checked + span { text-decoration: line-through; color: var(--muted); }
+{{ results_styles() }}
+  .decide { border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin: 14px 0 6px; }
+  .decide h2 { margin: 0 0 10px; font-size: 18px; }
+  .decide-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px 18px; }
+  .decide-grid > div { font-size: 13px; color: var(--muted); }
+  .decide-grid b { display: block; font-size: 18px; color: var(--fg); font-variant-numeric: tabular-nums; }
+  .decide-grid b.good { color: var(--ok); } .decide-grid b.warn { color: #b26a00; }
+  .decide .alert { margin: 12px 0 0; padding: 8px 12px; border-radius: 8px; background: color-mix(in srgb, #f0b429 16%, transparent); font-size: 14px; }
+  .decide .alert + .alert { margin-top: 6px; }
+  .cust-stats { display: flex; flex-wrap: wrap; gap: 6px 22px; margin: 6px 0 12px; }
 {% endblock %}
 {% block main %}
 {% if refresh_error %}<p class="notice">{{ refresh_error }}</p>{% endif %}
@@ -129,6 +140,24 @@
 {{ share_buttons("/lots/" ~ lot.id, portal_url ~ "?tab=lots", loc(lot) ~ " — " ~ _("лот") ~ " " ~ (lot.lotNumber or lot.id)) }}
 {{ lot_card(lot, link=false) }}
 
+{# «Стоит ли участвовать» — главные цифры одним взглядом (zakup.bids, zakup.lot_insights).
+   Снижение цены — по подписке, как вкладка «Цена заявки». #}
+{% set li = insight or {} %}{% set i = info[lot.id] %}
+<section class="decide" aria-labelledby="decide-title">
+  <h2 id="decide-title">{{ _("Стоит ли участвовать") }}</h2>
+  <div class="decide-grid">
+    {% if end %}<div>{{ _("До конца приёма заявок") }}<b class="{{ 'warn' if end and hours_left(end) < 24 }}">{{ time_left(end) if hours_left(end) > 0 else _("приём закончен") }}</b></div>{% endif %}
+    {% if bid and bid.offers %}<div>{{ _("Заявок в похожих лотах") }}<b>≈ {{ "%.1f" | format(bid.offers) }}</b></div>{% endif %}
+    {% if bid and bid.failed_share is not none %}<div>{{ _("Похожие не состоялись") }}<b class="{{ 'good' if bid.failed_share >= 0.5 }}">{{ (bid.failed_share * 100) | round | int }}%</b>{% if bid.empty %}{{ _("без заявок:") }} {{ (bid.empty * 100) | round | int }}%{% endif %}</div>{% endif %}
+    {% if bid %}<div>{{ _("Обычное снижение цены") }}{% if request.state.paid %}<b>{{ (bid.median * 100) | round(1) }}%</b>{% else %}<b><button type="button" class="link-button" data-paid data-feature="bid_price">{{ _("по подписке") }} 🔒</button></b>{% endif %}</div>{% endif %}
+    {% if li.market %}{% set m = li.market %}<div>{{ _("Цена за ед. против рынка") }}<b class="{{ 'good' if m.diff > 0.1 else ('warn' if m.diff < -0.1) }}">{% if m.diff > 0.02 %}+{% endif %}{{ (m.diff * 100) | round | int }}%</b>{{ _("средняя у победителей:") }} {{ m.median | money }} ₸ ({{ m.n }})</div>{% endif %}
+    <div>{{ _("Аванс") }}<b class="{{ 'good' if i.prepayment and i.prepayment >= 30 }}">{{ ('%g'|format(i.prepayment)) ~ "%" if i.prepayment else _("нет") }}</b></div>
+    {% if i.supply_date %}<div>{{ _("Срок поставки") }}<span style="display:block;color:var(--fg)">{{ i.supply_date[:90] }}{% if i.supply_date|length > 90 %}…{% endif %}</span></div>{% endif %}
+  </div>
+  {% if li.repeats %}{% set r = li.repeats %}<p class="alert">🔁 {{ _("Этот лот заказчик уже объявлял:") }} {{ r.rows|length }} {{ _("раз(а)") }}{% if r.failed %}, {{ _("не состоялось:") }} {{ r.failed }}{% endif %}. <a href="#customer" data-tab-link="customer">{{ _("Подробнее") }}</a></p>{% endif %}
+  {% if li.history and li.history.same_winner %}{% set w = li.history.same_winner %}<p class="alert">⚠ {{ _("Такой товар у этого заказчика почти всегда выигрывает один поставщик:") }} <a href="/org/{{ w.bin }}">{{ w.name }}</a> — {{ w.wins }} {{ _("из") }} {{ w.of }}.</p>{% endif %}
+</section>
+
 {# Разделы лота — вкладками, а не одной простынёй. Старые ссылки #research, #suppliers,
    #results открывают нужную вкладку (lot.js). #}
 {% set has_spec = spec_file(lot) %}
@@ -139,6 +168,8 @@
   {% if rivals %}<button type="button" role="tab" data-tab="suppliers">{{ _("Конкуренты и поставщики") }}</button>{% endif %}
   <button type="button" role="tab" data-tab="bid">{{ _("Цена заявки") }}</button>
   {% if has_results %}<button type="button" role="tab" data-tab="results">{{ _("Итоги") }}</button>{% endif %}
+  {% if li.history or li.repeats or li.customer %}<button type="button" role="tab" data-tab="customer">{{ _("Заказчик") }}</button>{% endif %}
+  {% if similar %}<button type="button" role="tab" data-tab="similar">{{ _("Похожие открытые лоты") }} ({{ similar|length }}{% if similar|length >= similar_limit %}+{% endif %})</button>{% endif %}
   {% if others %}<button type="button" role="tab" data-tab="others">{{ _("Другие лоты") }} ({{ others|length }})</button>{% endif %}
 </nav>
 
@@ -169,7 +200,7 @@
 <div data-panel="bid" id="bid" hidden>
 <section class="research-box">
   <h2 style="margin-top:0">{{ _("Какую цену поставить") }}</h2>
-  {% if bid %}
+  {% if bid and request.state.paid %}
   <p class="muted">{{ _("По итогам похожих закупок за год") }} ({{ _(bid.level_label) }}, {{ _("лотов с победителем:") }} {{ bid.won }}).
     {% if not bid.reliable %}<b>{{ _("Похожих итогов мало — оценка ориентировочная.") }}</b>{% endif %}</p>
   <div class="table-wrap"><table class="bid-table">
@@ -201,6 +232,49 @@
   {% endif %}
 </section>
 </div>
+
+{% if li.history or li.repeats or li.customer %}<div data-panel="customer" id="customer" hidden>
+{% set c = li.customer %}
+{% if c %}
+<h2 style="margin-top:0">{{ _("Как проходят закупки заказчика") }}</h2>
+<div class="cust-stats">
+  {% if c.results %}<span>{{ _("Итогов в базе:") }} <b>{{ c.results }}</b></span>
+  <span>{{ _("не состоялись:") }} <b>{{ (c.failed_share * 100) | round | int }}%</b>{% if c.empty %} ({{ _("без заявок:") }} {{ c.empty }}){% endif %}</span>{% endif %}
+  {% if c.names %}<span>{{ _("Объявлял повторно:") }} <b>{{ c.repeated }}</b> {{ _("из") }} {{ c.names }} {{ _("наименований") }}</span>{% endif %}
+</div>
+<p class="muted">{{ _("Много несостоявшихся и повторных закупок — заказчик сложный: жёсткие требования, отклоняет заявки или мало желающих. Зато в повторной закупке бывает меньше конкурентов.") }} <a href="/org/{{ lot.customerBin or '' }}">{{ _("Страница заказчика →") }}</a></p>
+{% endif %}
+{% if li.repeats %}
+<h2>{{ _("Этот же лот раньше") }}</h2>
+<div class="table-wrap"><table>
+  <tr><th>{{ _("Опубликован") }}</th><th class="num">{{ _("Сумма, ₸") }}</th><th>{{ _("Итог") }}</th><th class="num">{{ _("Заявок") }}</th></tr>
+  {% for r in li.repeats.rows %}<tr><td><a href="/lots/{{ r.id }}">{{ (r.publish_date|local).strftime("%d.%m.%Y") if r.publish_date else r.id }}</a></td><td class="num">{{ r.amount | money }}</td>
+    <td>{% if r.outcome == "winner" %}🏁 {{ r.winner_name }}{% elif r.outcome == "failed" %}<span class="muted">{{ _("не состоялась") }}</span>{% elif r.end_date and r.end_date > now %}{{ _("идёт приём заявок") }}{% else %}<span class="muted">{{ _("итогов пока нет") }}</span>{% endif %}</td>
+    <td class="num">{{ r.offers if r.offers is not none else "—" }}</td></tr>{% endfor %}
+</table></div>
+{% endif %}
+{% if li.history %}{% set h = li.history %}
+<h2>{{ _("Что этот заказчик покупал из такого же") }}</h2>
+<p class="muted">{{ _("Итогов:") }} {{ h.total }}, {{ _("с победителем:") }} {{ h.won }}{% if h.total > h.rows|length %} · {{ _("показаны последние") }} {{ h.rows|length }}{% endif %}.</p>
+<div class="table-wrap"><table>
+  <tr><th>{{ _("Лот") }}</th><th>{{ _("Дата") }}</th><th class="num">{{ _("Кол-во") }}</th><th class="num">{{ _("Плановая сумма, ₸") }}</th><th>{{ _("Победитель") }}</th><th class="num">{{ _("Цена победы, ₸") }}</th><th class="num">{{ _("Заявок") }}</th></tr>
+  {% for r in h.rows %}<tr><td><a href="/lots/{{ r.id }}#results">{{ pick(r.name_ru, r.name_kz) or r.id }}</a></td>
+    <td class="when">{{ (r.end_date|local).strftime("%d.%m.%Y") if r.end_date else "—" }}</td>
+    <td class="num">{{ '%g'|format(r.count or 0) }} {{ (pick(r.unit_name, r.unit_name_kz) or "")|lower }}</td>
+    <td class="num">{{ r.amount | money }}</td>
+    <td>{% if r.outcome == "winner" %}<a href="/org/{{ r.winner_bin }}">{{ r.winner_name }}</a>{% else %}<span class="muted">{{ _("не состоялась") }}</span>{% endif %}</td>
+    <td class="num">{{ r.winner_total | money if r.outcome == "winner" else "—" }}</td>
+    <td class="num">{{ r.offers if r.offers is not none else "—" }}</td></tr>{% endfor %}
+</table></div>
+{% endif %}
+</div>{% endif %}
+
+{% if similar %}<div data-panel="similar" hidden>
+<p class="muted">{{ _("Открытые лоты с таким же товаром у других заказчиков — можно подать заявки сразу в несколько. Сначала — у которых приём заявок кончается раньше.") }}</p>
+{{ view_switch() }}
+{{ lots_table(similar, similar_marks, here) }}
+<script src="/static/sortbar.js?v={{ asset_v }}" defer></script>
+</div>{% endif %}
 
 {% if has_results %}<div data-panel="results" id="results" hidden>
 {% if lot.id in results %}

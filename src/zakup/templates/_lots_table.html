@@ -1,0 +1,89 @@
+{# Таблица / плитка лотов — как в поиске лотов (/lots); и во вкладке «Похожие открытые лоты»
+   на странице лота. rows — строки запроса lots_search (порядок полей — там же, public.LOT_ROW).
+   Вид переключает sortbar.js (кнопки .view-switch [data-view]). #}
+{% from "_marks.html" import mark_control %}
+{% macro lots_table(rows, marks, here, empty=none) %}
+<div class="table-wrap" data-view-box><table class="results lots-table">
+  <tr><th>{{ _("№ лота") }}</th><th>{{ _("Объявление") }}</th><th>{{ _("Наименование и описание лота") }}</th><th>{{ _("Кол-во") }}</th><th>{{ _("Цена за ед., ₸") }}</th><th>{{ _("Сумма, ₸") }}</th><th>{{ _("Аванс") }}</th><th>{{ _("Способ") }}</th><th>{{ _("Статус") }}</th><th>{{ _("Избранное") }}</th></tr>
+  {% for r in rows %}
+  <tr id="lot-{{ r[0] }}">
+    <td class="muted c-num">{{ r[1] or r[0] }}</td>
+    <td class="c-ann" style="min-width:200px"><a class="ann-link" href="{{ announcement_url(r[2]) }}">№ {{ r[3] or r[2] }} {{ pick(r[4], r[23]) or "" }}</a>
+      <div class="muted">{{ r[5] or "" }}</div>
+      {% set h = hours_left(r[15]) %}{% if r[15] %}<div class="deadline">{{ _("до") }} {{ (r[15]|local).strftime("%d.%m %H:%M") }}{% if h > 0 %} <span class="due {{ 'urgent' if h < 24 }}">⏱ {{ time_left(r[15]) }}</span>{% endif %}</div>{% endif %}</td>
+    <td class="c-title" style="min-width:220px"><a class="title" href="/lots/{{ r[0] }}">{{ pick(r[6], r[22]) or "—" }}</a>
+      {% set desc = pick(r[7], r[24]) %}{% if desc and desc != pick(r[6], r[22]) %}<div class="muted">{{ desc[:180] }}</div>{% endif %}
+      <div class="muted">{{ region_names(r[16]) | join(", ") }}</div>
+      {% if r[17] == "winner" %}<div>🏁 {{ r[18] }}{% if r[19] is not none %} — <b>{{ r[19] | money }} ₸</b>{% if r[11] %} <span class="muted">(−{{ '%.1f'|format((1 - (r[19]|float) / (r[11]|float)) * 100) }}%)</span>{% endif %}{% endif %} <span class="muted">{{ _("· предложений:") }} {{ r[20] }}</span></div>
+      {% elif r[17] == "failed" %}<div class="muted">{{ _("🏁 Не состоялась") }}{% if r[21] %}: {{ r[21] }}{% endif %}</div>{% endif %}</td>
+    <td class="num c-qty" data-label="{{ _("Кол-во") }}">{% if r[8] is not none %}{{ '%g'|format(r[8]) }}{% endif %} {{ (pick(r[9], r[25]) or "")|lower }}</td>
+    <td class="num c-price" data-label="{{ _("Цена за ед., ₸") }}">{{ r[10] | money }}</td>
+    <td class="num c-sum" data-label="{{ _("Сумма, ₸") }}"><b>{{ r[11] | money }}</b></td>
+    <td class="c-adv" data-label="{{ _("Аванс") }}">{% if r[12] %}<span class="badge {% if r[12] >= 30 %}hot{% endif %}">{{ '%g'|format(r[12]) }}%</span>{% else %}<span class="muted">{{ _("нет") }}</span>{% endif %}</td>
+    <td class="muted c-method">{{ _(method_names.get(r[13], "")) }}</td>
+    <td class="c-status"><span class="st {{ 'st-open' if r[14] in open_statuses }}">{{ _(status_names.get(r[14], r[14] or "")) }}</span></td>
+    <td class="c-fav">{{ mark_control(r[0], marks.get(r[0]), here) }}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="10" class="muted">{{ empty or _("Под фильтр ничего не подходит.") }}</td></tr>
+  {% endfor %}
+</table></div>
+{% endmacro %}
+
+{% macro view_switch() %}
+<div class="view-switch" role="group" aria-label="{{ _("Вид отображения") }}">
+  <button type="button" data-view="table" title="{{ _("Таблица") }}" aria-label="{{ _("Таблица") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18M3 12h18M3 19h18"/></svg><span>{{ _("Таблица") }}</span></button>
+  <button type="button" data-view="cards" title="{{ _("Плитка") }}" aria-label="{{ _("Плитка") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5"/></svg><span>{{ _("Плитка") }}</span></button>
+</div>
+{% endmacro %}
+
+{# Стили таблицы и плитки лотов: поиск (_filters.html) и вкладка на странице лота. #}
+{% macro results_styles() %}
+  .view-switch { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .view-switch button { display: inline-flex; align-items: center; gap: 6px; border: 0; border-radius: 0; padding: 5px 10px; color: var(--muted); }
+  .view-switch button[aria-pressed=true] { background: var(--accent); color: var(--on-accent); }
+  .view-switch svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; }
+  /* Иерархия: название — главное, сумма и срок — затем, заказчик и номера — мелко. */
+  /* Название — ссылка цветом ссылок; при наведении — заливка, как у пунктов меню. */
+  table.results a.title { color: var(--accent); font-weight: 650; font-size: 15px; border-radius: 4px;
+                          padding: 0 2px; margin: 0 -2px; -webkit-box-decoration-break: clone; box-decoration-break: clone;
+                          transition: background-color .15s; }
+  table.results a.ann-link { border-radius: 4px; padding: 0 2px; margin: 0 -2px; -webkit-box-decoration-break: clone;
+                             box-decoration-break: clone; transition: background-color .15s; }
+  table.results a.title:hover, table.results a.ann-link:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+  .st { font-size: 13px; color: var(--muted); }
+  .st.st-open { color: var(--ok); font-weight: 600; }
+  .due { display: inline-block; margin-top: 3px; padding: 1px 8px; border-radius: 999px; font-size: 12px; background: color-mix(in srgb, var(--fg) 8%, transparent); color: var(--fg); white-space: nowrap; }
+  .due.urgent { background: color-mix(in srgb, var(--bad) 16%, transparent); color: var(--bad); font-weight: 600; }
+  td.c-more { display: none; }
+  /* Плитка: та же таблица, строки — карточки. */
+  [data-view=cards] { overflow: visible; }
+  /* В плитке на телефоне у избранного — только сердечко (подсказка остаётся в title). */
+  @media (max-width: 760px) { [data-view=cards] .fav span { display: none; } [data-view=cards] .fav { padding: 6px 9px; } }
+  [data-view=cards] table.results, [data-view=cards] table.results tbody { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; min-width: 0 !important; }
+  [data-view=cards] table.results tbody { grid-column: 1 / -1; }
+  [data-view=cards] table.results tr:first-child:has(th) { display: none; }
+  [data-view=cards] table.results tr { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+  [data-view=cards] table.results td { display: block; border: 0; padding: 0; min-width: 0 !important; text-align: left; }
+  [data-view=cards] table.results td[data-label]::before { content: attr(data-label) " "; display: block; font-size: 12px; color: var(--muted); font-weight: 400; }
+  [data-view=cards] table.results tr { gap: 8px 16px; padding: 14px 16px; background: var(--bg); }
+  [data-view=cards] .c-status { order: -4; flex: 1 1 auto; }
+  [data-view=cards] .c-fav { order: -4; margin-left: auto; }
+  [data-view=cards] .c-title { order: -3; flex: 1 1 100%; font-size: 13px; color: var(--muted); }
+  [data-view=cards] .c-title .title { display: block; font-size: 17px; line-height: 1.35; font-weight: 700; margin-bottom: 4px; }
+  [data-view=cards] .c-ann { order: -2; flex: 1 1 100%; font-size: 12px; color: var(--muted); }
+  [data-view=cards] .c-ann a { font-size: 12px; }
+  [data-view=cards] .c-ann .deadline { font-size: 13px; color: var(--fg); margin-top: 4px; }
+  [data-view=cards] .c-sum b { font-size: 19px; }
+  [data-view=cards] table.results td.c-start { display: none; }
+  [data-view=cards] .c-num { order: 5; flex: 1 1 auto; font-size: 12px; padding-top: 8px; border-top: 1px solid var(--line); }
+  [data-view=cards] .c-num div { display: inline; margin-left: 8px; }
+  [data-view=cards] .c-method { order: 6; flex: 1 1 100%; font-size: 12px; color: var(--muted); }
+  [data-view=cards] td.c-more { display: block; order: 7; margin-left: auto; font-weight: 600; }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 13px; white-space: nowrap; border: 1px solid var(--line); }
+  .badge.hot { background: color-mix(in srgb, #1e9e5a 15%, transparent); border-color: transparent; color: var(--ok); font-weight: 600; }
+  .badge.sub { background: color-mix(in srgb, var(--accent) 14%, transparent); border-color: transparent; }
+
+  table.results td { font-size: 14px; }
+  table.results .title { font-weight: 500; }
+{% endmacro %}

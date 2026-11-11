@@ -26,6 +26,7 @@ from zakup import (
     details,
     i18n,
     legal,
+    lot_insights,
     marks,
     og,
     orgs,
@@ -39,6 +40,7 @@ from zakup import (
     visits,
 )
 from zakup.filters import (
+    METHOD_NAMES,
     REGIONS,
     STATUS_NAMES,
     Filters,
@@ -546,6 +548,26 @@ async def track_event(request: Request):
     return Response(status_code=204)
 
 
+def lot_rows(conn, shown: str, params: dict) -> list[tuple]:
+    """Строки таблицы лотов (_lots_table.html): shown — подзапрос (id, n) нужной страницы.
+    Сначала номера нужной страницы, потом остальные поля только для них: иначе итоги
+    (offers) и тексты считались бы у всех подходящих лотов до сортировки."""
+    return conn.execute(
+        f"""SELECT l.id, l.lot_number, a.id, a.number_anno, a.name_ru,
+                   coalesce(a.customer_name_ru, l.customer_name_ru, a.org_name_ru),
+                   l.name_ru, coalesce(l.extra_desc, l.description_ru), l.count,
+                   l.unit_name, l.price, l.amount, l.prepayment, a.trade_method_id,
+                   l.status_id, a.end_date, coalesce(nullif(l.kato, '{{}}'), a.kato),
+                   r.outcome, r.winner_name, r.winner_total,
+                   jsonb_array_length(r.offers), r.reason,
+                   l.name_kz, a.name_kz,
+                   l.extra_desc_kz, l.unit_name_kz
+            FROM ({shown}) shown
+            JOIN lots l ON l.id = shown.id JOIN announcements a ON a.id = l.trd_buy_id
+            LEFT JOIN lot_results r ON r.lot_id = l.id
+            ORDER BY shown.n""", params).fetchall()
+
+
 @router.get("/lots")
 def lots_search(request: Request, user: Viewer, page: int = 1, per_page: int = PAGE_SIZE):
     form = parse_qs(request.url.query)
@@ -555,27 +577,10 @@ def lots_search(request: Request, user: Viewer, page: int = 1, per_page: int = P
     now = datetime.now(UTC)
     where, params = current.where(now, "lots")
     with core.pool.connection() as conn:
-        rows = conn.execute(
-            f"""SELECT l.id, l.lot_number, a.id, a.number_anno, a.name_ru,
-                       coalesce(a.customer_name_ru, l.customer_name_ru, a.org_name_ru),
-                       l.name_ru, coalesce(l.extra_desc, l.description_ru), l.count,
-                       l.unit_name, l.price, l.amount, l.prepayment, a.trade_method_id,
-                       l.status_id, a.end_date, coalesce(nullif(l.kato, '{{}}'), a.kato),
-                       r.outcome, r.winner_name, r.winner_total,
-                       jsonb_array_length(r.offers), r.reason,
-                       l.name_kz, a.name_kz,
-                       l.extra_desc_kz, l.unit_name_kz
-                -- Сначала номера нужной страницы, потом остальные поля только для них: иначе
-                -- итоги (offers) и тексты считались у всех подходящих лотов до сортировки.
-                FROM (SELECT l.id, row_number() OVER (ORDER BY {current.order_by("lots")}) AS n
-                      FROM lots l, announcements a WHERE {where}
-                      ORDER BY {current.order_by("lots")}
-                      LIMIT {per_page} OFFSET {(page - 1) * per_page}) shown
-                JOIN lots l ON l.id = shown.id JOIN announcements a ON a.id = l.trd_buy_id
-                LEFT JOIN lot_results r ON r.lot_id = l.id
-                ORDER BY shown.n""",
-            params,
-        ).fetchall()
+        rows = lot_rows(conn, f"""SELECT l.id, row_number() OVER (ORDER BY {current.order_by("lots")}) AS n
+                                   FROM lots l, announcements a WHERE {where}
+                                   ORDER BY {current.order_by("lots")}
+                                   LIMIT {per_page} OFFSET {(page - 1) * per_page}""", params)
         total = conn.execute(
             f"SELECT count(*) FROM lots l, announcements a WHERE {where}", params
         ).fetchone()[0]
@@ -647,6 +652,38 @@ def announcement(request: Request, user: Viewer, announcement_id: int, backgroun
     return templates.TemplateResponse(request, "announcement.html", context)
 
 
+LOT_NUMBERS_TTL = 600
+LOT_NUMBERS_CACHE = 3000
+_lot_numbers_cache: dict[int, tuple[float, tuple]] = {}
+
+
+def _lot_numbers(conn, lot_id: int) -> tuple[dict | None, dict, list]:
+    """Статистика похожих итогов (zakup.bids), цифры «стоит ли участвовать»
+    (zakup.lot_insights) и похожие открытые лоты — общие для всех, держим 10 минут: страницы
+    лотов часто открывают и роботы, а считается это по тысячам итогов."""
+    hit = _lot_numbers_cache.get(lot_id)
+    if hit and hit[0] > time.monotonic():
+        return hit[1]
+    bid = bids.compute(conn, lot_id)
+    facts = lot_insights.lot_facts(conn, lot_id)
+    insight: dict = {}
+    similar: list = []
+    if facts is not None:
+        insight = {"history": lot_insights.history(conn, lot_id, facts),
+                   "repeats": lot_insights.repeats(conn, lot_id, facts),
+                   "market": lot_insights.market(conn, lot_id, facts),
+                   "customer": lot_insights.customer(conn, facts)}
+        where, params = lot_insights.similar_where(facts, datetime.now(UTC))
+        similar = lot_rows(conn, f"""SELECT l.id, row_number() OVER (ORDER BY a.end_date, l.id) AS n
+                                    FROM lots l, announcements a WHERE {where}
+                                    ORDER BY a.end_date, l.id LIMIT {lot_insights.SIMILAR_LIMIT}""", params)
+    if len(_lot_numbers_cache) >= LOT_NUMBERS_CACHE:
+        for old_key in list(_lot_numbers_cache)[:LOT_NUMBERS_CACHE // 5]:
+            del _lot_numbers_cache[old_key]
+    _lot_numbers_cache[lot_id] = (time.monotonic() + LOT_NUMBERS_TTL, (bid, insight, similar))
+    return bid, insight, similar
+
+
 @router.get("/lots/{lot_id}")
 def lot_page(request: Request, user: Viewer, lot_id: int, background: BackgroundTasks, sup: str = ""):
     with core.pool.connection() as conn:
@@ -663,10 +700,14 @@ def lot_page(request: Request, user: Viewer, lot_id: int, background: Background
         lot_info = research.lot_context(conn, lot_id)
         provider = ai_config.provider(conn)
         rivals = suppliers.for_lot(conn, lot_id, sup or None, paid=bool(request.state.paid))
-        # Цена заявки — платная часть (сотрудникам — всегда); маржа — по найденному в подборе.
-        bid = bids.compute(conn, lot_id, ((done or {}).get("result") or {}).get("items")) \
-            if request.state.paid else None
+        # Статистика похожих итогов — для карточки «Стоит ли участвовать» всем; вкладка «Цена
+        # заявки» (цены, снижение, маржа по найденному в подборе) — платная (сотрудникам — всегда).
+        items = ((done or {}).get("result") or {}).get("items")
+        bid, insight, similar = _lot_numbers(conn, lot_id)
+        if items and request.state.paid:  # маржа — по найденному этим клиентом, без кэша
+            bid = bids.compute(conn, lot_id, items)
         bid_advice = bids.of(conn, lot_id) if request.state.paid else None
+        similar_marks = marks.of_user(conn, user, [row[0] for row in similar]) if user and similar else {}
     if user:
         _audit(request, user, "view_lot", f"/lots/{lot_id}")
     context.update(lot=lot, others=[other for other in context["lots"] if other["id"] != lot_id],
@@ -676,7 +717,9 @@ def lot_page(request: Request, user: Viewer, lot_id: int, background: Background
                        lot_info, research.default_region(lot_info) if lot_info else ""),
                    provider_name=research.PROVIDERS.get(provider, provider),
                    targets=research.TARGETS, rivals=rivals, rivals_shown=suppliers.SHOWN,
-                   bid=bid, bid_advice=bid_advice,
+                   bid=bid, bid_advice=bid_advice, insight=insight, similar=similar,
+                   similar_marks=similar_marks, method_names=METHOD_NAMES,
+                   similar_limit=lot_insights.SIMILAR_LIMIT,
                    is_admin=request.state.role == "admin")
     return templates.TemplateResponse(request, "lot.html", context)
 

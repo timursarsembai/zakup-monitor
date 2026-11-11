@@ -664,3 +664,28 @@ def test_xlsx_text_drops_control_characters():
     from zakup.web.core import xlsx_text
 
     assert xlsx_text("Стол\x0bдубовый\x00") == "Столдубовый" and xlsx_text(5) == 5
+
+
+def test_lot_page_decide_card_customer_and_similar_tabs(client, conn):
+    from zakup import orgs
+    sofa = "310912.100.000001"
+    _tender(conn, 801, code=sofa, kato="551010000", end="2099-01-01 09:00:00")
+    _tender(conn, 804, code=sofa, kato="751410000", end="2099-02-01 09:00:00")  # такой же — другое объявление
+    _tender(conn, 802, code=sofa, kato="551010000", end="2026-10-30 09:00:00",
+            winner=("050540002222", "ТОО Кровля"), offers=[("651114400549", "ИП Иванов")])
+    conn.execute("UPDATE lots SET customer_bin = '990740001111'")
+    conn.execute("UPDATE lots SET customer_bin = '990740002222' WHERE id = 8040")  # другой заказчик
+    conn.execute("UPDATE lots SET status_id = 240 WHERE id IN (8010, 8040)")  # приём заявок
+    conn.execute("UPDATE announcements SET status_id = 240, lots_ready = true WHERE id IN (801, 804)")
+    conn.commit()
+    orgs.refresh_directory(conn)
+    page = client.get("/lots/8010").text
+    assert "Стоит ли участвовать" in page
+    assert 'data-tab="similar"' in page
+    assert 'href="/lots/8040"' in page
+    # Заказчик уже покупал такой диван: победитель и цена.
+    customer = page.split('data-panel="customer"', 1)[1].split("</div>", 1)[0]
+    assert "Что этот заказчик покупал из такого же" in page and 'href="/org/050540002222"' in page
+    assert "Как проходят закупки заказчика" in customer
+    # Снижение и цены заявки — по подписке.
+    assert 'data-feature="bid_price"' in page

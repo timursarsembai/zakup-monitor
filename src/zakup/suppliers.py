@@ -127,6 +127,14 @@ def _by_name_query(conn: psycopg.Connection, lot_id: int, region: str) -> list[d
     return [dict(zip(names, row, strict=True)) for row in cursor.fetchall()]
 
 
+def same_product(level: str) -> str:
+    """«Такой же товар» для лотов l (параметры code, name): тот же код ЕНС ТРУ или, у лотов
+    без кода, те же слова в названии. Общее для этого блока и zakup.lot_insights."""
+    if level == "code":
+        return "left(l.enstru[1], 2) = left(%(code)s, 2) AND l.enstru[1] = %(code)s"
+    return "l.tsv @@ plainto_tsquery('russian', %(name)s)"
+
+
 HISTORY_ROWS = 20  # строк истории на участника
 HISTORY_TTL = 1800
 _history_cache: dict[tuple, tuple[float, dict[str, dict[str, Any]]]] = {}
@@ -150,8 +158,7 @@ def offer_history(conn: psycopg.Connection, lot_id: int, level: str, code: str,
     hit = _history_cache.get(key)
     if hit and hit[0] > time.monotonic():
         return hit[1]
-    match = ("left(l.enstru[1], 2) = left(%(code)s, 2) AND l.enstru[1] = %(code)s" if level == "code"
-             else "l.tsv @@ plainto_tsquery('russian', %(name)s)")
+    match = same_product(level)
     cursor = conn.execute(
         f"""WITH m AS (
                 SELECT l.id, l.name_ru, l.name_kz, l.count, l.amount, l.unit_name, l.unit_name_kz,
