@@ -97,6 +97,21 @@
     }
     return params.toString();
   };
+  // Подпись выпадающего списка с галочками: выбранные через запятую, иначе «Все …» серым.
+  function multiLabel(box) {
+    const summary = box?.querySelector("summary");
+    if (!summary) return;
+    const picked = [...box.querySelectorAll("input[type=checkbox]:not([data-all]):checked")]
+      .map((input) => input.closest("label").textContent.trim());
+    if (picked.length) summary.textContent = picked.join(", ");
+    else {
+      const muted = document.createElement("span");
+      muted.className = "muted";
+      muted.textContent = box.querySelector("[data-all]")?.closest("label").textContent.trim() || "";
+      summary.replaceChildren(muted);
+    }
+    summary.title = picked.join(", ");
+  }
   // Поля формы — как в ответе сервера (после «Сбросить» и др.): значения, галочки, ползунки.
   const syncForm = (fresh) => {
     for (const field of sheet.querySelectorAll("input, select")) {
@@ -118,6 +133,7 @@
     for (const option of sheet.querySelectorAll("[data-sort-value]")) {
       option.classList.toggle("on", option.dataset.sortValue === sheet.querySelector("[data-sort-field]").value);
     }
+    for (const list of sheet.querySelectorAll("details.multi")) multiLabel(list);
   };
   let inflight = null;  // новый запрос отменяет прежний: медленный ответ не перебьёт свежий
   const softApply = async (target) => {
@@ -340,14 +356,20 @@
     if (event.key === "Escape" && sheet.classList.contains("open")) closeSheet();
   });
   // «Все …» в списке: отмечено — снять остальные; отметили что-то — снять «Все».
+  // Подпись списка — выбранное (или «Все …»), сразу при отметке.
   for (const list of sheet.querySelectorAll(".multi-list")) {
     const all = list.querySelector("[data-all]");
     const items = [...list.querySelectorAll("input[type=checkbox]:not([data-all])")];
+    const box = list.closest("details.multi");
     all?.addEventListener("change", () => {
       if (all.checked) for (const item of items) item.checked = false;
       else if (!items.some((i) => i.checked)) all.checked = true;
+      multiLabel(box);
     });
-    for (const item of items) item.addEventListener("change", () => { if (all) all.checked = !items.some((i) => i.checked); });
+    for (const item of items) item.addEventListener("change", () => {
+      if (all) all.checked = !items.some((i) => i.checked);
+      multiLabel(box);
+    });
   }
   // Выпадающие списки: клик мимо — закрыть.
   document.addEventListener("click", (event) => {

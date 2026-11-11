@@ -20,6 +20,17 @@ for (const [width, mobile] of [[1280, false], [390, true]]) {
       return sheet.classList.contains("open") && Math.abs(sheet.getBoundingClientRect().top - chip.bottom) < 40;
     });
     if (!placed) problems.push("1280px /lots: шторка «Регион» не раскрылась под кнопкой");
+    // Подпись списка с галочками меняется сразу при отметке (2026-11-11 оставалась «Весь Казахстан»).
+    const label = await page.evaluate(() => {
+      const box = document.querySelector('details.multi:has(input[name="region"])');
+      const input = box?.querySelector('input[name="region"]:not(:checked)');
+      if (!input) return "нет списка";
+      input.click();
+      const text = box.querySelector("summary").textContent.trim();
+      input.click();
+      return text === input.closest("label").textContent.trim() ? "" : text;
+    });
+    if (label) problems.push(`1280px /lots: подпись списка «Регион» не обновилась: ${label}`);
   }
   if (mobile) {
     await page.goto(SITE + "/lots", { waitUntil: "networkidle" });
