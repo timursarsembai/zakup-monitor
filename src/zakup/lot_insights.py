@@ -31,11 +31,13 @@ SIMILAR_LIMIT = 60
 def lot_facts(conn: psycopg.Connection, lot_id: int) -> dict[str, Any] | None:
     row = conn.execute(
         """SELECT l.trd_buy_id, l.customer_bin, coalesce(l.enstru[1], ''),
-                  coalesce(l.name_ru, ''), coalesce(lower(l.unit_name), ''), l.amount, l.count, a.publish_date
+                  coalesce(l.name_ru, ''), coalesce(lower(l.unit_name), ''), l.amount, l.count, a.publish_date,
+                  a.securities, a.trade_method_id, l.prepayment
            FROM lots l JOIN announcements a ON a.id = l.trd_buy_id WHERE l.id = %s""", (lot_id,)).fetchone()
     if not row:
         return None
-    keys = ("announcement", "customer", "code", "name", "unit", "amount", "count", "published")
+    keys = ("announcement", "customer", "code", "name", "unit", "amount", "count", "published",
+            "securities", "method", "prepayment")
     return dict(zip(keys, row, strict=True))
 
 

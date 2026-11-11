@@ -677,6 +677,7 @@ def test_lot_page_decide_card_customer_and_similar_tabs(client, conn):
     conn.execute("UPDATE lots SET customer_bin = '990740002222' WHERE id = 8040")  # другой заказчик
     conn.execute("UPDATE lots SET status_id = 240 WHERE id IN (8010, 8040)")  # приём заявок
     conn.execute("UPDATE announcements SET status_id = 240, lots_ready = true WHERE id IN (801, 804)")
+    conn.execute("UPDATE announcements SET trade_method_id = 2 WHERE id = 801")  # конкурс: 1% и 3%
     conn.commit()
     orgs.refresh_directory(conn)
     page = client.get("/lots/8010").text
@@ -689,3 +690,5 @@ def test_lot_page_decide_card_customer_and_similar_tabs(client, conn):
     assert "Как проходят закупки заказчика" in customer
     # Снижение и цены заявки — по подписке.
     assert 'data-feature="bid_price"' in page
+    # Сколько заморозить: 1% заявки и 3% договора от 1 000 000 (документы не разобраны — по способу).
+    assert "10 000.00 ₸" in page and "до 30 000.00 ₸" in page and "по способу закупки" in page

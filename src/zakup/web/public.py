@@ -33,6 +33,7 @@ from zakup import (
     outcomes,
     research,
     results,
+    securities,
     spec,
     subjects,
     suppliers,
@@ -672,7 +673,8 @@ def _lot_numbers(conn, lot_id: int) -> tuple[dict | None, dict, list]:
         insight = {"history": lot_insights.history(conn, lot_id, facts),
                    "repeats": lot_insights.repeats(conn, lot_id, facts),
                    "market": lot_insights.market(conn, lot_id, facts),
-                   "customer": lot_insights.customer(conn, facts)}
+                   "customer": lot_insights.customer(conn, facts),
+                   "deposit_terms": (facts["securities"], facts["method"], facts["amount"], facts["prepayment"])}
         where, params = lot_insights.similar_where(facts, datetime.now(UTC))
         similar = lot_rows(conn, f"""SELECT l.id, row_number() OVER (ORDER BY a.end_date, l.id) AS n
                                     FROM lots l, announcements a WHERE {where}
@@ -707,6 +709,10 @@ def lot_page(request: Request, user: Viewer, lot_id: int, background: Background
         if items and request.state.paid:  # маржа — по найденному этим клиентом, без кэша
             bid = bids.compute(conn, lot_id, items)
         bid_advice = bids.of(conn, lot_id) if request.state.paid else None
+        # Сколько заморозить: от плановой суммы; по подписке — и при обычной цене заявки.
+        deposits = securities.for_lot(*insight["deposit_terms"],
+                                      price=bid["prices"]["usual"] if bid and request.state.paid else None) \
+            if insight.get("deposit_terms") else None
         similar_marks = marks.of_user(conn, user, [row[0] for row in similar]) if user and similar else {}
     if user:
         _audit(request, user, "view_lot", f"/lots/{lot_id}")
@@ -719,7 +725,7 @@ def lot_page(request: Request, user: Viewer, lot_id: int, background: Background
                    targets=research.TARGETS, rivals=rivals, rivals_shown=suppliers.SHOWN,
                    bid=bid, bid_advice=bid_advice, insight=insight, similar=similar,
                    similar_marks=similar_marks, method_names=METHOD_NAMES,
-                   similar_limit=lot_insights.SIMILAR_LIMIT,
+                   similar_limit=lot_insights.SIMILAR_LIMIT, deposits=deposits,
                    is_admin=request.state.role == "admin")
     return templates.TemplateResponse(request, "lot.html", context)
 

@@ -199,12 +199,15 @@ def _with_portal(args) -> int:
 
 
 def _specs(limit: int, loop: bool) -> int:
-    from zakup import spec
+    from zakup import securities, spec
 
     while True:
         with db.connect(config.database_url()) as conn:
             done = spec.prefetch(conn, limit)
-        print(f"specs: {done}", flush=True)
+            # Проценты обеспечения — из проекта договора и конкурсной документации.
+            terms = securities.prefetch(conn, min(limit, securities.BATCH))
+        print(f"specs: {done}, securities: {terms}", flush=True)
+        done = max(done, terms)
         if not loop:
             return 0
         # Пока есть очередь — сразу дальше, иначе раз в 5 минут.
