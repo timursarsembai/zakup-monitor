@@ -1,6 +1,9 @@
 {# Блок «Конкуренты и поставщики» на странице лота (zakup.suppliers). Названия — ссылки на
    страницы организаций, контакты там. Без тарифа — по SHOWN в группе и без снижения цены. #}
-{% macro supplier_rows(rows, total, here, paid, shown, region) %}
+{# Цена: от 100 ₸ — целыми, дешевле — с копейками (расходники за грамм). Количество — без «1.5e+06». #}
+{% macro unit(v) %}{% if v is none %}—{% elif v >= 100 %}{{ v | round | int | count }}{% else %}{{ '%.2f'|format(v) }}{% endif %}{% endmacro %}
+{% macro qty(v) %}{% if v == v|int %}{{ v | int | count }}{% else %}{{ ('%.3f'|format(v)).rstrip('0') }}{% endif %}{% endmacro %}
+{% macro supplier_rows(rows, total, here, paid, shown, region, prices=false) %}
 <div class="table-wrap" data-rview-box><table class="sup-table">
   <tr>
     <th>{{ _("Организация") }}</th>
@@ -12,6 +15,7 @@
     <th>{{ _("Заявок всего") }}</th>
     <th>{{ _("Последняя закупка") }}</th>
     {% if paid %}<th title="{{ _("Насколько в среднем снижал цену от плановой суммы, когда выигрывал") }}">{{ _("Снижение цены") }}</th>{% endif %}
+    {% if prices %}<th title="{{ _("Цены за единицу в его заявках на такие же товары в других лотах") }}">{{ _("Его цены за ед., ₸") }}</th>{% endif %}
     {% if not here %}<th>{{ _("Регионы поставки") }}</th>{% endif %}
     <th></th>
   </tr>
@@ -26,10 +30,30 @@
     <td class="num" data-label="{{ _("Заявок всего") }}">{{ r.offers or 0 }}</td>
     <td class="when" data-label="{{ _("Последняя закупка") }}">{{ (r.last_at|local).strftime("%d.%m.%Y") if r.last_at else "—" }}</td>
     {% if paid %}<td class="num" data-label="{{ _("Снижение цены") }}">{{ ('%.1f'|format(r.discount * 100)) ~ "%" if r.discount is not none else "—" }}</td>{% endif %}
+    {% if prices %}<td class="s-prices" data-label="{{ _("Его цены за ед., ₸") }}">{% if r.history %}{% set h = r.history %}
+      <button type="button" class="link-button" data-sup-history aria-expanded="false">{{ unit(h.min) }}{% if unit(h.max) != unit(h.min) %} – {{ unit(h.max) }}{% endif %} · {{ h.total }} {{ _("лот.") }}{% if h.won %}, {{ _("побед") }} {{ h.won }}{% endif %} ▾</button>
+      {% else %}<span class="muted">—</span>{% endif %}</td>{% endif %}
     {% if not here %}{% set names = (r.regions or []) | map("region_name_filter") | select | list %}
     <td class="s-regions" data-label="{{ _("Регионы поставки") }}">{{ names[:3] | join(", ") }}{% if names|length > 3 %} {{ _("и ещё") }} {{ names|length - 3 }}{% endif %}</td>{% endif %}
     <td class="s-link"><a href="/org/{{ r.bin }}">{{ _("Контакты →") }}</a></td>
   </tr>
+  {% if prices and r.history %}{% set h = r.history %}
+  <tr class="sup-hist" hidden><td colspan="12">
+    <div class="table-wrap"><table class="sup-hist-table">
+      <tr><th>{{ _("Лот") }}</th><th>{{ _("Дата") }}</th><th class="num">{{ _("Кол-во") }}</th><th class="num">{{ _("Его цена за ед., ₸") }}</th><th class="num">{{ _("Плановая за ед., ₸") }}</th><th class="num">{{ _("Его заявка, ₸") }}</th><th>{{ _("Результат") }}</th></tr>
+      {% for x in h.rows %}
+      <tr><td><a href="/lots/{{ x.lot }}#results">{{ pick(x.name_ru, x.name_kz) or x.lot }}</a></td>
+        <td class="when">{{ (x.date|local).strftime("%d.%m.%Y") if x.date else "—" }}</td>
+        <td class="num">{{ qty(x.count) }} {{ (pick(x.unit_ru, x.unit_kz) or "")|lower }}</td>
+        <td class="num"><b>{{ unit(x.unit) }}</b></td>
+        <td class="num muted">{{ unit(x.plan_unit) }}</td>
+        <td class="num">{{ unit(x.total) }}</td>
+        <td class="res-{{ x.result }}">{{ {"won": _("✓ выиграл"), "lost": _("проиграл"), "failed": _("не состоялась")}[x.result] }}</td></tr>
+      {% endfor %}
+    </table></div>
+    {% if h.total > h.rows|length %}<p class="muted">{{ _("Показаны последние") }} {{ h.rows|length }} {{ _("из") }} {{ h.total }}. <a href="/org/{{ r.bin }}?tab=history">{{ _("Вся история участия →") }}</a></p>{% endif %}
+  </td></tr>
+  {% endif %}
   {% endfor %}
 </table></div>
 {% if paid and total > rows|length %}<p class="muted">{{ _("И ещё") }} {{ total - rows|length }}.</p>{% endif %}
@@ -55,13 +79,16 @@
     <button type="button" data-rview="table"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18M3 12h18M3 19h18"/></svg><span>{{ _("Таблица") }}</span></button>
     <button type="button" data-rview="cards"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5"/></svg><span>{{ _("Плитка") }}</span></button>
   </div>
+  {% set prices = paid and s.level in ("code", "name") %}
+  {% if prices %}<p class="muted">{{ _("«Его цены за ед.» — что участник предлагал за единицу в таких же лотах раньше, выиграл он или нет. Нажмите на цены — откроется список лотов.") }}</p>
+  {% elif not paid and s.level in ("code", "name") %}<p class="muted"><button type="button" data-paid data-feature="supplier_prices" class="link-button">{{ _("Цены, которые эти участники предлагали в таких же лотах") }} 🔒</button></p>{% endif %}
   {% if s.here %}
   <h3>{{ _("В регионе поставки:") }} {{ region_name(s.region) }}</h3>
-  {{ supplier_rows(s.here, s.here_total, true, paid, shown, s.region) }}
+  {{ supplier_rows(s.here, s.here_total, true, paid, shown, s.region, prices) }}
   {% endif %}
   {% if s.rest %}
   <h3>{{ _("По всему Казахстану") if s.here else _("По Казахстану") }}</h3>
-  {{ supplier_rows(s.rest, s.rest_total, false, paid, shown, s.region) }}
+  {{ supplier_rows(s.rest, s.rest_total, false, paid, shown, s.region, prices) }}
   {% endif %}
   {% if not s.here and not s.rest %}<p class="muted">{{ _("На этом уровне пока никого нет.") }}</p>{% endif %}
 </section>
@@ -83,6 +110,10 @@
   .sup-box .view-switch button { display: inline-flex; align-items: center; gap: 6px; border: 0; border-radius: 0; padding: 5px 10px; color: var(--muted); background: none; }
   .sup-box .view-switch button[aria-pressed=true] { background: var(--accent); color: var(--on-accent); }
   .sup-box .view-switch svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; }
+  table.sup-table td.s-prices { white-space: nowrap; }
+  tr.sup-hist > td { background: color-mix(in srgb, var(--accent) 4%, transparent); padding: 8px 10px 12px; }
+  table.sup-hist-table { font-size: 14px; } table.sup-hist-table td.res-won { color: var(--ok); font-weight: 600; }
+  table.sup-hist-table td.res-failed { color: var(--muted); }
   .link-button { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font: inherit; }
   /* Плитка: строки — карточки, подписи столбцов — над значениями. */
   [data-rview=cards] { overflow: visible; }
@@ -95,4 +126,12 @@
   [data-rview=cards] table.sup-table td.s-name, [data-rview=cards] table.sup-table td.s-regions { flex: 1 1 100%; font-weight: 600; }
   [data-rview=cards] table.sup-table td.s-regions { font-weight: 400; }
   [data-rview=cards] table.sup-table td.s-link { flex: 1 1 100%; text-align: right; }
+  /* История цен под участником: в плитке — на всю ширину, внутри — обычная таблица. */
+  [data-rview=cards] table.sup-table tr.sup-hist { grid-column: 1 / -1; display: block; padding: 0; border: 0; }
+  [data-rview=cards] table.sup-table tr.sup-hist[hidden] { display: none; }
+  [data-rview=cards] table.sup-table tr.sup-hist > td { display: block; border-radius: 12px; }
+  [data-rview=cards] table.sup-table table.sup-hist-table { display: table; min-width: 0 !important; }
+  [data-rview=cards] table.sup-table table.sup-hist-table tbody { display: table-row-group; }
+  [data-rview=cards] table.sup-table table.sup-hist-table tr, [data-rview=cards] table.sup-table table.sup-hist-table tr:first-child:has(th) { display: table-row; border: 0; padding: 0; }
+  [data-rview=cards] table.sup-table table.sup-hist-table td { display: table-cell; padding: 4px 8px; font-weight: 400; }
 {% endmacro %}

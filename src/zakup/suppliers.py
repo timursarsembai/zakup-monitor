@@ -127,6 +127,68 @@ def _by_name_query(conn: psycopg.Connection, lot_id: int, region: str) -> list[d
     return [dict(zip(names, row, strict=True)) for row in cursor.fetchall()]
 
 
+HISTORY_ROWS = 20  # строк истории на участника
+HISTORY_TTL = 1800
+_history_cache: dict[tuple, tuple[float, dict[str, dict[str, Any]]]] = {}
+
+
+def offer_history(conn: psycopg.Connection, lot_id: int, level: str, code: str,
+                  bins: list[str]) -> dict[str, dict[str, Any]]:
+    """Что предлагали эти участники в таких же лотах (тот же код ЕНС ТРУ или, без кода, те же
+    слова в названии) — по последним NAME_LOTS лотам с итогами и только в той же единице
+    измерения, что у этого лота (штуки со штуками, а не с комплектами). Цена за единицу —
+    сумма заявки / количество лота; если участник подавал заявку несколько раз — самая низкая.
+    Держим 30 минут, как подбор по названию: считается по тысячам итогов."""
+    if not bins or level not in ("code", "name"):
+        return {}
+    lot = conn.execute("SELECT coalesce(name_ru, ''), coalesce(lower(unit_name), '') FROM lots WHERE id = %s",
+                       (lot_id,)).fetchone()
+    if not lot:
+        return {}
+    name, unit = lot
+    key = (level, code if level == "code" else name.lower().strip(), unit, tuple(sorted(bins)))
+    hit = _history_cache.get(key)
+    if hit and hit[0] > time.monotonic():
+        return hit[1]
+    match = ("left(l.enstru[1], 2) = left(%(code)s, 2) AND l.enstru[1] = %(code)s" if level == "code"
+             else "l.tsv @@ plainto_tsquery('russian', %(name)s)")
+    cursor = conn.execute(
+        f"""WITH m AS (
+                SELECT l.id, l.name_ru, l.name_kz, l.count, l.amount, l.unit_name, l.unit_name_kz,
+                       r.result_date, r.outcome, r.winner_bin, r.offers
+                FROM lots l JOIN lot_results r ON r.lot_id = l.id
+                WHERE {match} AND l.id <> %(lot)s AND coalesce(lower(l.unit_name), '') = %(unit)s
+                ORDER BY r.result_date DESC NULLS LAST LIMIT {NAME_LOTS})
+            SELECT DISTINCT ON (o->>'bin', m.id) o->>'bin', m.id, m.name_ru, m.name_kz, m.count, m.amount,
+                   m.unit_name, m.unit_name_kz, m.result_date, m.outcome, m.winner_bin,
+                   nullif(o->>'total', '')::numeric AS total
+            FROM m, jsonb_array_elements(m.offers) o
+            WHERE o->>'bin' = ANY(%(bins)s) AND nullif(o->>'total', '') IS NOT NULL
+            ORDER BY o->>'bin', m.id, total""",
+        {"code": code, "name": name, "lot": lot_id, "unit": unit, "bins": bins})
+    result: dict[str, dict[str, Any]] = {}
+    for bin_, lot_, name_ru, name_kz, count, amount, unit_ru, unit_kz, date, outcome, winner, total in cursor:
+        entry = result.setdefault(bin_, {"rows": []})
+        entry["rows"].append({
+            "lot": lot_, "name_ru": name_ru, "name_kz": name_kz, "count": float(count or 0),
+            "unit_ru": unit_ru, "unit_kz": unit_kz, "date": date, "total": float(total),
+            "unit": float(total) / float(count) if count else None,
+            "plan_unit": float(amount) / float(count) if count and amount else None,
+            "result": "won" if outcome == "winner" and winner == bin_ else "lost" if outcome == "winner" else "failed"})
+    for entry in result.values():
+        units = [row["unit"] for row in entry["rows"] if row["unit"]]
+        entry["min"], entry["max"] = (min(units), max(units)) if units else (None, None)
+        entry["total"] = len(entry["rows"])
+        entry["won"] = sum(1 for row in entry["rows"] if row["result"] == "won")
+        entry["rows"].sort(key=lambda row: row["date"].timestamp() if row["date"] else 0, reverse=True)
+        entry["rows"] = entry["rows"][:HISTORY_ROWS]
+    if len(_history_cache) >= NAME_CACHE:
+        for old_key in list(_history_cache)[:NAME_CACHE // 5]:
+            del _history_cache[old_key]
+    _history_cache[key] = (time.monotonic() + HISTORY_TTL, result)
+    return result
+
+
 def for_lot(conn: psycopg.Connection, lot_id: int, level: str | None = None,
             paid: bool = True) -> dict[str, Any] | None:
     """Участники по уровням; None — никого не нашлось. Без тарифа — по SHOWN в группе и
@@ -157,6 +219,12 @@ def for_lot(conn: psycopg.Connection, lot_id: int, level: str | None = None,
     if not paid:
         for row in here[:limit] + rest[:limit]:
             row["discount"] = None
+    else:
+        # Цены их заявок в таких же лотах — платная часть, как все участники итогов с ценами.
+        shown_rows = here[:limit] + rest[:limit]
+        history = offer_history(conn, lot_id, level, code, [r["bin"] for r in shown_rows])
+        for row in shown_rows:
+            row["history"] = history.get(row["bin"])
     return {"code": code, "region": region, "level": level, "available": available,
             "class_name": catalog.division_name(code[:2]) if code else None, "here": here[:limit], "rest": rest[:limit],
             "here_total": len(here), "rest_total": len(rest)}

@@ -186,3 +186,13 @@ const PAGE = document.querySelector("[data-lot-page]");
   const status = box.querySelector("[data-advice-status]")?.dataset.adviceStatus;
   if (status === "queued" || status === "running") setTimeout(poll, 3000);
 })();
+
+// Конкуренты: цены участника в таких же лотах — раскрыть / свернуть строку под ним.
+document.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-sup-history]");
+  if (!button) return;
+  const row = button.closest("tr")?.nextElementSibling;
+  if (!row || !row.classList.contains("sup-hist")) return;
+  row.hidden = !row.hidden;
+  button.setAttribute("aria-expanded", String(!row.hidden));
+});

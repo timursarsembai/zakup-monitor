@@ -461,8 +461,13 @@ def test_lot_page_shows_competitors_and_suppliers(client, conn):
     # Точный уровень — только диваны.
     exact = client.get("/lots/8010?sup=code").text.split("Конкуренты и поставщики", 1)[1]
     assert "060640003333" not in exact.split("</section>", 1)[0]
+    assert 'data-feature="supplier_prices"' in exact and "Его цены за ед." not in exact
     _login(client)
     assert ">10.0%<" in client.get("/lots/8010").text
+    # По подписке — цены участников в таких же лотах (диван 802; стул 803 — другой код).
+    exact = client.get("/lots/8010?sup=code").text.split("Конкуренты и поставщики", 1)[1]
+    assert "Его цены за ед." in exact and "data-sup-history" in exact and 'href="/lots/8020#results"' in exact
+    assert "900 000" in exact and "✓ выиграл" in exact and "проиграл" in exact and "/lots/8030#" not in exact
     # У ИП — ИИН, у ТОО — БИН.
     assert "ИИН 651114400549" in client.get("/org/651114400549").text
     assert "БИН 050540002222" in client.get("/org/050540002222").text

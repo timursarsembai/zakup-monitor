@@ -111,6 +111,7 @@ def client(conn, monkeypatch):
     monkeypatch.setattr(branding, "_cache", None)
     monkeypatch.setattr(outcomes, "_summaries", {})
     monkeypatch.setattr(suppliers, "_name_cache", {})
+    monkeypatch.setattr(suppliers, "_history_cache", {})
     # Список лотов для sitemap кэшируется на час — в каждом тесте свой.
     monkeypatch.setattr(web.public, "_sitemap_lots", {"at": 0.0, "rows": []})
     monkeypatch.setattr(catalog, "_counts", {"at": 0.0, "rows": {}})
