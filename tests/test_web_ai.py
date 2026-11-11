@@ -219,3 +219,25 @@ def test_research_fragment_shows_offers_found_so_far(client, conn):
     _login(client)
     page = client.get("/lots/90/research").text
     assert "Уже нашёл:" in page and "Стол дубовый" in page and "Открываю mebel.kz…" in page
+
+
+def test_research_output_in_kazakh_when_interface_is_kazakh(client, conn):
+    from psycopg.types.json import Jsonb
+
+    from zakup import details
+
+    db.upsert_announcement(conn, {"id": 9, "name_ru": "Столы", "end_date": "2099-01-01 09:00:00"})
+    details.save(conn, {"id": 9, "endDate": "2099-01-01 09:00:00", "Lots": [{"id": 90, "trdBuyId": 9, "nameRu": "Стол", "Plans": []}]})
+    owner = conn.execute("SELECT id FROM users WHERE email = 'owner@mail.kz'").fetchone()[0]
+    conn.execute("""INSERT INTO lot_research (lot_id, user_id, provider, region, status, finished_at, result)
+                    VALUES (90, %s, 'claude_code', 'Актобе', 'done', now(), %s)""",
+                 (owner, Jsonb({"summary": "Столы есть в Актобе", "summary_kk": "Үстелдер Ақтөбеде бар", "items": [
+                     {"name": "Стол", "url": "https://mebel.kz/1", "in_region": True, "unit_price": 1000,
+                      "note": "В наличии", "note_kk": "Қоймада бар", "matches": ["дуб"], "matches_kk": ["емен"]}]})))
+    conn.commit()
+    _login(client)
+    page = client.get("/lots/90/research").text
+    assert "Столы есть в Актобе" in page and "В наличии" in page and "✓ дуб" in page
+    client.get("/lang/kk")
+    page = client.get("/lots/90/research").text
+    assert "Үстелдер Ақтөбеде бар" in page and "Қоймада бар" in page and "✓ емен" in page

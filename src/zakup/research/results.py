@@ -46,12 +46,17 @@ def clean(result: dict[str, Any]) -> dict[str, Any]:
             "matches": _strings(item.get("matches")),
             "mismatches": _strings(item.get("mismatches")),
             "note": note[:500],
+            # Казахский перевод вывода (поиск — по-русски); нет — страница покажет русский.
+            "note_kk": str(item.get("note_kk") or "").strip()[:500],
+            "matches_kk": _strings(item.get("matches_kk")),
+            "mismatches_kk": _strings(item.get("mismatches_kk")),
         })
     items.sort(key=lambda i: (not i["in_region"], i["unit_price"] is None, i["unit_price"] or 0))
     return {
         "region_searched": str(result.get("region_searched") or "")[:200],
         "category": str(result.get("category") or "")[:60],
         "summary": str(result.get("summary") or "")[:2000],
+        "summary_kk": str(result.get("summary_kk") or "")[:2000],
         "items": items[:30],
     }
 
