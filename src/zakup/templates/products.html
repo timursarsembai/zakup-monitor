@@ -64,5 +64,5 @@
   <tr><td colspan="6" class="muted">{{ _("Пока пусто: каталог пополняется с каждым поиском товаров.") if not p.q and not p.division else _("Ничего не нашлось.") }}</td></tr>
   {% endfor %}
 </table></div>
-{% if p.pages > 1 %}<div class="pager">{% if p.page > 1 %}<a href="{{ page_url(page=p.page - 1) }}">← {{ _("Назад") }}</a>{% endif %}<span class="muted">{{ _("стр.") }} {{ p.page }} {{ _("из") }} {{ p.pages }}</span>{% if p.page < p.pages %}<a href="{{ page_url(page=p.page + 1) }}">{{ _("Дальше") }} →</a>{% endif %}</div>{% endif %}
+{% if p.pages > 1 %}<div class="pager">{% if p.page > 1 %}<a href="{{ products_url(page=p.page - 1) }}">← {{ _("Назад") }}</a>{% endif %}<span class="muted">{{ _("стр.") }} {{ p.page }} {{ _("из") }} {{ p.pages }}</span>{% if p.page < p.pages %}<a href="{{ products_url(page=p.page + 1) }}">{{ _("Дальше") }} →</a>{% endif %}</div>{% endif %}
 {% endblock %}

@@ -44,7 +44,7 @@ def products_page(request: Request, _: Staff, q: str = "", category: str = "", s
         data = products.listing(conn, q[:200], category[:2] if category.isdigit() else "", sort, page)
     return templates.TemplateResponse(request, "products.html", {
         "p": data, "sorts": products.SORTS, "fresh_days": products.FRESH_DAYS,
-        "page_url": lambda **changes: "/products?" + urlencode(
+        "products_url": lambda **changes: "/products?" + urlencode(
             {k: v for k, v in {"q": data["q"], "category": data["division"], "sort": data["sort"],
                                "page": data["page"], **changes}.items() if v and not (k == "page" and v == 1)})})
 

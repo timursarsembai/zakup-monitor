@@ -7,6 +7,7 @@
 """
 
 import logging
+import time
 from datetime import UTC, datetime
 from typing import Any
 
@@ -17,6 +18,7 @@ from zakup import lot_insights, securities
 logger = logging.getLogger(__name__)
 
 STALE = "1 day"
+THROTTLE = 1.0  # тесты ставят 0
 BATCH = 300
 
 COLUMNS = ("market_diff", "market_median", "market_n", "repeats", "repeats_failed", "same_winner_bin",
@@ -80,6 +82,7 @@ def refresh(conn: psycopg.Connection, limit: int = BATCH) -> int:
     customers: dict = {}
     done = 0
     for (lot_id,) in rows:
+        started = time.monotonic()
         try:
             values = compute(conn, lot_id, customers)
             if values is not None:
@@ -89,12 +92,12 @@ def refresh(conn: psycopg.Connection, limit: int = BATCH) -> int:
         except Exception as exc:  # noqa: BLE001 — один плохой лот не должен останавливать службу
             conn.rollback()
             logger.warning("scores for lot %s failed: %s", lot_id, exc)
+        # Не больше половины ядра базы: после каждого лота пауза, равная времени расчёта.
+        time.sleep(min(time.monotonic() - started, 2) * THROTTLE)
     return done
 
 
 def run(database_url: str, loop: bool) -> int:
-    import time
-
     from zakup import db
 
     while True:

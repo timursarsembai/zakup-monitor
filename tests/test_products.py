@@ -80,3 +80,16 @@ def test_candidates_include_own_lot_finds_with_other_words(conn):
     products.remember(conn, 90, [{"name": "Утюг дорогой", "url": "https://a.kz/iron2", "price": 900000, "price_unit": "шт"}])
     rows = products.candidates(conn, 90, "Электроутюг", max_price=100000)
     assert [r["url"] for r in rows] == ["https://a.kz/iron"]  # дороже цены лота — не предлагаем
+
+
+def test_products_page_pager(client, conn, monkeypatch):
+    # Больше одной страницы — ссылки «Дальше»/«Назад» (имя функции не должно совпадать с page_url из base.html).
+    _lot(conn)
+    products.remember(conn, 90, [{"name": f"Стол {i}", "url": f"https://mebel.kz/stol{i}", "price": 1000 + i}
+                                 for i in range(3)])
+    conn.commit()
+    monkeypatch.setattr(products, "PAGE_SIZE", 2)
+    _login(client)
+    page = client.get("/products").text
+    assert "стр. 1 из 2" in page and "page=2" in page
+    assert client.get("/products?page=2").status_code == 200
