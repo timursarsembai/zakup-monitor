@@ -65,7 +65,8 @@
   <button role="tab" data-tab="winners" aria-selected="false">{{ _("Победители (") }}{{ results|length }})</button>
   <button role="tab" data-tab="contracts" aria-selected="false">{{ _("Договоры (") }}{{ contracts|length }})</button>
   <button role="tab" data-tab="appeals" aria-selected="false">{{ _("Апелляции (") }}{{ appeals|length }})</button>
-  <a href="{{ portal_url }}" target="_blank" rel="noopener">{{ _("На портале ↗") }}</a>
+  <a href="{{ portal_url }}" target="_blank" rel="noopener" title="{{ _("Новая версия портала — подача заявок, вход по ЭЦП") }}">{{ _("На портале ↗") }}</a>
+  <a href="{{ portal_old_url }}" target="_blank" rel="noopener" class="muted" title="{{ _("Старая версия портала — открывается без входа") }}">{{ _("старая версия ↗") }}</a>
 </nav>
 
 <section data-panel="lots">

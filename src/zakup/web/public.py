@@ -48,7 +48,7 @@ from zakup.filters import (
     Filters,
 )
 from zakup.goszakup import PORTAL_TZ, GoszakupError, parse_date
-from zakup.matcher import PORTAL_ANNOUNCEMENT_URL
+from zakup.matcher import PORTAL_ANNOUNCEMENT_URL, PORTAL_OLD_URL
 from zakup.web import core
 from zakup.web.ai import _research_view
 from zakup.web.core import (
@@ -817,6 +817,7 @@ def _announcement_context(request: Request, user: int | None, announcement_id: i
         "refresh_error": None,
         "spec_file": spec.spec_file,
         "portal_url": PORTAL_ANNOUNCEMENT_URL.format(announcement_id),
+        "portal_old_url": PORTAL_OLD_URL.format(announcement_id),
         "status_names": STATUS_NAMES,
     }
 

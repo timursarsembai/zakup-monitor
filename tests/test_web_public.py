@@ -120,7 +120,8 @@ def test_logo_and_share_buttons(client, conn):
     _login(client)
     page = client.get("/a/501").text
     assert 'data-share="https://zakup.sarsembai.com/a/501"' in page
-    assert 'data-share="https://goszakup.gov.kz/ru/announce/index/501"' in page
+    assert 'data-share="https://v3bl.goszakup.gov.kz/ru/announce/index/501"' in page
+    assert 'href="https://old.goszakup.gov.kz/ru/announce/index/501"' in page
     assert 'data-share="https://zakup.sarsembai.com/lots/5011"' in client.get("/lots/5011").text
 
 
