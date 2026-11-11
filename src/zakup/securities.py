@@ -3,7 +3,7 @@
 Точных сумм в документации нет — только проценты: в проекте договора («внести обеспечение
 исполнения Договора в размере 3 (трех) процентов…» — 3% в конкурсе и аукционе, 5% в запросе
 ценовых предложений) и в конкурсной документации («обеспечение заявки … в размере одного
-процента от суммы, выделенной…»; 3% — строительство «под ключ»). Служба specs разбирает их
+процента от суммы, выделенной…»; 3% — строительство «под ключ»). Служба securities разбирает их
 из документов открытых объявлений (prefetch) — обычным поиском по тексту, без ИИ. Нет
 документа или не прочитался — процент по способу закупки (FALLBACK).
 
@@ -21,6 +21,7 @@
 
 import logging
 import re
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import psycopg
@@ -107,7 +108,8 @@ def from_documents(detail: dict[str, Any]) -> dict[str, Any]:
 
 
 PREFETCH_RETRY = "1 day"
-BATCH = 10  # за круг службы specs: файлы с портала качаются по 5–40 с
+BATCH = 40
+WORKERS = 2  # параллельных загрузок: файлы с портала качаются по 5–40 с; разбор PDF — до ~200 МБ
 
 
 def prefetch(conn: psycopg.Connection, limit: int) -> int:
@@ -121,11 +123,12 @@ def prefetch(conn: psycopg.Connection, limit: int) -> int:
            ORDER BY securities_at NULLS FIRST, end_date DESC LIMIT %s""",
         (PREFETCH_RETRY, limit)).fetchall()
     conn.commit()  # файлы качаем без открытой транзакции
-    for announcement_id, detail in rows:
-        found = from_documents(detail)
-        conn.execute("UPDATE announcements SET securities = %s, securities_at = now() WHERE id = %s",
-                     (Jsonb(found), announcement_id))
-        conn.commit()
+    with ThreadPoolExecutor(WORKERS) as pool:
+        for announcement_id, found in zip((r[0] for r in rows), pool.map(lambda r: from_documents(r[1]), rows),
+                                          strict=True):
+            conn.execute("UPDATE announcements SET securities = %s, securities_at = now() WHERE id = %s",
+                         (Jsonb(found), announcement_id))
+            conn.commit()
     return len(rows)
 
 

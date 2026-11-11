@@ -40,15 +40,15 @@ if [ -n "$new_migrations" ]; then
   # Если миграция упадёт, службы не должны остаться остановленными.
   # Запускаем те же остановленные контейнеры (прежний код), а не пересоздаём из нового
   # образа: новый код на старой схеме и повтор миграции при живых сборщиках — хуже.
-  trap 'echo "Миграция не прошла — запускаю прежние службы на старой схеме"; docker compose start worker archive history specs scores research bot client-bot; systemctl --user start zakup-research' EXIT
-  docker compose stop worker archive history specs scores research bot client-bot
+  trap 'echo "Миграция не прошла — запускаю прежние службы на старой схеме"; docker compose start worker archive history specs securities scores research bot client-bot; systemctl --user start zakup-research' EXIT
+  docker compose stop worker archive history specs securities scores research bot client-bot
   systemctl --user stop zakup-research
   docker compose run --rm --no-deps --entrypoint zakup worker migrate
   trap - EXIT
 fi
 
 # Всё, кроме сайта, — как обычно.
-docker compose up -d --no-deps postgres worker archive history specs scores research bot client-bot
+docker compose up -d --no-deps postgres worker archive history specs securities scores research bot client-bot
 
 # Сайт — две копии за шлюзом: перезапускаем по очереди и ждём, пока новая ответит.
 # Пока одна перезапускается, шлюз отправляет запросы в другую — перерыва нет.

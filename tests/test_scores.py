@@ -53,3 +53,23 @@ def test_filters_form_round_trip():
     assert len(f.score_labels()) == 5 and "заморозить не больше 100 000 ₸" in f.describe()
     back = Filters.from_form({k: [str(v)] for k, v in __import__("urllib.parse").parse.parse_qsl(f.to_query().split("?")[1])})
     assert back.own_supplier == "only" and back.freeze_max == Decimal(100000)
+
+
+def test_market_by_plan_prices(conn):
+    from zakup import lot_insights
+
+    _lot(conn, 10, 510, name="Бумага А4", amount=1300000)  # 130 000 за шт
+    for i, price in enumerate((95000, 100000, 100000, 105000, 110000)):
+        _lot(conn, 20 + i, 520 + i, customer=f"c{i}", name="Бумага А4", amount=price * 10)
+    conn.commit()
+    facts = lot_insights.lot_facts(conn, 10)
+    m = lot_insights.market(conn, 10, facts)
+    assert m["n"] == 5 and m["median"] == 100000 and round(m["diff"], 2) == 0.3
+    # Под то же название попали очень разные цены — оценку не даём.
+    _lot(conn, 30, 530, customer="x", name="Бумага А4", amount=10000)
+    _lot(conn, 31, 531, customer="y", name="Бумага А4", amount=20000)
+    _lot(conn, 32, 532, customer="z", name="Бумага А4", amount=30000)
+    conn.commit()
+    assert lot_insights.market(conn, 10, facts) is None
+    # Услуги не сравниваем.
+    assert lot_insights.market(conn, 10, {**facts, "unit": "одна услуга"}) is None

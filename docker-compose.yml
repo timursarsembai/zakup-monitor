@@ -149,6 +149,21 @@ services:
     mem_limit: 512m  # разбор PDF — в отдельном процессе, до ~200 МБ (zakup.spec)
     logging: *logging
 
+  # Проценты обеспечения заявки и договора из документов открытых объявлений (zakup.securities).
+  securities:
+    <<: *hardening
+    image: zakup
+    container_name: zakup-securities
+    restart: unless-stopped
+    init: true
+    depends_on:
+      worker:
+        condition: service_started
+    entrypoint: ["zakup", "securities", "--loop"]
+    environment: *db-env
+    mem_limit: 768m  # две загрузки разом, разбор PDF — в отдельном процессе до ~200 МБ
+    logging: *logging
+
   # Оценки открытых лотов для фильтров поиска (zakup.scores, таблица lot_scores).
   scores:
     <<: *hardening

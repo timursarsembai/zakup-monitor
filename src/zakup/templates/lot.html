@@ -150,7 +150,7 @@
     {% if bid and bid.offers %}<div>{{ _("Заявок в похожих лотах") }}<b>≈ {{ "%.1f" | format(bid.offers) }}</b></div>{% endif %}
     {% if bid and bid.failed_share is not none %}<div>{{ _("Похожие не состоялись") }}<b class="{{ 'good' if bid.failed_share >= 0.5 }}">{{ (bid.failed_share * 100) | round | int }}%</b>{% if bid.empty %}{{ _("без заявок:") }} {{ (bid.empty * 100) | round | int }}%{% endif %}</div>{% endif %}
     {% if bid %}<div>{{ _("Обычное снижение цены") }}{% if request.state.paid %}<b>{{ (bid.median * 100) | round(1) }}%</b>{% else %}<b><button type="button" class="link-button" data-paid data-feature="bid_price">{{ _("по подписке") }} 🔒</button></b>{% endif %}</div>{% endif %}
-    {% if li.market %}{% set m = li.market %}<div>{{ _("Цена за ед. против рынка") }}<b class="{{ 'good' if m.diff > 0.1 else ('warn' if m.diff < -0.1) }}">{% if m.diff > 0.02 %}+{% endif %}{{ (m.diff * 100) | round | int }}%</b>{{ _("средняя у победителей:") }} {{ m.median | money }} ₸ ({{ m.n }})</div>{% endif %}
+    {% if li.market %}{% set m = li.market %}<div>{{ _("Цена за ед. против рынка") }}<b class="{{ 'good' if m.diff > 0.1 else ('warn' if m.diff < -0.1) }}">{% if m.diff > 0.02 %}+{% endif %}{{ (m.diff * 100) | round | int }}%</b>{{ _("обычная плановая цена:") }} {{ m.median | money }} ₸ ({{ _("лотов:") }} {{ m.n }})</div>{% endif %}
     <div>{{ _("Аванс") }}<b class="{{ 'good' if i.prepayment and i.prepayment >= 30 }}">{{ ('%g'|format(i.prepayment)) ~ "%" if i.prepayment else _("нет") }}</b></div>
     {% if deposits %}{% set d = deposits %}
     {% if d.bid %}<div>{{ _("Обеспечение заявки") }} ({{ '%g'|format(d.bid_pct) }}%)<b>{{ d.bid | money }} ₸</b>{{ _("возвращают после итогов") }}</div>{% endif %}

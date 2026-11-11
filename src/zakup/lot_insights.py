@@ -6,7 +6,7 @@
 - history: что этот заказчик покупал из такого же раньше — цена, кто выиграл, сколько заявок;
   если почти всегда выигрывает один поставщик — предупреждение;
 - repeats: этот же лот (то же название, сумма ±20%) у заказчика уже объявляли — чем кончилось;
-- market: плановая цена за единицу против цены победителей за единицу (та же единица измерения);
+- market: плановая цена за единицу против обычной плановой цены такого же товара (та же единица);
 - customer: как проходят закупки заказчика — доля несостоявшихся и повторно объявленных;
 - similar_where: открытые лоты с таким же товаром у других заказчиков (вкладка «Похожие
   открытые лоты»).
@@ -22,7 +22,8 @@ from zakup.suppliers import same_product
 
 PERIOD = "365 days"
 HISTORY_ROWS = 10
-MARKET_MIN = 5  # меньше итогов — «цену рынка» не показываем
+MARKET_MIN = 5  # меньше похожих лотов — «цену рынка» не показываем
+MARKET_SPREAD = 2.5  # 75-й процентиль цены дороже 25-го больше чем в 2,5 раза — товары разные
 SAME_WINNER_MIN = 3  # предупреждение «свой поставщик»: побед одного не меньше
 SAME_WINNER_SHARE = 0.7  # …и не меньше этой доли итогов с победителем
 SIMILAR_LIMIT = 60
@@ -96,22 +97,27 @@ def repeats(conn: psycopg.Connection, lot_id: int, facts: dict[str, Any]) -> dic
 
 
 def market(conn: psycopg.Connection, lot_id: int, facts: dict[str, Any]) -> dict[str, Any] | None:
-    """Цена за единицу у победителей такого же товара за год — в той же единице измерения."""
-    if not facts["amount"] or not facts["count"]:
+    """Плановая цена за единицу против обычной плановой цены такого же товара за год (та же
+    единица измерения). С ценами победителей не сравниваем: они ниже плана на обычное снижение
+    (медиана ~27%), и почти любой лот выглядел бы «дороже рынка». Оценку не даём, если цены
+    похожих лотов слишком разные (под одно название попали разные товары) или единица —
+    «услуга» (услуги по одной цене не сравнить)."""
+    if not facts["amount"] or not facts["count"] or "услуг" in facts["unit"]:
         return None
     row = conn.execute(
-        f"""SELECT count(*), percentile_cont(ARRAY[0.25, 0.5, 0.75]) WITHIN GROUP (ORDER BY r.winner_total / l.count)
-            FROM lot_results r JOIN lots l ON l.id = r.lot_id
-            WHERE r.outcome = 'winner' AND r.winner_total > 0 AND l.count > 0 AND l.id <> %(lot)s
-              AND r.result_date > now() - interval '{PERIOD}'
-              AND coalesce(lower(l.unit_name), '') = %(unit)s AND {_match(facts)}
-              AND r.winner_total BETWEEN l.amount * 0.05 AND l.amount""",
+        f"""SELECT count(*), percentile_cont(ARRAY[0.25, 0.5, 0.75]) WITHIN GROUP (ORDER BY l.amount / l.count)
+            FROM lots l JOIN announcements a ON a.id = l.trd_buy_id
+            WHERE l.amount > 0 AND l.count > 0 AND l.id <> %(lot)s AND l.trd_buy_id <> %(announcement)s
+              AND a.publish_date > now() - interval '{PERIOD}'
+              AND coalesce(lower(l.unit_name), '') = %(unit)s AND {_match(facts)}""",
         {**facts, "lot": lot_id}).fetchone()
     n, quartiles = row
     if n < MARKET_MIN or not quartiles:
         return None
-    plan = float(facts["amount"]) / float(facts["count"])
     low, median, high = (float(q) for q in quartiles)
+    if low <= 0 or high / low > MARKET_SPREAD:
+        return None
+    plan = float(facts["amount"]) / float(facts["count"])
     return {"n": n, "plan": plan, "low": low, "median": median, "high": high,
             "diff": plan / median - 1 if median else None}
 

@@ -45,6 +45,8 @@ def _parser() -> argparse.ArgumentParser:
     sub.add_parser("tidy", help="база регионов по IP (раз в месяц) и чистка старой статистики посещений")
     sub.add_parser("nightly", help="ночной ревьюер: отчёт владельцу за сутки (на хосте)")
     sub.add_parser("bot", help="Telegram-бот: привязка чатов (работает постоянно)")
+    securities_cmd = sub.add_parser("securities", help="проценты обеспечений из документов открытых объявлений")
+    securities_cmd.add_argument("--loop", action="store_true", help="работать постоянно")
     scores_cmd = sub.add_parser("scores", help="оценки открытых лотов для фильтров поиска (lot_scores)")
     scores_cmd.add_argument("--loop", action="store_true", help="работать постоянно")
     specs_cmd = sub.add_parser("specs", help="заранее разобрать техспецификации открытых лотов")
@@ -165,6 +167,7 @@ LOCAL = {
     "client-bot": _client_bot, "bot": _bot, "research": _research, "add-user": _add_user,
     "specs": lambda args: _specs(args.limit, args.loop),
     "scores": lambda args: _scores(args.loop),
+    "securities": lambda args: _securities(args.loop),
     "set-password": lambda args: _set_password(args.email),
 }
 
@@ -211,21 +214,30 @@ SPECS_BATCH = 50
 
 
 def _specs(limit: int, loop: bool) -> int:
-    from zakup import securities, spec
+    from zakup import spec
+
+    batch = min(limit, SPECS_BATCH)
+    while True:
+        with db.connect(config.database_url()) as conn:
+            done = spec.prefetch(conn, batch)
+        print(f"specs: {done}", flush=True)
+        if not loop:
+            return 0
+        # Пока есть очередь (проход полный) — сразу дальше, иначе раз в 5 минут.
+        if done < batch:
+            time.sleep(300)
+
+
+def _securities(loop: bool) -> int:
+    from zakup import securities
 
     while True:
         with db.connect(config.database_url()) as conn:
-            # Короткие проходы по очереди: спецификации качаются по 5–40 с, и при длинном проходе
-            # обеспечения ждали бы часами (а перезапуск при выкладке начинает всё сначала).
-            done = spec.prefetch(conn, min(limit, SPECS_BATCH))
-            # Проценты обеспечения — из проекта договора и конкурсной документации.
-            terms = securities.prefetch(conn, min(limit, securities.BATCH))
-        print(f"specs: {done}, securities: {terms}", flush=True)
-        done = max(done, terms)
+            done = securities.prefetch(conn, securities.BATCH)
+        print(f"securities: {done}", flush=True)
         if not loop:
             return 0
-        # Пока есть очередь — сразу дальше, иначе раз в 5 минут.
-        if done < limit:
+        if done < securities.BATCH:
             time.sleep(300)
 
 
