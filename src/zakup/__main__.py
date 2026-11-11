@@ -198,12 +198,17 @@ def _with_portal(args) -> int:
         client.close()
 
 
+SPECS_BATCH = 50
+
+
 def _specs(limit: int, loop: bool) -> int:
     from zakup import securities, spec
 
     while True:
         with db.connect(config.database_url()) as conn:
-            done = spec.prefetch(conn, limit)
+            # Короткие проходы по очереди: спецификации качаются по 5–40 с, и при длинном проходе
+            # обеспечения ждали бы часами (а перезапуск при выкладке начинает всё сначала).
+            done = spec.prefetch(conn, min(limit, SPECS_BATCH))
             # Проценты обеспечения — из проекта договора и конкурсной документации.
             terms = securities.prefetch(conn, min(limit, securities.BATCH))
         print(f"specs: {done}, securities: {terms}", flush=True)

@@ -107,7 +107,7 @@ def from_documents(detail: dict[str, Any]) -> dict[str, Any]:
 
 
 PREFETCH_RETRY = "1 day"
-BATCH = 20  # за круг службы specs: файлы с портала качаются по 5–40 с
+BATCH = 10  # за круг службы specs: файлы с портала качаются по 5–40 с
 
 
 def prefetch(conn: psycopg.Connection, limit: int) -> int:
