@@ -43,8 +43,11 @@ def test_dumping_rules():
 
 
 def test_prefetch_reads_documents(conn, monkeypatch):
-    db.upsert_announcement(conn, {"id": 77, "name_ru": "Конкурс", "end_date": "2099-01-01 09:00:00"})
-    conn.execute("UPDATE announcements SET lots_ready = true, detail = %s WHERE id = 77", (Jsonb({"Files": [
+    db.upsert_announcement(conn, {"id": 77, "name_ru": "Тендер", "end_date": "2099-01-01 09:00:00"})
+    db.upsert_announcement(conn, {"id": 78, "name_ru": "Конкурс", "end_date": "2099-01-01 09:00:00"})
+    # Конкурс — по Правилам, документы не качаем; тендер квазигоссектора — из документов.
+    conn.execute("UPDATE announcements SET lots_ready = true, trade_method_id = 2, detail = '{}' WHERE id = 78")
+    conn.execute("UPDATE announcements SET lots_ready = true, trade_method_id = 124, detail = %s WHERE id = 77", (Jsonb({"Files": [
         {"nameRu": "Проект договора об электронных закупках", "filePath": "https://ows.goszakup.gov.kz/c"},
         {"nameRu": "Конкурсная документация ", "filePath": "https://ows.goszakup.gov.kz/k"}]}),))
     conn.commit()

@@ -691,5 +691,5 @@ def test_lot_page_decide_card_customer_and_similar_tabs(client, conn):
     # Снижение и цены заявки — по подписке.
     assert 'data-feature="bid_price"' in page
     # Сколько заморозить: 1% заявки и 3% договора от 1 000 000 (документы не разобраны — по способу).
-    assert "10 000.00 ₸" in page and "до 30 000.00 ₸" in page and "по способу закупки" in page
+    assert "10 000.00 ₸" in page and "до 30 000.00 ₸" in page and "по Правилам госзакупок" in page
     assert "Порог демпинга" in page and "900 000.00 ₸" in page

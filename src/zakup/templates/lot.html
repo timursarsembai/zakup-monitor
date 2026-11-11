@@ -159,7 +159,7 @@
     {% endif %}
     {% if i.supply_date %}<div>{{ _("Срок поставки") }}<span style="display:block;color:var(--fg)">{{ i.supply_date[:90] }}{% if i.supply_date|length > 90 %}…{% endif %}</span></div>{% endif %}
   </div>
-  {% if deposits %}<p class="muted note" style="margin:10px 0 0;font-size:13px">{{ _("Обеспечение — проценты") }} {{ _("из документов объявления") if deposits.source == "documents" else _("по способу закупки (документы ещё не разобраны)") }}.{% if deposits.advance_pct %} {{ _("При авансе к обеспечению договора добавляется обеспечение аванса, равное авансу.") }}{% endif %}
+  {% if deposits %}<p class="muted note" style="margin:10px 0 0;font-size:13px">{{ _("Обеспечение — проценты") }} {{ _("из документов объявления") if deposits.source == "documents" else _("по Правилам госзакупок для этого способа закупки") }}.{% if deposits.advance_pct %} {{ _("При авансе к обеспечению договора добавляется обеспечение аванса, равное авансу.") }}{% endif %}
     {% if deposits.dumping and deposits.dumping.floor and deposits.dumping.allowed %}{{ _("Цену ниже порога демпинга можно подать, но после победы вместе с обеспечением договора нужно внести антидемпинговую сумму: порог минус ваша цена (ст. 13 Закона).") }}
     {% elif deposits.dumping and deposits.dumping.works %}{{ _("Порог демпинга у работ зависит от их вида: СМР — 2% от сметы, текущий ремонт — 20%, проектирование — 10% (п. 85–89 Правил).") }}{% endif %}
     {{ _("Поставщики из реестра казахстанских товаропроизводителей обеспечение договора и аванса не вносят.") }}</p>{% endif %}

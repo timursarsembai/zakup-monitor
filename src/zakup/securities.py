@@ -4,8 +4,9 @@
 исполнения Договора в размере 3 (трех) процентов…» — 3% в конкурсе и аукционе, 5% в запросе
 ценовых предложений) и в конкурсной документации («обеспечение заявки … в размере одного
 процента от суммы, выделенной…»; 3% — строительство «под ключ»). Служба securities разбирает их
-из документов открытых объявлений (prefetch) — обычным поиском по тексту, без ИИ. Нет
-документа или не прочитался — процент по способу закупки (FALLBACK).
+из документов открытых объявлений (prefetch) — обычным поиском по тексту, без ИИ. Для
+способов по закону документы не качаем: в 114 разобранных объявлениях проценты совпали с
+Правилами без исключений, — берём процент по способу закупки (FALLBACK).
 
 Обеспечение договора — процент от суммы договора (цены победителя) плюс обеспечение аванса,
 равное авансу (п. 542–543 Правил осуществления госзакупок, приказ МФ РК № 687).
@@ -109,19 +110,22 @@ def from_documents(detail: dict[str, Any]) -> dict[str, Any]:
 
 PREFETCH_RETRY = "1 day"
 BATCH = 40
-WORKERS = 2  # параллельных загрузок: файлы с портала качаются по 5–40 с; разбор PDF — до ~200 МБ
+WORKERS = 1  # документы качаем только у способов вне закона — их немного; разбор PDF — до ~200 МБ
 
 
 def prefetch(conn: psycopg.Connection, limit: int) -> int:
     """Разбирает документы открытых объявлений, у которых процентов ещё нет; сначала —
-    заканчивающиеся позже (по ним ещё успеют подать)."""
+    заканчивающиеся позже (по ним ещё успеют подать). Только способы вне закона о госзакупках
+    (тендер квазигоссектора, госсоцзаказ, особый порядок): у конкурса, аукциона и запроса
+    ценовых предложений проценты заданы Правилами (FALLBACK) — документы с ними совпадают."""
     rows = conn.execute(
         """SELECT id, detail FROM announcements
            WHERE end_date > now() + interval '1 hour' AND detail IS NOT NULL AND lots_ready
+             AND NOT (trade_method_id = ANY(%s))
              AND (securities_at IS NULL
                   OR (securities ? 'error' AND securities_at < now() - %s::interval))
            ORDER BY securities_at NULLS FIRST, end_date DESC LIMIT %s""",
-        (PREFETCH_RETRY, limit)).fetchall()
+        (list(FALLBACK), PREFETCH_RETRY, limit)).fetchall()
     conn.commit()  # файлы качаем без открытой транзакции
     with ThreadPoolExecutor(WORKERS) as pool:
         for announcement_id, found in zip((r[0] for r in rows), pool.map(lambda r: from_documents(r[1]), rows),

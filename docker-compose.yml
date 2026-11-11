@@ -161,7 +161,7 @@ services:
         condition: service_started
     entrypoint: ["zakup", "securities", "--loop"]
     environment: *db-env
-    mem_limit: 768m  # две загрузки разом, разбор PDF — в отдельном процессе до ~200 МБ
+    mem_limit: 512m  # разбор PDF — в отдельном процессе, до ~200 МБ
     logging: *logging
 
   # Оценки открытых лотов для фильтров поиска (zakup.scores, таблица lot_scores).
