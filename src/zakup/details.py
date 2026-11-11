@@ -303,14 +303,16 @@ def refresh_finished(conn: psycopg.Connection, client: Client, limit: int) -> in
     ids = [
         row[0]
         for row in conn.execute(
-            """SELECT id FROM announcements
-               WHERE status_id = ANY(%s)
+            # Условие — как у частичного индекса announcements_finished_incomplete (миграция 0031),
+            # статусы — константой: с параметром планировщик не докажет, что индекс подходит.
+            f"""SELECT id FROM announcements
+               WHERE status_id IN ({", ".join(map(str, FINISHED_STATUSES))})
                  AND (detail IS NULL OR NOT detail ? 'nameKz'
                       OR (detail->>'refBuyStatusId')::int IS DISTINCT FROM status_id)
                  AND (details_fetched_at IS NULL OR details_fetched_at < now() - interval '1 hour')
                ORDER BY end_date DESC
                LIMIT %s""",
-            (FINISHED_STATUSES, limit),
+            (limit,),
         )
     ]
     return _fetch(conn, client, ids)
