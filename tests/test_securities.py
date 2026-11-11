@@ -31,6 +31,8 @@ def test_for_lot_amounts_and_fallback():
     d = securities.for_lot(None, 3, 1000000, None)
     assert d["bid"] == 30000 and d["contract_max"] == 50000 and d["source"] == "method"
     assert securities.for_lot(None, 999, 1000000, None) is None
+    d = securities.for_lot(None, 6, 1000000, None)  # из одного источника по несостоявшимся
+    assert d["bid"] is None and d["contract_max"] == 30000 and d["dumping"] is None
 
 
 def test_dumping_rules():
