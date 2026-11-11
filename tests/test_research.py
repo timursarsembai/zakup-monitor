@@ -405,3 +405,13 @@ def test_tech_proposal_queue_bilingual(conn, monkeypatch):
     assert result["status"] == "done" and "Стол дубовый 120х60" in prompts[1]
     assert [r["ok"] for r in result["result"]["rows"]] == [True, False]
     assert result["result"]["kk"]["title"] == "Емен үстел"
+
+
+def test_strings_cut_on_word_boundary():
+    from zakup.research.results import _strings
+
+    long = "В спецификации не указаны стандарт, сертификаты, гарантия и условия поставки " * 3
+    cut = _strings([long])[0]
+    assert len(cut) <= 120 and cut.endswith("…") and not cut[:-1].endswith(" ")
+    assert long.startswith(cut[:-1])  # обрезано по целому слову
+    assert _strings([long], 500)[0] == long.strip()

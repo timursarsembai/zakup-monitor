@@ -61,10 +61,17 @@ def clean(result: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _strings(value: Any) -> list[str]:
+def _cut(text: str, limit: int) -> str:
+    """Не длиннее limit — по границе слова и с «…», чтобы фраза не обрывалась на полуслове."""
+    if len(text) <= limit:
+        return text
+    return text[:limit - 1].rsplit(" ", 1)[0].rstrip(" ,;:—-") + "…"
+
+
+def _strings(value: Any, limit: int = 120) -> list[str]:
     if not isinstance(value, list):
         return []
-    return [str(v).strip()[:120] for v in value if str(v).strip()][:10]
+    return [_cut(str(v).strip(), limit) for v in value if str(v).strip()][:10]
 
 
 def _phone(value: Any) -> str | None:
