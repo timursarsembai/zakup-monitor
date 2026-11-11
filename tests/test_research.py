@@ -373,3 +373,35 @@ def test_report_mcp_server_answers_protocol():
     tools = report_mcp.answer({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})["result"]["tools"]
     assert [t["name"] for t in tools] == ["report_offer"]
     assert report_mcp.answer({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {}})["result"]["content"]
+
+
+def test_tech_proposal_queue_bilingual(conn, monkeypatch):
+    from zakup import proposals
+
+    user = _lot(conn)
+    found = {"summary": "s", "region_searched": "Актобе",
+             "items": [{"name": "Стол Дуб-120", "url": "https://a.kz/1", "in_region": True, "unit_price": 90000,
+                        "matches": ["дуб"], "mismatches": ["размер не указан"]}]}
+    answers = [found, {
+        "title": "Стол Дуб-120",
+        "rows": [{"requirement": "Материал — дуб", "offer": "Массив дуба", "status": "соответствует"},
+                 {"requirement": "Размер 120×60", "offer": "120×60 см", "status": "уточнить"}],
+        "confirm": ["Сертификат соответствия"],
+        "kk": {"title": "Емен үстел", "rows": [{"requirement": "Материалы — емен", "offer": "Емен", "status": "соответствует"}],
+               "confirm": ["Сәйкестік сертификаты"]}}]
+    prompts = []
+
+    def fake(prompt, model, schema=None, web=True, **_):
+        prompts.append(prompt)
+        return answers[len(prompts) - 1]
+    monkeypatch.setattr(research.providers, "_claude_code", fake)
+    url = os.environ["TEST_DATABASE_URL"]
+    research.enqueue(conn, user, 90, "Актобе", True)
+    research.work(url, ["claude_code"], once=True)
+    assert proposals.request(conn, 90, "https://unknown.kz", user) is None
+    assert proposals.request(conn, 90, "https://a.kz/1", user) == "queued"
+    research.work(url, ["claude_code"], once=True)
+    result = proposals.of(conn, 90, "https://a.kz/1")
+    assert result["status"] == "done" and "Стол дубовый 120х60" in prompts[1]
+    assert [r["ok"] for r in result["result"]["rows"]] == [True, False]
+    assert result["result"]["kk"]["title"] == "Емен үстел"

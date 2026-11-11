@@ -103,6 +103,7 @@
   .q-list li { margin: 8px 0; display: flex; gap: 8px; align-items: flex-start; counter-increment: q; }
   .q-list li::before { content: counter(q) "."; flex: none; min-width: 1.6em; text-align: right; }
   .q-list label { display: flex; gap: 8px; align-items: flex-start; cursor: pointer; }
+  .proposal-table td.ok { color: var(--ok); white-space: nowrap; } .proposal-table td.check { color: #b26a00; white-space: nowrap; }
   .q-list input { margin-top: 4px; flex: none; } .q-list input:checked + span { text-decoration: line-through; color: var(--muted); }
 {% endblock %}
 {% block main %}
@@ -213,6 +214,13 @@
       <button type="button" data-q-close aria-label="{{ _("Закрыть") }}">✕</button></div>
     <div class="q-tools"><button type="button" data-q-copy hidden>📋 {{ _("Скопировать вопросы") }}</button></div>
     <div data-q-body></div>
+  </div>
+</dialog>
+<dialog class="questions" id="proposal" aria-labelledby="proposal-title">
+  <div class="q-wrap">
+    <div class="q-head"><div><h2 id="proposal-title">{{ _("Техническое предложение — черновик") }}</h2><div class="muted" data-p-title></div></div>
+      <button type="button" data-p-close aria-label="{{ _("Закрыть") }}">✕</button></div>
+    <div data-p-body></div>
   </div>
 </dialog>
 <div hidden data-lot-page data-lot="{{ lot.id }}" data-staff="{{ '1' if request.state.staff else '' }}" data-has-searches="{{ '1' if request.state.user_id and request.state.searches > 0 else '' }}"></div>

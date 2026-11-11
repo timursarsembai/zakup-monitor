@@ -1,0 +1,19 @@
+{# Черновик технического предложения (zakup.proposals): пока готовится — окно опрашивает фрагмент. #}
+{% if not p %}<p class="muted">{{ _("Готовлю черновик…") }}</p>
+{% elif p.status in ("queued", "running") %}<p data-p-status="{{ p.status }}"><span class="spinner"></span> {{ _("ИИ сверяет техспецификацию с товаром и составляет черновик — обычно до минуты.") }}</p>
+{% elif p.status == "error" %}<p class="bad" data-p-status="error">{{ _("Не получилось:") }} {{ p.error }}</p>
+{% else %}<div data-p-status="done">
+  {% set r = p.result.kk if lang() == "kk" and p.result.kk else p.result %}
+  {% if r.title %}<p><b>{{ _("Предлагаемый товар:") }}</b> {{ r.title }}</p>{% endif %}
+  <div class="table-wrap"><table class="proposal-table">
+    <tr><th>№</th><th>{{ _("Требование заказчика") }}</th><th>{{ _("Предложение поставщика") }}</th><th></th></tr>
+    {% for row in r.rows %}
+    <tr><td>{{ loop.index }}</td><td>{{ row.requirement }}</td><td>{{ row.offer }}</td>
+      <td class="{{ 'ok' if row.ok else 'check' }}">{{ _("соответствует") if row.ok else _("уточнить") }}</td></tr>
+    {% endfor %}
+  </table></div>
+  {% if r.confirm %}<h3>{{ _("Подтвердить и приложить") }}</h3>
+  <ul>{% for x in r.confirm %}<li>{{ x }}</li>{% endfor %}</ul>{% endif %}
+  <p class="muted">{{ _("Черновик составлен ИИ по тексту спецификации и описанию товара — проверьте каждое значение по документам товара перед подачей.") }}</p>
+  <p><a class="primary-link" href="/lots/{{ lot_id }}/proposal.doc?url={{ url | urlencode }}" data-p-doc>⬇ {{ _("Скачать для Word") }}</a></p>
+</div>{% endif %}

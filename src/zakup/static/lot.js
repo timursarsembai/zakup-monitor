@@ -125,3 +125,35 @@ const PAGE = document.querySelector("[data-lot-page]");
   }
   addEventListener("hashchange", () => { const name = fromHash(); if (name) show(name); });
 })();
+
+// Черновик технического предложения по найденному товару — окно, как у вопросов поставщику.
+(() => {
+  const dialog = document.getElementById("proposal");
+  if (!dialog) return;
+  const body = dialog.querySelector("[data-p-body]");
+  const lot = document.querySelector("[data-lot-page]").dataset.lot;
+  let current = null;
+  const src = (url) => `/lots/${lot}/proposal?url=` + encodeURIComponent(url);
+  const show = async (url) => {
+    if (url !== current) return;
+    try {
+      const response = await fetch(src(url));
+      if (response.redirected) { body.innerHTML = '<p class="muted"><a href="/login">' + CONFIG.t.login_again + "</a></p>"; return; }
+      if (response.ok && url === current) body.innerHTML = await response.text();
+    } catch {}
+    const status = body.querySelector("[data-p-status]")?.dataset.pStatus;
+    if (status === "queued" || status === "running") setTimeout(() => show(url), 3000);
+  };
+  document.addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-proposal]");
+    if (!button || button.hasAttribute("data-paid") && !CONFIG.paid) return;
+    current = button.dataset.proposal;
+    dialog.querySelector("[data-p-title]").textContent = button.dataset.title || "";
+    body.innerHTML = '<p><span class="spinner"></span></p>';
+    dialog.showModal();
+    await fetch(`/lots/${lot}/proposal`, { method: "POST", body: new URLSearchParams({ url: current }) }).catch(() => {});
+    show(current);
+  });
+  dialog.querySelector("[data-p-close]").addEventListener("click", () => { current = null; dialog.close(); });
+  dialog.addEventListener("close", () => { current = null; });
+})();

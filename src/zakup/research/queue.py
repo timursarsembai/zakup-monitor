@@ -282,9 +282,10 @@ def work(database_url: str, providers: list[str], once: bool = False) -> None:
 
 
 def _light_once(conn: psycopg.Connection, providers: list[str]) -> bool:
-    from zakup import questions
+    from zakup import proposals, questions
 
-    return bool(_work_summaries(conn, providers) or questions.work_one(conn, providers))
+    return bool(_work_summaries(conn, providers) or questions.work_one(conn, providers)
+                or proposals.work_one(conn, providers))
 
 
 def _light_lane(database_url: str, providers: list[str]) -> None:
@@ -333,7 +334,7 @@ def _reap(conn: psycopg.Connection, providers: list[str], first: bool) -> None:
     ).fetchall()
     for (dead,) in reaped:
         credits.refund(conn, dead)
-    for table in ("spec_summaries", "supplier_questions"):
+    for table in ("spec_summaries", "supplier_questions", "tech_proposals"):
         conn.execute(
             f"""UPDATE {table} SET status = 'error', error = 'прервано'
                 WHERE status = 'running' AND started_at < now() - interval '20 minutes'"""

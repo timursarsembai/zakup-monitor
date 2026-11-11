@@ -4,13 +4,14 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, Response
 
 from zakup import (
     contacts,
     credits,
     i18n,
     notify,
+    proposals,
     questions,
     research,
     sources,
@@ -71,7 +72,7 @@ def _helpers_left(request: Request, conn, user: int) -> None:
         return
     used = conn.execute(
         """SELECT count(*) FROM user_actions WHERE user_id = %s
-           AND action IN ('spec_summary', 'supplier_questions') AND at > now() - interval '1 day'""",
+           AND action IN ('spec_summary', 'supplier_questions', 'tech_proposal') AND at > now() - interval '1 day'""",
         (user,)).fetchone()[0]
     if used >= HELPERS_DAILY_LIMIT:
         raise HTTPException(429, f"Не больше {HELPERS_DAILY_LIMIT} выжимок и вопросов в сутки")
@@ -107,6 +108,42 @@ def request_questions(request: Request, user: Paid, lot_id: int, url: Annotated[
         raise HTTPException(404, "Такого предложения нет в результатах подбора")
     _audit(request, user, "supplier_questions", f"/lots/{lot_id}", url=url[:300])
     return {"status": status}
+
+
+@router.post("/lots/{lot_id}/proposal", dependencies=[Depends(same_origin)])
+def request_proposal(request: Request, user: Paid, lot_id: int, url: Annotated[str, Form()]):
+    """Черновик технического предложения по найденному товару (сотрудникам — без подписки)."""
+    with core.pool.connection() as conn:
+        _helpers_left(request, conn, user)
+        owner = None if request.state.staff else user
+        status = proposals.request(conn, lot_id, url, owner)
+    if status is None:
+        raise HTTPException(404, "Такого предложения нет в результатах подбора")
+    _audit(request, user, "tech_proposal", f"/lots/{lot_id}", url=url[:300])
+    return {"status": status}
+
+
+def _proposal_view(request: Request, user: int, lot_id: int, url: str) -> dict | None:
+    with core.pool.connection() as conn:
+        owner = None if request.state.staff else user
+        return proposals.of(conn, lot_id, url) if questions.item(conn, lot_id, url, owner) else None
+
+
+@router.get("/lots/{lot_id}/proposal")
+def proposal_fragment(request: Request, user: Paid, lot_id: int, url: str):
+    return templates.TemplateResponse(request, "proposal_fragment.html",
+                                      {"p": _proposal_view(request, user, lot_id, url), "lot_id": lot_id, "url": url})
+
+
+@router.get("/lots/{lot_id}/proposal.doc")
+def proposal_doc(request: Request, user: Paid, lot_id: int, url: str):
+    """Для Word: HTML-документ с расширением .doc — Word открывает и сохраняет как .docx."""
+    found = _proposal_view(request, user, lot_id, url)
+    if not found or found["status"] != "done":
+        raise HTTPException(404, "Черновик ещё не готов")
+    body = templates.get_template("proposal_doc.html").render(request=request, p=found)
+    return Response(body, media_type="application/msword",
+                    headers={"Content-Disposition": f'attachment; filename="tech-proposal-{lot_id}.doc"'})
 
 
 @router.get("/lots/{lot_id}/questions")
