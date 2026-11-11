@@ -59,14 +59,17 @@ def test_advice_queue_bilingual(conn, monkeypatch):
 
     def fake(prompt, model, schema=None, web=True, **_):
         prompts.append(prompt)
-        return {"text": "Ставьте около 360 000 ₸.", "kk": "Шамамен 360 000 ₸ қойыңыз."}
+        # Первый ответ — казахский со смесью алфавитов: должна быть вторая попытка.
+        kk = "Шамамен 360 000 ₸ бermeңіз." if len(prompts) == 1 else "Шамамен 360 000 ₸ қойыңыз."
+        return {"text": "Ставьте около 360 000 ₸.", "kk": kk}
     monkeypatch.setattr(research.providers, "_claude_code", fake)
     assert bids.request(conn, 90) == "queued"
     assert bids.request(conn, 90) == "queued"  # повторный запрос — та же задача
     research.work(os.environ["TEST_DATABASE_URL"], ["claude_code"], once=True)
     advice = bids.of(conn, 90)
-    assert advice["status"] == "done" and advice["result"]["kk"].startswith("Шамамен")
-    assert "лотов с победителем: 16" in prompts[0] and "360 000" in prompts[0]
+    assert advice["status"] == "done" and advice["result"]["kk"] == "Шамамен 360 000 ₸ қойыңыз."
+    assert len(prompts) == 2 and "одна заявка — " in prompts[0]
+    assert "из них с победителем: 16" in prompts[0] and "360 000" in prompts[0]
     assert bids.request(conn, 90) == "done"  # готовое — общее, без нового запроса к ИИ
 
 

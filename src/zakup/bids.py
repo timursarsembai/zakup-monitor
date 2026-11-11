@@ -10,6 +10,7 @@
 """
 
 import logging
+import re
 from typing import Any
 
 import psycopg
@@ -42,20 +43,24 @@ def _lot(conn: psycopg.Connection, lot_id: int) -> dict[str, Any] | None:
 
 
 def _stats(conn: psycopg.Connection, where: str, params: dict[str, Any]) -> dict[str, Any]:
+    """Доли «одна заявка» и «ни одной» — от всех похожих итогов: в данных портала лот с одной
+    заявкой часто «не состоялся», и среди лотов с победителем одиночных почти нет."""
     row = conn.execute(
         f"""SELECT count(*) FILTER (WHERE r.outcome = 'winner' AND {DISCOUNT} IS NOT NULL),
                    count(*) FILTER (WHERE r.outcome = 'failed'), count(*),
                    percentile_cont(ARRAY[0.25, 0.5, 0.75]) WITHIN GROUP (ORDER BY {DISCOUNT}),
-                   avg(jsonb_array_length(r.offers)) FILTER (WHERE r.outcome = 'winner' AND r.offers <> '[]'),
-                   avg((jsonb_array_length(r.offers) = 1)::int) FILTER (WHERE r.outcome = 'winner' AND r.offers <> '[]')
+                   avg(jsonb_array_length(r.offers)) FILTER (WHERE r.offers <> '[]'),
+                   count(*) FILTER (WHERE jsonb_array_length(r.offers) = 1),
+                   count(*) FILTER (WHERE r.outcome = 'failed' AND r.offers = '[]')
             FROM lot_results r JOIN lots l ON l.id = r.lot_id JOIN announcements a ON a.id = l.trd_buy_id
             WHERE r.result_date > now() - interval '{PERIOD}' AND l.id <> %(lot)s AND {where}""",
         params).fetchone()
-    won, failed, total, quartiles, offers, single = row
+    won, failed, total, quartiles, offers, single, empty = row
     low, median, high = (float(q) if q is not None else None for q in quartiles or (None, None, None))
-    as_float = lambda v: float(v) if v is not None else None  # noqa: E731 — avg() отдаёт Decimal
-    return {"won": won, "failed_share": failed / total if total else None, "low": low, "median": median,
-            "high": high, "offers": as_float(offers), "single": as_float(single)}
+    share = lambda n: n / total if total else None  # noqa: E731
+    return {"won": won, "total": total, "failed_share": share(failed), "low": low, "median": median,
+            "high": high, "offers": float(offers) if offers is not None else None,
+            "single": share(single), "empty": share(empty)}
 
 
 def compute(conn: psycopg.Connection, lot_id: int, items: list[dict[str, Any]] | None = None) -> dict[str, Any] | None:
@@ -117,15 +122,21 @@ SCHEMA = {"type": "object", "properties": {"text": {"type": "string"}, "kk": {"t
 PROMPT = """Ты помогаешь поставщику на госзакупках Казахстана решить, по какой цене подать заявку.
 Лот: {name}. Количество: {count}. Плановая сумма: {amount} тенге.
 
-Итоги похожих закупок за год ({level}, лотов с победителем: {won}):
+Итоги похожих закупок за год ({level}; всего итогов: {total}, из них с победителем: {won}):
 - обычное снижение от плановой суммы (медиана): {median}; осторожно (25%): {low}; агрессивно (75%): {high};
-- участников в среднем: {offers}; доля лотов с одной заявкой: {single}; не состоялись: {failed}.
+- заявок в среднем (где они были): {offers};
+- из всех похожих: одна заявка — {single}, ни одной заявки — {empty}, закупка не состоялась — {failed}.
 Цены заявки: осторожная {careful} ₸, обычная {usual} ₸, агрессивная {bold} ₸.
 
 Напиши 4–6 коротких предложений простыми словами: какую цену разумно ставить и почему, чем
-рискует слишком низкая цена, на что влияет число участников и одна заявка. Себестоимость
+рискует слишком низкая цена, что значат число заявок и доля несостоявшихся. Себестоимость
 неизвестна — напомни сравнить цену со своей закупочной ценой с доставкой. Без воды и без общих советов, только по этим цифрам.
-Не выдумывай данных. text — по-русски, kk — то же на казахском (числа не меняй)."""
+Не выдумывай данных и правил закона — только эти цифры. text — по-русски, kk — то же на
+казахском (числа не меняй), только кириллицей, без латинских букв внутри слов."""
+
+# Модель иногда сбивается на казахском: слово со смесью алфавитов («бermeңіз») или латиницей
+# строчными («artpau»; марки и стандарты обычно с заглавной — ISO, Word).
+MIXED = re.compile(r"(?i:\w*(?:[а-яёәғқңөұүһі][a-z]|[a-z][а-яёәғқңөұүһі])\w*)|\b[a-z]{3,}\b")
 
 
 def _pct(value: Any) -> str:
@@ -163,23 +174,29 @@ def _explain(conn: psycopg.Connection, lot_id: int, provider: str, model: str) -
         raise research.ResearchError("нет похожих итогов для расчёта")
     prompt = PROMPT.format(
         name=lot["name"] or "—", count=_money(data["count"]), amount=_money(data["amount"]),
-        level=data["level_label"], won=data["won"], median=_pct(data["median"]), low=_pct(data["low"]),
+        level=data["level_label"], won=data["won"], total=data["total"], empty=_pct(data["empty"]), median=_pct(data["median"]), low=_pct(data["low"]),
         high=_pct(data["high"]), offers=f"{float(data['offers']):.1f}" if data["offers"] else "нет данных",
         single=_pct(data["single"]), failed=_pct(data["failed_share"]),
         careful=_money(data["prices"]["careful"]), usual=_money(data["prices"]["usual"]),
         bold=_money(data["prices"]["bold"]))
     key = research.api_key(conn, provider)
     conn.commit()
-    if provider == "claude_code":
-        raw = research.providers._claude_code(prompt, model, SCHEMA, web=False)
-    elif provider == "anthropic":
-        raw = research.providers._anthropic(prompt, model, key, schema=SCHEMA, web=False)
+    for _ in range(2):  # вторая попытка — если казахский текст вышел со смесью алфавитов
+        if provider == "claude_code":
+            raw = research.providers._claude_code(prompt, model, SCHEMA, web=False)
+        elif provider == "anthropic":
+            raw = research.providers._anthropic(prompt, model, key, schema=SCHEMA, web=False)
+        else:
+            raw = research.providers._openai(prompt, model, key, schema=SCHEMA, web=False)
+        text = str(raw.get("text") or "").strip()[:2000]
+        if not text:
+            raise research.ResearchError("ИИ не вернул объяснения")
+        kk = str(raw.get("kk") or "").strip()[:2000]
+        if not MIXED.search(kk):
+            break
     else:
-        raw = research.providers._openai(prompt, model, key, schema=SCHEMA, web=False)
-    text = str(raw.get("text") or "").strip()[:2000]
-    if not text:
-        raise research.ResearchError("ИИ не вернул объяснения")
-    return {"text": text, "kk": str(raw.get("kk") or "").strip()[:2000]}
+        kk = ""  # казахский не удался — покажем русский текст
+    return {"text": text, "kk": kk}
 
 
 def work_one(conn: psycopg.Connection, providers: list[str]) -> bool:

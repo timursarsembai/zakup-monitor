@@ -185,9 +185,9 @@
   </table></div>
   <ul class="bid-facts">
     <li>{{ _("Плановая сумма лота:") }} <b>{{ bid.amount | money }} ₸</b></li>
-    {% if bid.offers %}<li>{{ _("Участников в среднем:") }} <b>{{ "%.1f" | format(bid.offers) }}</b></li>{% endif %}
-    {% if bid.single is not none %}<li>{{ _("Одна заявка — в") }} <b>{{ "%.0f" | format(bid.single * 100) }}%</b> {{ _("похожих лотов: там побеждают почти без снижения") }}</li>{% endif %}
-    {% if bid.failed_share is not none %}<li>{{ _("Не состоялись:") }} <b>{{ "%.0f" | format(bid.failed_share * 100) }}%</b></li>{% endif %}
+    {% if bid.offers %}<li>{{ _("Заявок в среднем:") }} <b>{{ "%.1f" | format(bid.offers) }}</b></li>{% endif %}
+    {% if bid.total %}<li>{{ _("Из похожих лотов") }} ({{ bid.total }}): {{ _("одна заявка —") }} <b>{{ "%.0f" | format(bid.single * 100) }}%</b>,
+      {{ _("ни одной заявки —") }} <b>{{ "%.0f" | format(bid.empty * 100) }}%</b>, {{ _("закупка не состоялась —") }} <b>{{ "%.0f" | format(bid.failed_share * 100) }}%</b></li>{% endif %}
     {% if bid.cost %}<li>{{ _("Себестоимость — по самой дешёвой цене из поиска товаров:") }} <b>{{ bid.cost | money }} ₸</b></li>
     {% else %}<li class="muted">{{ _("Маржа появится, когда поиск товаров найдёт товар с ценой.") }}</li>{% endif %}
   </ul>
