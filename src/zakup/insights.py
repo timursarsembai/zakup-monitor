@@ -51,6 +51,7 @@ FEATURES = [
 PAYWALL_FEATURES = {
     "favorite": "Избранное", "spec_summary": "Выжимка техспецификации", "export": "Выгрузка в Excel",
     "subscription": "Подписка", "supplier_questions": "Что спросить у поставщика",
+    "bid_price": "Цена заявки", "results_offers": "Участники итогов",
     "/my": "Мои лоты", "/research": "ИИ-подбор", "/subscriptions": "Подписки", "/matches": "Лента",
 }
 SOURCE_NAMES = {"direct": "Прямой заход", "internal": "Переходы внутри сайта", "google": "Google",

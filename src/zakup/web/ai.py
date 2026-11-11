@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
 
 from zakup import (
+    bids,
     contacts,
     credits,
     i18n,
@@ -72,7 +73,8 @@ def _helpers_left(request: Request, conn, user: int) -> None:
         return
     used = conn.execute(
         """SELECT count(*) FROM user_actions WHERE user_id = %s
-           AND action IN ('spec_summary', 'supplier_questions', 'tech_proposal') AND at > now() - interval '1 day'""",
+           AND action IN ('spec_summary', 'supplier_questions', 'tech_proposal', 'bid_advice')
+           AND at > now() - interval '1 day'""",
         (user,)).fetchone()[0]
     if used >= HELPERS_DAILY_LIMIT:
         raise HTTPException(429, f"Не больше {HELPERS_DAILY_LIMIT} выжимок и вопросов в сутки")
@@ -144,6 +146,26 @@ def proposal_doc(request: Request, user: Paid, lot_id: int, url: str):
     body = templates.get_template("proposal_doc.html").render(request=request, p=found)
     return Response(body, media_type="application/msword",
                     headers={"Content-Disposition": f'attachment; filename="tech-proposal-{lot_id}.doc"'})
+
+
+@router.post("/lots/{lot_id}/bid-advice", dependencies=[Depends(same_origin)])
+def request_bid_advice(request: Request, user: Paid, lot_id: int):
+    """Объяснение рекомендуемой цены заявки от ИИ (сотрудникам — без подписки)."""
+    with core.pool.connection() as conn:
+        _helpers_left(request, conn, user)
+        before = bids.of(conn, lot_id)
+        status = bids.request(conn, lot_id)
+    # В лимит — только новые запросы к ИИ, не повторные клики по готовому объяснению.
+    if status == "queued" and (before is None or before["status"] != "queued"):
+        _audit(request, user, "bid_advice", f"/lots/{lot_id}")
+    return {"status": status}
+
+
+@router.get("/lots/{lot_id}/bid-advice")
+def bid_advice_fragment(request: Request, _: Paid, lot_id: int):
+    with core.pool.connection() as conn:
+        advice = bids.of(conn, lot_id)
+    return templates.TemplateResponse(request, "bid_advice_fragment.html", {"advice": advice})
 
 
 @router.get("/lots/{lot_id}/questions")

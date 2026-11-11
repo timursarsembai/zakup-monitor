@@ -103,6 +103,9 @@
   .q-list li { margin: 8px 0; display: flex; gap: 8px; align-items: flex-start; counter-increment: q; }
   .q-list li::before { content: counter(q) "."; flex: none; min-width: 1.6em; text-align: right; }
   .q-list label { display: flex; gap: 8px; align-items: flex-start; cursor: pointer; }
+  .bid-table tr.bid-main td { background: color-mix(in srgb, var(--accent) 10%, transparent); } .bid-table td.neg { color: var(--bad); }
+  .bid-facts { padding-left: 18px; margin: 12px 0; } .bid-facts li { margin: 4px 0; }
+  .advice-text { background: color-mix(in srgb, var(--accent) 7%, transparent); border-left: 3px solid var(--accent); padding: 10px 14px; border-radius: 6px; line-height: 1.5; }
   .proposal-table td.ok { color: var(--ok); white-space: nowrap; } .proposal-table td.check { color: #b26a00; white-space: nowrap; }
   .q-list input { margin-top: 4px; flex: none; } .q-list input:checked + span { text-decoration: line-through; color: var(--muted); }
 {% endblock %}
@@ -134,6 +137,7 @@
   {% if has_spec %}<button type="button" role="tab" data-tab="spec">{{ _("Техспецификация") }}</button>{% endif %}
   <button type="button" role="tab" data-tab="research">{{ _("Поиск товаров") }}</button>
   {% if rivals %}<button type="button" role="tab" data-tab="suppliers">{{ _("Конкуренты и поставщики") }}</button>{% endif %}
+  <button type="button" role="tab" data-tab="bid">{{ _("Цена заявки") }}</button>
   {% if has_results %}<button type="button" role="tab" data-tab="results">{{ _("Итоги") }}</button>{% endif %}
   {% if others %}<button type="button" role="tab" data-tab="others">{{ _("Другие лоты") }} ({{ others|length }})</button>{% endif %}
 </nav>
@@ -161,6 +165,42 @@
 </div>
 
 {% if rivals %}<div data-panel="suppliers" hidden>{{ suppliers_block(rivals, lot.id, request.state.paid, rivals_shown) }}</div>{% endif %}
+
+<div data-panel="bid" id="bid" hidden>
+<section class="research-box">
+  <h2 style="margin-top:0">{{ _("Какую цену поставить") }}</h2>
+  {% if bid %}
+  <p class="muted">{{ _("По итогам похожих закупок за год") }} ({{ _(bid.level_label) }}, {{ _("лотов с победителем:") }} {{ bid.won }}).
+    {% if not bid.reliable %}<b>{{ _("Похожих итогов мало — оценка ориентировочная.") }}</b>{% endif %}</p>
+  <div class="table-wrap"><table class="bid-table">
+    <tr><th></th><th class="num">{{ _("Снижение") }}</th><th class="num">{{ _("Цена заявки, ₸") }}</th>{% if bid.cost %}<th class="num">{{ _("Маржа, ₸") }}</th>{% endif %}</tr>
+    {% for key, q, label, hint in (("careful", "low", _("Осторожная"), _("выше, чем у 3 из 4 победителей")),
+                                   ("usual", "median", _("Обычная"), _("как у половины победителей")),
+                                   ("bold", "high", _("Агрессивная"), _("ниже, чем у 3 из 4 победителей"))) %}
+    <tr{% if key == "usual" %} class="bid-main"{% endif %}><td>{{ label }}<div class="muted">{{ hint }}</div></td>
+      <td class="num">{{ "%.1f" | format(bid[q] * 100) }}%</td>
+      <td class="num"><b>{{ bid.prices[key] | money }}</b></td>
+      {% if bid.cost %}<td class="num {{ 'neg' if bid.margins[key] < 0 }}">{{ bid.margins[key] | money }}</td>{% endif %}</tr>
+    {% endfor %}
+  </table></div>
+  <ul class="bid-facts">
+    <li>{{ _("Плановая сумма лота:") }} <b>{{ bid.amount | money }} ₸</b></li>
+    {% if bid.offers %}<li>{{ _("Участников в среднем:") }} <b>{{ "%.1f" | format(bid.offers) }}</b></li>{% endif %}
+    {% if bid.single is not none %}<li>{{ _("Одна заявка — в") }} <b>{{ "%.0f" | format(bid.single * 100) }}%</b> {{ _("похожих лотов: там побеждают почти без снижения") }}</li>{% endif %}
+    {% if bid.failed_share is not none %}<li>{{ _("Не состоялись:") }} <b>{{ "%.0f" | format(bid.failed_share * 100) }}%</b></li>{% endif %}
+    {% if bid.cost %}<li>{{ _("Себестоимость — по самой дешёвой цене из поиска товаров:") }} <b>{{ bid.cost | money }} ₸</b></li>
+    {% else %}<li class="muted">{{ _("Маржа появится, когда поиск товаров найдёт товар с ценой.") }}</li>{% endif %}
+  </ul>
+  <div data-bid-advice data-src="/lots/{{ lot.id }}/bid-advice">{% set advice = bid_advice %}{% include "bid_advice_fragment.html" %}</div>
+  <p class="muted note">{{ _("Цифры — статистика прошлых итогов, а не гарантия победы. Не опускайтесь ниже себестоимости с доставкой и налогами; при сильном демпинге заказчик может запросить обоснование цены.") }}</p>
+  {% elif request.state.paid %}
+  <p class="muted">{{ _("Похожих завершённых закупок пока нет — посчитать цену не из чего.") }}</p>
+  {% else %}
+  <p>{{ _("Посчитаем по итогам похожих закупок за год: на сколько обычно снижают цену, сколько участников, три цены заявки — осторожная, обычная, агрессивная — и маржу по найденному товару. ИИ объяснит простыми словами.") }}</p>
+  <button type="button" class="primary" data-paid data-feature="bid_price">💡 {{ _("Рассчитать цену заявки") }} 🔒</button>
+  {% endif %}
+</section>
+</div>
 
 {% if has_results %}<div data-panel="results" id="results" hidden>
 {% if lot.id in results %}

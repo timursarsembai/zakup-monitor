@@ -157,3 +157,32 @@ const PAGE = document.querySelector("[data-lot-page]");
   dialog.querySelector("[data-p-close]").addEventListener("click", () => { current = null; dialog.close(); });
   dialog.addEventListener("close", () => { current = null; });
 })();
+
+// Цена заявки: объяснение от ИИ по кнопке — запуск и опрос фрагмента, пока готовится.
+(() => {
+  const box = document.querySelector("[data-bid-advice]");
+  if (!box) return;
+  const poll = async () => {
+    try {
+      const response = await fetch(box.dataset.src);
+      if (response.ok && !response.redirected) box.innerHTML = await response.text();
+    } catch {}
+    const status = box.querySelector("[data-advice-status]")?.dataset.adviceStatus;
+    if (status === "queued" || status === "running") setTimeout(poll, 3000);
+  };
+  box.addEventListener("click", async (event) => {
+    if (!event.target.closest("[data-advice-start]")) return;
+    box.innerHTML = '<p><span class="spinner"></span></p>';
+    const response = await fetch(box.dataset.src, { method: "POST" }).catch(() => null);
+    if (response && !response.ok) {
+      // Например, дневной лимит (429): показать причину, а не молча вернуть кнопку.
+      const detail = await response.json().then((data) => data.detail).catch(() => null);
+      box.innerHTML = '<p class="muted"></p>';
+      box.firstChild.textContent = detail || CONFIG.t.load_failed;
+      return;
+    }
+    poll();
+  });
+  const status = box.querySelector("[data-advice-status]")?.dataset.adviceStatus;
+  if (status === "queued" || status === "running") setTimeout(poll, 3000);
+})();

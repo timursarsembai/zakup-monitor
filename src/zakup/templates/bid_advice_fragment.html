@@ -1,0 +1,13 @@
+{# Объяснение цены заявки от ИИ (zakup.bids): пока готовится — вкладка опрашивает фрагмент. #}
+<div data-advice-status="{{ advice.status if advice else 'none' }}">
+{% if not advice %}
+  <button type="button" class="primary" data-advice-start>💡 {{ _("Объяснить простыми словами (ИИ)") }}</button>
+{% elif advice.status in ("queued", "running") %}
+  <p class="muted"><span class="spinner"></span> {{ _("ИИ разбирает цифры — обычно 10–20 секунд…") }}</p>
+{% elif advice.status == "error" %}
+  <p class="muted">{{ _("Не удалось объяснить:") }} {{ advice.error }} <button type="button" data-advice-start>{{ _("Попробовать ещё раз") }}</button></p>
+{% else %}
+  {% set text = advice.result.kk if lang() == "kk" and advice.result.kk else advice.result.text %}
+  <div class="advice-text">💡 {{ text }}</div>
+{% endif %}
+</div>

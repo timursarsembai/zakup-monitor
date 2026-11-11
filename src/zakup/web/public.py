@@ -19,6 +19,7 @@ from fastapi.responses import RedirectResponse, Response
 from zakup import (
     SITE_URL,
     ai_config,
+    bids,
     branding,
     catalog,
     dashboard,
@@ -662,6 +663,10 @@ def lot_page(request: Request, user: Viewer, lot_id: int, background: Background
         lot_info = research.lot_context(conn, lot_id)
         provider = ai_config.provider(conn)
         rivals = suppliers.for_lot(conn, lot_id, sup or None, paid=bool(request.state.paid))
+        # Цена заявки — платная часть (сотрудникам — всегда); маржа — по найденному в подборе.
+        bid = bids.compute(conn, lot_id, ((done or {}).get("result") or {}).get("items")) \
+            if request.state.paid else None
+        bid_advice = bids.of(conn, lot_id) if request.state.paid else None
     if user:
         _audit(request, user, "view_lot", f"/lots/{lot_id}")
     context.update(lot=lot, others=[other for other in context["lots"] if other["id"] != lot_id],
@@ -671,6 +676,7 @@ def lot_page(request: Request, user: Viewer, lot_id: int, background: Background
                        lot_info, research.default_region(lot_info) if lot_info else ""),
                    provider_name=research.PROVIDERS.get(provider, provider),
                    targets=research.TARGETS, rivals=rivals, rivals_shown=suppliers.SHOWN,
+                   bid=bid, bid_advice=bid_advice,
                    is_admin=request.state.role == "admin")
     return templates.TemplateResponse(request, "lot.html", context)
 
