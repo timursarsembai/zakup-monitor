@@ -40,11 +40,20 @@ RESULT_SCHEMA = {
                     "note_kk": {"type": "string"},
                     "matches_kk": {"type": "array", "items": {"type": "string"}},
                     "mismatches_kk": {"type": "array", "items": {"type": "string"}},
+                    # Характеристики самого товара со страницы продавца — для каталога.
+                    "specs": {"type": "array", "items": {
+                        "type": "object",
+                        "properties": {"name": {"type": "string"}, "value": {"type": "string"}},
+                        "required": ["name", "value"]}},
+                    # false — цену взял из нашего каталога, страницу не открывал.
+                    "checked": {"type": "boolean"},
                 },
                 "required": ["name", "seller", "city", "in_region", "price", "unit_price",
                              "url", "image", "fit"],
             },
         },
+        # Товары из каталога, которых больше нет в наличии (страница не открывается).
+        "unavailable": {"type": "array", "items": {"type": "string"}},
     },
     "required": ["region_searched", "summary", "items"],
 }
@@ -80,7 +89,7 @@ ITEM, формат в конце задания). Не копи их до кон
    Цена за единицу у продавца должна быть НИЖЕ цены в лоте ({price} тенге): иначе
    поставщик уйдёт в минус. Дороже или по той же цене — не бери, ищи дешевле.
    Если подходящих меньше — верни сколько есть: не добавляй неподходящее ради
-   количества. Ничего не нашёл — пустой список items.{exclude}{kaspi}
+   количества. Ничего не нашёл — пустой список items.{catalog}{exclude}{kaspi}
 4. Для каждого предложения:
    - name — название товара у продавца; seller — магазин или компания; city — город;
    - in_region — true, если продавец в регионе поставки ({region});
@@ -105,6 +114,11 @@ ITEM, формат в конце задания). Не копи их до кон
    - matches — параметры из техспецификации, которым товар соответствует
      (коротко: «массив дерева», «101×60×48 см»); mismatches — параметры, которым
      НЕ соответствует или которые на странице не указаны (с пометкой «не указано»);
+   - specs — характеристики САМОГО товара со страницы продавца (не сравнение со
+     спецификацией): название → значение, как на странице, до 15 главных («Материал» →
+     «массив дуба», «Размер» → «120×60×75 см», «Масса заряда» → «2 кг»);
+   - checked — true, если открывал страницу товара в этом поиске; false — только для
+     товаров из нашего каталога со свежей ценой, которые ты не открывал;
    - note — что ещё важно (наличие, срок, доставка);
    - note_kk, matches_kk, mismatches_kk — те же тексты на казахском языке (перевод, пункт
      в пункт; числа, размеры, марки и стандарты не меняй). Ищешь при этом по-русски.
@@ -178,7 +192,7 @@ SUMMARY_PROMPT = """Сделай краткую выжимку техничес�
 def build_prompt(context: dict[str, Any], region: str, whole_kz: bool,
                  sources_text: str = "", categories: list[str] | None = None,
                  target: int = 10, exclude: list[str] | None = None,
-                 known_sellers: str = "", kaspi_text: str = "") -> str:
+                 known_sellers: str = "", kaspi_text: str = "", catalog_text: str = "") -> str:
     exclude_text = ""
     if exclude:
         # «Найти ещё»: уже найденное не повторяем — нужны только новые предложения.
@@ -189,6 +203,7 @@ def build_prompt(context: dict[str, Any], region: str, whole_kz: bool,
         exclude=exclude_text,
         known_sellers=known_sellers or "     (пока нет)",
         kaspi=kaspi_text,
+        catalog=catalog_text,
         sources=sources_text or "   (пока нет — ищи сам)",
         categories=", ".join(categories or []) or "например «Мебель», «Канцтовары», «Оргтехника»",
         **{key: value if value not in (None, "") else "—" for key, value in context.items()

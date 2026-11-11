@@ -50,6 +50,8 @@ def clean(result: dict[str, Any]) -> dict[str, Any]:
             "note_kk": str(item.get("note_kk") or "").strip()[:500],
             "matches_kk": _strings(item.get("matches_kk")),
             "mismatches_kk": _strings(item.get("mismatches_kk")),
+            "specs": _specs(item.get("specs")),
+            "checked": item.get("checked") is not False,
         })
     items.sort(key=lambda i: (not i["in_region"], i["unit_price"] is None, i["unit_price"] or 0))
     return {
@@ -58,7 +60,20 @@ def clean(result: dict[str, Any]) -> dict[str, Any]:
         "summary": str(result.get("summary") or "")[:2000],
         "summary_kk": str(result.get("summary_kk") or "")[:2000],
         "items": items[:30],
+        "unavailable": [str(u)[:1000] for u in result.get("unavailable") or []
+                        if str(u).startswith(("https://", "http://"))][:30],
     }
+
+
+def _specs(value: Any) -> list[dict[str, str]]:
+    """Характеристики товара: пары «название — значение», не больше 20."""
+    if not isinstance(value, list):
+        return []
+    pairs = []
+    for spec in value:
+        if isinstance(spec, dict) and str(spec.get("name") or "").strip() and str(spec.get("value") or "").strip():
+            pairs.append({"name": _cut(str(spec["name"]).strip(), 80), "value": _cut(str(spec["value"]).strip(), 200)})
+    return pairs[:20]
 
 
 def _cut(text: str, limit: int) -> str:

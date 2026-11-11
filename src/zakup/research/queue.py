@@ -9,7 +9,8 @@ from typing import Any
 import psycopg
 from psycopg.types.json import Jsonb
 
-from zakup import ai_config, contacts, credits, sources
+from zakup import ai_config, contacts, credits, products, sources
+from zakup.goszakup import PORTAL_TZ
 from zakup.research import providers as prov
 from zakup.research.context import (
     clean_region,
@@ -220,17 +221,33 @@ def _partial_saver(conn: psycopg.Connection, job: dict[str, Any], base: dict[str
     return save
 
 
+def _to_catalog(conn: psycopg.Connection, lot_id: int, found: dict[str, Any], offered: set[str]) -> None:
+    """Каталог — польза сверху: его сбой (блокировка и т.п.) не должен стоить готового поиска."""
+    try:
+        with conn.transaction():
+            products.remember(conn, lot_id, found.get("items") or [], found.get("unavailable"), offered)
+        conn.commit()
+    except psycopg.Error as exc:
+        conn.rollback()
+        logger.warning("catalog update for lot %s failed: %s", lot_id, exc)
+
+
 def run_job(conn: psycopg.Connection, job: dict[str, Any]) -> dict[str, Any]:
     context = lot_context(conn, job["lot_id"])
     if context is None:
         raise ResearchError("нет данных лота — откройте страницу объявления, чтобы их загрузить")
     base = _base_result(conn, job)
+    # Сначала — уже найденное раньше (zakup.products): в интернете — только недостающее.
+    exclude = [i["url"] for i in (base or {}).get("items", [])]
+    known = products.candidates(conn, job["lot_id"], context.get("name") or "", exclude=exclude,
+                                max_price=context.get("price"))
     prompt = build_prompt(context, job["region"], job["whole_kz"],
                           sources.for_prompt(conn), sources.known_categories(conn),
                           target=job.get("target") or 10,
-                          exclude=[i["url"] for i in (base or {}).get("items", [])],
+                          exclude=exclude,
                           known_sellers=contacts.known_for_prompt(conn),
-                          kaspi_text=_kaspi_candidates(conn, context, base))
+                          kaspi_text=_kaspi_candidates(conn, context, base),
+                          catalog_text=products.for_prompt(known))
     key = api_key(conn, job["provider"])
     # Поиск идёт минутами: не держим транзакцию открытой.
     conn.commit()
@@ -240,9 +257,21 @@ def run_job(conn: psycopg.Connection, job: dict[str, Any]) -> dict[str, Any]:
     else:
         runner = prov._anthropic if job["provider"] == "anthropic" else prov._openai
         found = clean(runner(prompt, job["model"], key))
+    # В каталог — всё найденное, и то, что дороже этого лота (пригодится лотам подороже).
+    _to_catalog(conn, job["lot_id"], found, {products.url_key(r["url"]) for r in known})
     found = without_loss(found, context.get("price"))
     # Телефоны, которые ИИ не увидел (лежат в коде страницы), — достаём сами.
     contacts.enrich(found, conn)
+    # У каждой цены — дата, когда её видели на странице (у взятых из каталога — прежняя).
+    found.pop("unavailable", None)
+    try:
+        dates = products.checked_dates(conn, [i["url"] for i in found.get("items") or []])
+    except psycopg.Error:
+        conn.rollback()
+        dates = {}
+    for item in found.get("items") or []:
+        if (at := dates.get(products.url_key(item["url"]))) is not None:
+            item["price_date"] = at.astimezone(PORTAL_TZ).isoformat()
     conn.commit()
     if base:
         # Новое — в справочник источников; в результат — прошлое плюс новое.

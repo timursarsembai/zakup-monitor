@@ -24,6 +24,9 @@ TOOL = {
             "price_unit": {"type": "string"}, "unit_price": {"type": ["number", "null"]},
             "url": {"type": "string"}, "image": {"type": ["string", "null"]},
             "fit": {"type": "string", "enum": ["полностью", "частично", "аналог"]},
+            "specs": {"type": "array", "items": {"type": "object", "properties": {
+                "name": {"type": "string"}, "value": {"type": "string"}}}},
+            "checked": {"type": "boolean"},
         },
         "required": ["name", "url"],
     },
