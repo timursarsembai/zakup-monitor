@@ -26,7 +26,7 @@ from zakup.incidents import redact
 logger = logging.getLogger(__name__)
 
 REPO = Path(__file__).resolve().parents[2]
-SERVICES = ("worker", "archive", "specs", "skk", "research", "bot", "client-bot", "web", "web-2", "gateway")
+SERVICES = ("worker", "archive", "specs", "skk", "reserve", "research", "bot", "client-bot", "web", "web-2", "gateway")
 # Здесь в логах — текст от посетителей сайта: только число строк.
 PUBLIC_SERVICES = ("web", "web-2", "gateway")
 DIFF_LIMIT = 40_000

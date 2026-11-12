@@ -32,6 +32,24 @@ const PAGE = document.querySelector("[data-lot-page]");
       pending = null;
     });
   })();
+  // Поиск отправлен (подтверждение пройдено) — кнопка неактивна до ответа сервера, чтобы второй
+  // клик не запустил ещё один поиск. Вернулись «назад» из кэша браузера — снова активна.
+  document.addEventListener("submit", (event) => {
+    const form = event.target.closest("[data-search]");
+    if (!form || event.defaultPrevented) return;
+    const button = form.querySelector("button.primary");
+    if (!button) return;
+    button.dataset.label = button.innerHTML;
+    button.disabled = true;
+    button.textContent = CONFIG.t.searching;
+  });
+  window.addEventListener("pageshow", (event) => {
+    if (!event.persisted) return;
+    document.querySelectorAll("[data-search] button.primary[data-label]").forEach((button) => {
+      button.innerHTML = button.dataset.label;
+      button.disabled = false;
+    });
+  });
   // «Что спросить у поставщика»: чек-лист от ИИ по кнопке; готовый — общий для всех.
   const qDialog = document.getElementById("questions");
   const qBody = qDialog.querySelector("[data-q-body]");

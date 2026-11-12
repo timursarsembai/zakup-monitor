@@ -144,6 +144,13 @@ def _keep_plans(conn: psycopg.Connection, item: dict[str, Any]) -> bool:
 
 
 def save(conn: psycopg.Connection, item: dict[str, Any]) -> None:
+    if not item.get("source") and not any(not lot.get("isDeleted") for lot in item.get("Lots") or []):
+        # Лоты уже взяты с платформы (zakup.reserve), а OWS их ещё не отдаёт (запаздывает на
+        # 10–20 минут) — не затираем; refresh спросит OWS снова на следующем круге.
+        if conn.execute("SELECT 1 FROM announcements WHERE id = %s AND lots_ready AND detail ? 'source'",
+                        (int(item["id"]),)).fetchone():
+            conn.execute("UPDATE announcements SET details_fetched_at = now() WHERE id = %s", (int(item["id"]),))
+            return
     plans_missing = _keep_plans(conn, item)
     fields, lots = parse(item)
     conn.execute(
@@ -320,6 +327,11 @@ def refresh(conn: psycopg.Connection, client: Client, limit: int) -> int:
                       -- Пунктов плана (цена за единицу, единица) у части лотов ещё нет — OWS
                       -- дописывает их позже: первые 6 часов раз в 10 минут, до 3 суток раз в 2 часа,
                       -- дальше — как все, раз в сутки (бывают лоты, где пунктов так и нет).
+                      -- Подробности пока с платформы (zakup.reserve): ждём OWS (файлы, протоколы) —
+                      -- как объявления без лотов: первые 3 часа на каждом круге, дальше раз в час.
+                      OR (detail ? 'source' AND details_fetched_at < now() - CASE
+                              WHEN coalesce(publish_date, now()) > now() - interval '3 hours' THEN interval '1 minute'
+                              ELSE interval '1 hour' END)
                       OR (plans_missing AND coalesce(publish_date, now()) > now() - interval '3 days'
                           AND details_fetched_at < now() - CASE
                               WHEN coalesce(publish_date, now()) > now() - interval '6 hours' THEN interval '10 minutes'

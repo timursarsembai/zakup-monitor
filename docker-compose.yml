@@ -197,6 +197,23 @@ services:
     mem_limit: 256m
     logging: *logging
 
+  # Резерв госзакупок с платформы zakup.gov.kz (zakup.reserve): свежие объявления раньше OWS и
+  # пункты плана, которых нет в OWS. Проход раз в 2 минуты, запрос к платформе — раз в секунду.
+  reserve:
+    <<: *hardening
+    image: zakup
+    container_name: zakup-reserve
+    restart: unless-stopped
+    init: true
+    depends_on:
+      worker:
+        condition: service_started
+    entrypoint: ["zakup", "reserve", "--loop"]
+    environment: *db-env
+    cpus: 0.5
+    mem_limit: 256m
+    logging: *logging
+
   # Поиск товаров под лоты через API OpenAI/Anthropic (ключи пользователей).
   # Claude Code по подписке работает не здесь, а на хосте: deploy/zakup-research.service.
   research:
