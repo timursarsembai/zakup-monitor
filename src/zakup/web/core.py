@@ -138,6 +138,7 @@ templates.env.globals["open_statuses"] = set(OPEN_STATUSES)
 
 
 templates.env.globals["site_url"] = SITE_URL
+templates.env.globals["trial_days"] = auth.TRIAL_DAYS
 # Компьютер: фильтр поиска — строкой условий сверху (как на телефоне) с выпадающими шторками.
 # Не понравится — False: вернётся прежний фильтр целиком справа от результатов.
 DESKTOP_CHIPS = True

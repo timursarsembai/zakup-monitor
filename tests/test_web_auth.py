@@ -134,3 +134,25 @@ def test_sms_limits_protect_balance(client, conn, monkeypatch):
         client.post("/forgot", data={"phone": "87011112233"}, headers=ORIGIN)
     blocked = client.post("/forgot", data={"phone": "87011112233"}, headers=ORIGIN)
     assert blocked.status_code == 429 and len(sent) == signup.PER_IP_HOUR
+
+
+def test_reregistration_does_not_give_second_trial(client, conn, monkeypatch):
+    _fake_sms(monkeypatch)
+    signup.set_registration_open(conn, True)
+    conn.commit()
+
+    def register():
+        page = client.post("/register", data={"phone": "87011112233"}, headers=ORIGIN)
+        data = {"flow": _flow(page.text), "code": "1234", "password": "long-password-1",
+                "password2": "long-password-1"}
+        assert client.post("/register/code", data=data, headers=ORIGIN, follow_redirects=False).status_code == 303
+        client.post("/logout", headers=ORIGIN)
+
+    register()
+    # Проба кончилась, аккаунт удалили, администратор разрешил зарегистрироваться заново.
+    conn.execute("""UPDATE users SET trial_until = now() - interval '1 day', deleted_at = now(),
+                    may_reregister = true WHERE email = '+77011112233'""")
+    conn.commit()
+    register()
+    assert conn.execute("""SELECT trial_until < now() FROM users
+                           WHERE email = '+77011112233'""").fetchone() == (True,)

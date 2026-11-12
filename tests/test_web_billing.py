@@ -228,3 +228,15 @@ def test_trial_month_opens_paid_features_but_not_free_searches(client, conn):
                  (uid,))
     conn.commit()
     assert client.post("/pay/searches", data={"count": "20"}, headers=ORIGIN).status_code == 402
+
+
+def test_admin_grant_during_trial_adds_days_after_trial(client, conn):
+    auth.set_password(conn, "+77011112233", "client-password-1")
+    conn.execute("""UPDATE users SET role = 'user', trial_until = now() + interval '10 days'
+                    WHERE email = '+77011112233'""")
+    uid = conn.execute("SELECT id FROM users WHERE email = '+77011112233'").fetchone()[0]
+    conn.commit()
+    _login(client)
+    client.post(f"/settings/users/{uid}/access", data={"days": "30"}, headers=ORIGIN)
+    left = conn.execute("SELECT paid_until - now() FROM users WHERE id = %s", (uid,)).fetchone()[0]
+    assert 39 <= left.days <= 40

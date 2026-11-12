@@ -75,9 +75,9 @@ def _send(chat_id: int | str, text: str) -> None:
 def _user_by_tg(conn: psycopg.Connection, tg_id: int) -> tuple | None:
     """(id, логин, есть ли доступ) по Telegram-аккаунту, привязанному к клиентскому боту."""
     return conn.execute(
-        """SELECT id, email, role IN ('admin', 'moderator')
-                  OR coalesce(greatest(paid_until, trial_until) > now(), false)
-           FROM users WHERE telegram_chat_id = %s AND deleted_at IS NULL AND NOT disabled""",
+        f"""SELECT u.id, u.email, u.role IN ('admin', 'moderator')
+                  OR coalesce({auth.ACCESS_UNTIL} > now(), false)
+           FROM users u WHERE u.telegram_chat_id = %s AND u.deleted_at IS NULL AND NOT u.disabled""",
         (f"{telegram.CLIENT_PREFIX}{tg_id}",),
     ).fetchone()
 

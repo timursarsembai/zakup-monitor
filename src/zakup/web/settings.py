@@ -255,7 +255,7 @@ def grant_access(request: Request, admin: Admin, user_id: int, days: Annotated[i
         until = conn.execute(
             # «Снять» убирает и пробный месяц.
             """UPDATE users SET paid_until = CASE WHEN %s = 0 THEN NULL
-                   ELSE greatest(coalesce(paid_until, now()), now()) + make_interval(days => %s) END,
+                   ELSE greatest(paid_until, trial_until, now()) + make_interval(days => %s) END,
                    trial_until = CASE WHEN %s = 0 THEN NULL ELSE trial_until END
                WHERE id = %s RETURNING paid_until""",
             (days, days, days, user_id),

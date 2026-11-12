@@ -713,6 +713,11 @@ def test_calculator_open_to_all_and_prefilled_from_lot(client, conn):
     assert 'name="dump_pct" type="number" min="0" max="100" step="any" value="10"' in lot
     assert 'href="/lots/5001"' in lot and "по подписке" in lot  # гостю — без цены заявки и себестоимости
     assert "Лот не найден" in client.get("/calculator?lot=999999").text
+    conn.execute("UPDATE announcements SET trade_method_id = 999 WHERE id = 500")  # способ без правил
+    conn.commit()
+    assert "неизвестны" in client.get("/calculator?lot=5001").text
+    conn.execute("UPDATE announcements SET trade_method_id = 3 WHERE id = 500")
+    conn.commit()
     # Ссылка на калькулятор — со страницы лота.
     assert "/calculator?lot=5001" in client.get("/lots/5001").text
     # Сотрудник (платное) — подсказка про подписку не показывается.

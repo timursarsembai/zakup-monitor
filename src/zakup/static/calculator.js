@@ -92,7 +92,8 @@
       mp.className = d.profit < 0 ? "neg" : "pos";
       mini.querySelector('[data-mini="margin"]').textContent = `${(d.margin * 100).toFixed(1).replace(".", ",")}%`;
     }
-    const even = lowest(t, (x) => x.profit >= 0);
+    // Цена, при которой заявку отклонят (ниже порога, где антидемпинг не разрешён), — не ответ.
+    const even = lowest(t, (x) => !x.rejected && x.profit >= 0);
     set("breakeven", even === null ? "—" : money(even));
     set("peak", money(d.peak));
     set("price", money(d.price));
@@ -110,7 +111,7 @@
     set("anti", money(d.anti));
     set("goods", money(d.goods));
     const target = parseFloat(String(out.querySelector("[data-target]").value).replace(",", ".")) / 100;
-    const want = Number.isFinite(target) ? lowest(t, (x) => x.margin >= target) : null;
+    const want = Number.isFinite(target) ? lowest(t, (x) => !x.rejected && x.margin >= target) : null;
     set("target_price", want === null ? "—" : money(want) + (t.amount && want > t.amount ? ` · ${T.above}` : ""));
     const warn = [];
     if (t.amount && price > t.amount) warn.push(["bad", T.above]);
@@ -122,7 +123,7 @@
   };
 
   // Режим налога меняет ставку на обычную для него (своя ставка — после выбора режима).
-  f.regime.addEventListener("change", () => {
+  f.regime.addEventListener("input", () => {
     f.tax_rate.value = f.regime.selectedOptions[0].dataset.rate;
   });
   try {
@@ -138,8 +139,8 @@
         KEEP.map((key) => [key, f[key].type === "checkbox" ? f[key].checked : f[key].value]))));
     } catch (e) { /* приватный режим */ }
   };
+  // «input» срабатывает и у галочек, и у списков — «change» не нужен (иначе пересчёт дважды).
   form.addEventListener("input", () => { render(); remember(); });
-  form.addEventListener("change", () => { render(); remember(); });
   out.querySelector("[data-target]").addEventListener("input", render);
   render();
   // Строка-итог на телефоне видна, пока сам результат за экраном; нажатие — к результату.

@@ -438,7 +438,7 @@
     <p class="muted">{{ _("Поиск товаров под лот с ИИ — отдельно: 250 ₸ за поиск, пакетами.") }}</p>
     <div class="pw-actions">
       {% if request.state.user_id %}<a class="pw-buy" href="/pricing">{{ _("Подключить тариф") }}</a>
-      {% else %}<a class="pw-buy" href="/register">{{ _("Зарегистрироваться — 30 дней бесплатно") }}</a>
+      {% else %}<a class="pw-buy" href="/register">{{ _("Зарегистрироваться — {days} дней бесплатно", days=trial_days) }}</a>
       <a href="/login?next={{ request.url.path | urlencode }}">{{ _("Уже есть аккаунт? Войти") }}</a>{% endif %}
     </div>
   </div>

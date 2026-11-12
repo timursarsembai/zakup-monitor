@@ -226,7 +226,7 @@ def _finish(request: Request, purpose: str, flow: str, code: str, password: str,
         except signup.SignupError as error:
             return _code_page(request, purpose, flow, phone, i18n.gettext(str(error)), 422)
         if purpose == "register":
-            old = conn.execute("SELECT id, deleted_at, may_reregister FROM users WHERE email = %s",
+            old = conn.execute("SELECT id, deleted_at, may_reregister, trial_until FROM users WHERE email = %s",
                                (phone,)).fetchone()
             if old and old[1] is None:
                 return _phone_page(request, purpose, phone, i18n.gettext(
@@ -241,11 +241,11 @@ def _finish(request: Request, purpose: str, flow: str, code: str, password: str,
                 conn.execute("UPDATE users SET email = %s, phone = NULL WHERE id = %s",
                              (f"{phone}#deleted-{old[0]}", old[0]))
             user_id = auth.set_password(conn, phone, password)
-            # Пробный месяц — один раз на номер: повторная регистрация после удаления — только
-            # с разрешения администратора (may_reregister).
+            # Пробный месяц — один раз на номер: при повторной регистрации после удаления
+            # срок пробы переходит со старой записи (новый не даём).
             conn.execute("""UPDATE users SET phone = %s, role = 'user',
-                                trial_until = now() + make_interval(days => %s) WHERE id = %s""",
-                         (phone, auth.TRIAL_DAYS, user_id))
+                                trial_until = coalesce(%s, now() + make_interval(days => %s)) WHERE id = %s""",
+                         (phone, old[3] if old else None, auth.TRIAL_DAYS, user_id))
         else:
             user_id = auth.set_password(conn, phone, password)
         conn.execute("UPDATE users SET ui_lang = %s WHERE id = %s", (i18n.language(), user_id))

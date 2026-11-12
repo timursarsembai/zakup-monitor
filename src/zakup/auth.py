@@ -153,6 +153,13 @@ def create_session(conn: psycopg.Connection, user_id: int, user_agent: str | Non
     return token
 
 
+# До какого момента у клиента платный доступ: оплата или пробный месяц, что позже
+# (greatest пропускает NULL). Условие на таблицу users под псевдонимом u.
+ACCESS_UNTIL = "greatest(u.paid_until, u.trial_until)"
+# Пробный месяц после регистрации: всё платное, кроме поиска товаров с ИИ (он — по балансу поисков).
+TRIAL_DAYS = 30
+
+
 def user_by_session(conn: psycopg.Connection, token: str | None) -> tuple | None:
     """(id, логин, роль, есть ли доступ к платному, остаток поисков, кто из администраторов
     вошёл под этим пользователем — или None) по cookie сессии.
@@ -161,8 +168,8 @@ def user_by_session(conn: psycopg.Connection, token: str | None) -> tuple | None
     if not token:
         return None
     return conn.execute(
-        """SELECT u.id, u.email, u.role,
-                  u.role IN ('admin', 'moderator') OR coalesce(greatest(u.paid_until, u.trial_until) > now(), false),
+        f"""SELECT u.id, u.email, u.role,
+                  u.role IN ('admin', 'moderator') OR coalesce({ACCESS_UNTIL} > now(), false),
                   (SELECT coalesce(sum(g.delta), 0) FROM search_ledger g WHERE g.user_id = u.id),
                   s.impersonated_by
            FROM sessions s JOIN users u ON u.id = s.user_id
@@ -184,11 +191,6 @@ STAFF_ROLES = ("admin", "moderator")
 CLIENT_SQL = "u.role = 'user' AND u.deleted_at IS NULL"
 # Кому положены уведомления (подписки, напоминания): сотрудникам и клиентам с тарифом.
 # Условие на таблицу users под псевдонимом u.
-# До какого момента у клиента платный доступ: оплата или пробный месяц, что позже
-# (greatest пропускает NULL). Условие на таблицу users под псевдонимом u.
-ACCESS_UNTIL = "greatest(u.paid_until, u.trial_until)"
-# Пробный месяц после регистрации: всё платное, кроме поиска товаров с ИИ (он — по балансу поисков).
-TRIAL_DAYS = 30
 ENTITLED_SQL = (f"(u.role IN ('admin', 'moderator') OR {ACCESS_UNTIL} > now()) "
                 "AND NOT u.disabled AND u.deleted_at IS NULL")
 ROLES = {"admin": "администратор", "moderator": "модератор", "user": "пользователь"}

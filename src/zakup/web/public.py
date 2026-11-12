@@ -340,12 +340,9 @@ def calculator_page(request: Request, user: Viewer, lot: int | None = None):
                 terms = {key: facts[key] for key in ("securities", "method", "amount", "prepayment", "subject")}
                 deposits = securities.for_lot(**terms) or {}
                 usual = cost = None
-                if request.state.paid:
-                    _, done = _research_view(request, conn, user, lot) if user else (None, None)
-                    items = ((done or {}).get("result") or {}).get("items")
-                    bid, _, _ = _lot_numbers(conn, lot)
-                    if items:
-                        bid = bids.compute(conn, lot, items)
+                if user and request.state.paid:
+                    _, done = _research_view(request, conn, user, lot)
+                    bid = _priced_bid(conn, lot, done)
                     usual = bid["prices"]["usual"] if bid else None
                     cost = bid["cost"] if bid else None
                 prefill = {"id": lot, "name": facts["name"], "announcement": facts["announcement"],
@@ -725,6 +722,15 @@ def _lot_numbers(conn, lot_id: int) -> tuple[dict | None, dict, list]:
     return bid, insight, similar
 
 
+def _priced_bid(conn, lot_id: int, done: dict | None, cached: dict | None = None) -> dict | None:
+    """Цена заявки для подписчика: с найденными им в подборе товарами — с маржой (считаем
+    заново, без кэша); без них — общая статистика из кэша (_lot_numbers)."""
+    items = ((done or {}).get("result") or {}).get("items")
+    if items:
+        return bids.compute(conn, lot_id, items)
+    return cached if cached is not None else _lot_numbers(conn, lot_id)[0]
+
+
 @router.get("/lots/{lot_id}")
 def lot_page(request: Request, user: Viewer, lot_id: int, background: BackgroundTasks, sup: str = ""):
     with core.pool.connection() as conn:
@@ -743,10 +749,9 @@ def lot_page(request: Request, user: Viewer, lot_id: int, background: Background
         rivals = suppliers.for_lot(conn, lot_id, sup or None, paid=bool(request.state.paid))
         # Статистика похожих итогов — для карточки «Стоит ли участвовать» всем; вкладка «Цена
         # заявки» (цены, снижение, маржа по найденному в подборе) — платная (сотрудникам — всегда).
-        items = ((done or {}).get("result") or {}).get("items")
         bid, insight, similar = _lot_numbers(conn, lot_id)
-        if items and request.state.paid:  # маржа — по найденному этим клиентом, без кэша
-            bid = bids.compute(conn, lot_id, items)
+        if request.state.paid:  # маржа — по найденному этим клиентом
+            bid = _priced_bid(conn, lot_id, done, bid)
         bid_advice = bids.of(conn, lot_id) if request.state.paid else None
         # Сколько заморозить: от плановой суммы; по подписке — и при обычной цене заявки.
         deposits = securities.for_lot(**insight["deposit_terms"],
