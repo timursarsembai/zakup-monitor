@@ -95,6 +95,12 @@ class Client:
         raise PlatformError(f"{path}: no successful response after retries")
 
 
+def results(page: Any) -> list[dict[str, Any]]:
+    """Строки ответа платформы: со страницами (limit) — {"results": [...]}, без — сразу список."""
+    rows = page if isinstance(page, list) else (page.get("results") if isinstance(page, dict) else None) or []
+    return [row for row in rows if isinstance(row, dict)]
+
+
 def _iso(value: Any) -> str | None:
     """Дата платформы: ISO-строка в списке, unix-время в карточке."""
     if value is None or value == "":
@@ -258,9 +264,9 @@ def _listing(client: Client, since: datetime) -> list[dict[str, Any]]:
         page = client.get("/announcements/", {"system_id": SYSTEM, "limit": PAGE, "offset": offset,
                                                "ordering": "-publish_date",
                                                "offer_end_date__gte": since.strftime("%Y-%m-%dT%H:%M:%S")})
-        items += page.get("results") or []
+        items += results(page)
         offset += PAGE
-        if not page.get("next"):
+        if not isinstance(page, dict) or not page.get("next"):
             break
     return items
 
@@ -282,7 +288,7 @@ def _old_reviews(conn: psycopg.Connection, client: Client, now: datetime) -> lis
         except PlatformError as error:
             logger.warning("skk %s: %s", number, error)
             continue
-        items += [i for i in page.get("results") or [] if i.get("announcement_number") == number]
+        items += [i for i in results(page) if i.get("announcement_number") == number]
     return items
 
 
@@ -323,7 +329,7 @@ def run(conn: psycopg.Connection, client: Client, now: datetime | None = None,
                     logger.warning("skk %s: %s", item["id"], error)
                     failed += 1
                     continue
-                fetched.append((item, card, lots if isinstance(lots, list) else lots.get("results") or []))
+                fetched.append((item, card, results(lots)))
             wanted = [b for _, card, lots in fetched for b in bins(card, lots)]
             legal_entities.ensure(conn, wanted, http)
             known_names = legal_entities.names(conn, wanted)

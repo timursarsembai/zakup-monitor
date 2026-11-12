@@ -24,7 +24,7 @@ import psycopg
 
 from zakup import db, details
 from zakup.goszakup import parse_date
-from zakup.skk import Client, PlatformError, _bin, _iso
+from zakup.skk import Client, PlatformError, _bin, _iso, results
 
 logger = logging.getLogger(__name__)
 
@@ -212,8 +212,7 @@ class Reserve:
         return (when := self.tried.get(key)) is not None and when > now - RETRY
 
     def _lots(self, platform_id: int) -> list[dict[str, Any]]:
-        lots = self.client.get(f"/announcements/{platform_id}/lots/")
-        return lots if isinstance(lots, list) else lots.get("results") or []
+        return results(self.client.get(f"/announcements/{platform_id}/lots/"))
 
     def _fresh(self, conn: psycopg.Connection, now: datetime) -> list[dict[str, Any]]:
         """Строки списка платформы, которых у нас нет или нет их лотов, — новые первыми."""
@@ -228,8 +227,7 @@ class Reserve:
                     # Список одной системы не отдаётся — другую и пункты плана всё равно делаем.
                     logger.warning("reserve list %s: %s", system, error)
                     break
-                rows = page.get("results") or [] if isinstance(page, dict) else []
-                items = [i for i in rows if isinstance(i, dict) and _ext(i)]
+                items = [i for i in results(page) if _ext(i)]
                 ready = {r[0] for r in conn.execute(
                     "SELECT id FROM announcements WHERE id = ANY(%s) AND lots_ready", ([_ext(i) for i in items],))}
                 conn.commit()
@@ -239,7 +237,7 @@ class Reserve:
                 quiet = 0 if new else quiet + 1
                 offset += PAGE
                 oldest = parse_date((items or [{}])[-1].get("publish_date"))
-                if not page.get("next") or (oldest and oldest < now - FRESH):
+                if not isinstance(page, dict) or not page.get("next") or (oldest and oldest < now - FRESH):
                     break
         todo.sort(key=lambda i: i.get("publish_date") or "", reverse=True)
         return todo
@@ -309,7 +307,7 @@ class Reserve:
                 found = []
                 for system in SYSTEMS:
                     page = self.client.get("/announcements/", {"system_id": system, "announcement_number": number})
-                    found = [i for i in page.get("results") or [] if _ext(i) == aid]
+                    found = [i for i in results(page) if _ext(i) == aid]
                     if found:
                         break
                 if not found:

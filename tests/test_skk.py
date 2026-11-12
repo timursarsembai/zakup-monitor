@@ -199,7 +199,7 @@ def test_unknown_status_bad_item_and_old_reviews(conn, monkeypatch):
         def get(self, path, params=None):
             if path == "/announcements/" and "announcement_number" in params:
                 self.calls.append(("number", params["announcement_number"]))
-                return {"results": [_item(status=16, end="2026-09-01T00:00:00+00:00")]}
+                return [_item(status=16, end="2026-09-01T00:00:00+00:00")]  # без limit — список
             if path == "/announcements/":
                 self.calls.append(path)
                 return {"results": [], "next": None}

@@ -55,8 +55,9 @@ class Platform:
         self.calls.append((path, dict(params or {})))
         if path == "/announcements/":
             if "announcement_number" in params:
-                return {"results": [r for r in self.rows if r["announcement_number"] == params["announcement_number"]
-                                    and r["system_id"] == params["system_id"]]}
+                # Без limit платформа отдаёт голый список, без {"results": …}.
+                return [r for r in self.rows if r["announcement_number"] == params["announcement_number"]
+                        and r["system_id"] == params["system_id"]]
             rows = [r for r in self.rows if r["system_id"] == params["system_id"]]
             return {"results": rows[params["offset"]:params["offset"] + params["limit"]], "next": None}
         pid = int(path.split("/")[2])
