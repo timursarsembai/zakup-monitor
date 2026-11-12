@@ -106,13 +106,15 @@ def _autofix(args) -> int:
 
 
 def _tidy(args) -> int:
-    from zakup import geo, sellers, visits
+    from zakup import geo, photos, sellers, visits
 
     with db.connect(config.database_url()) as conn:
         print(f"geo: {geo.update(conn)}, purged visits/events: {visits.purge(conn)}")
         # Товары каталога без продавца (прежние находки; новые связывает products.remember).
         print(f"sellers linked: {sellers.link(conn)}")
         conn.commit()
+        # Файлы фото без строки в базе (сбой загрузки) — том media есть и у архивного сборщика.
+        print(f"orphan photo files removed: {photos.sweep(conn)}")
     return 0
 
 

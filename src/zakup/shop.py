@@ -21,7 +21,7 @@ import psycopg
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
-from zakup import catalog, contacts, legal_entities, products
+from zakup import catalog, contacts, legal_entities, photos, products
 
 MAX_PRODUCTS = 2000
 MAX_PHONES = 3
@@ -307,11 +307,14 @@ def set_on_sale(conn: psycopg.Connection, seller_id: int, product_id: int, on_sa
                         (on_sale, product_id, seller_id)).rowcount == 1
 
 
-def delete_product(conn: psycopg.Connection, seller_id: int, product_id: int) -> bool:
+def delete_product(conn: psycopg.Connection, seller_id: int, product_id: int) -> list[str] | None:
     """Удалить можно только свой товар; найденный ИИ — только снять с продажи (иначе
-    следующий поиск добавит его снова)."""
-    return conn.execute("DELETE FROM product_catalog WHERE id = %s AND seller_id = %s AND own",
-                        (product_id, seller_id)).rowcount == 1
+    следующий поиск добавит его снова). Возвращает ключи файлов фото — удалить после
+    коммита (photos.remove); None — нет такого товара."""
+    keys = photos.keys(conn, product_id)
+    deleted = conn.execute("DELETE FROM product_catalog WHERE id = %s AND seller_id = %s AND own",
+                           (product_id, seller_id)).rowcount
+    return keys if deleted else None
 
 
 # --- «Это мой магазин» и модерация -----------------------------------------------------------

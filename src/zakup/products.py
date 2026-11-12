@@ -21,6 +21,7 @@ import psycopg
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
+from zakup import photos
 from zakup.goszakup import PORTAL_TZ
 
 FRESH_DAYS = 3
@@ -319,6 +320,7 @@ def get(conn: psycopg.Connection, product_id: int) -> dict[str, Any] | None:
     item["seller_row"] = cur.execute(
         "SELECT id, name, kind, verified, status, user_id, prices_with_vat FROM sellers WHERE id = %s",
         (item["seller_id"],)).fetchone() if item["seller_id"] else None
+    item["photos"] = photos.listing(conn, product_id) if item["own"] else []
     # Цены по количеству (свои товары продавцов): розница и оптовые ступени.
     item["tiers"] = cur.execute("SELECT min_qty, price FROM product_prices WHERE product_id = %s ORDER BY min_qty",
                                 (product_id,)).fetchall()

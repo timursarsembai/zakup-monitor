@@ -167,7 +167,9 @@ def _structured(item: dict, path: str) -> list[dict]:
     """Разметка schema.org для поисковиков: хлебные крошки и товар с ценой (Product/Offer)."""
     url = _url(path)
     product: dict = {"@context": "https://schema.org", "@type": "Product", "name": item["name"], "url": url}
-    if item.get("image"):
+    if item.get("photos"):
+        product["image"] = [SITE_URL + ph["url"] for ph in item["photos"]]
+    elif item.get("image"):
         product["image"] = item["image"]
     if item.get("specs"):
         product["additionalProperty"] = [

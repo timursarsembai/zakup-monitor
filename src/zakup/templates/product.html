@@ -15,6 +15,9 @@
   .prod-img { border: 1px solid var(--line); border-radius: 12px; background: #fff; aspect-ratio: 1; display: flex; align-items: center; justify-content: center; overflow: hidden; }
   .prod-img img { max-width: 100%; max-height: 100%; object-fit: contain; }
   .prod-img .none { color: #888; font-size: 14px; }
+  .prod-img a { display: contents; }
+  .thumbs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .thumbs img { width: 60px; height: 60px; object-fit: contain; background: #fff; border: 1px solid var(--line); border-radius: 6px; }
   .prod h1 { margin: 0 0 8px; font-size: 24px; line-height: 1.25; overflow-wrap: anywhere; }
   .price { font-size: 26px; font-weight: 700; margin: 6px 0 2px; }
   .facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 14px; margin: 14px 0; }
@@ -31,7 +34,14 @@
 {% block main %}
 <nav class="crumbs muted"><a href="/products">{{ _("Каталог товаров") }}</a>{% if item.division %} › <a href="/products?category={{ item.division }}">{{ division_name(item.division) or item.division }}</a>{% endif %}</nav>
 <div class="prod">
+  {% if item.photos %}
+  <div>
+    <div class="prod-img"><a href="{{ item.photos[0].url }}" target="_blank" rel="noopener"><img src="{{ item.photos[0].url }}" alt="{{ item.name }}" width="{{ item.photos[0].width }}" height="{{ item.photos[0].height }}"></a></div>
+    {% if item.photos|length > 1 %}<div class="thumbs">{% for ph in item.photos %}<a href="{{ ph.url }}" target="_blank" rel="noopener"><img src="{{ ph.thumb }}" alt="" loading="lazy"></a>{% endfor %}</div>{% endif %}
+  </div>
+  {% else %}
   <div class="prod-img">{% if item.image %}<img src="{{ item.image }}" alt="{{ item.name }}" referrerpolicy="no-referrer">{% else %}<span class="none">{{ _("Нет фото") }}</span>{% endif %}</div>
+  {% endif %}
   <div>
     <h1>{{ item.name }}</h1>
     {% if item.price is not none %}

@@ -111,6 +111,9 @@ services:
       - while true; do zakup subjects; zakup rescan; zakup details --part finished; zakup codes; zakup tidy; sleep 900; done
     environment:
       <<: [*db-env, *telegram-env, *portal-env]
+    volumes:
+      # tidy убирает файлы фото без строки в базе (zakup.photos.sweep).
+      - media:/data/media
     mem_limit: 256m
     logging: *logging
 
@@ -286,6 +289,9 @@ services:
       ZAKUP_SECRET_KEY: ${ZAKUP_SECRET_KEY:-}
       KAZPAYMENT_API_KEY: ${KAZPAYMENT_API_KEY:-}
       KAZPAYMENT_WEBHOOK_SECRET: ${KAZPAYMENT_WEBHOOK_SECRET:-}
+    volumes:
+      # Фото товаров продавцов (zakup.photos): пишут обе копии сайта, раздаёт шлюз.
+      - media:/data/media
     networks:
       default:
       webnet:
@@ -315,6 +321,7 @@ services:
     volumes:
       # Папка, а не файл: при замене файла (git) контейнер видит новую версию.
       - ./deploy/gateway:/etc/nginx/conf.d:ro
+      - media:/srv/media:ro
     ports:
       - "127.0.0.1:8096:8000"
     networks:
@@ -363,6 +370,8 @@ services:
 
 volumes:
   pgdata:
+  # Фото товаров (docs/CATALOG_PLAN.md, этап 4) — в ночной копии сервера (~/backups/make-backup.sh).
+  media:
 
 networks:
   proxy-network:

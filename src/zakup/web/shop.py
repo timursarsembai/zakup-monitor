@@ -4,9 +4,10 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import RedirectResponse
 
-from zakup import catalog, products, sellers, shop
+from zakup import catalog, photos, products, sellers, shop
 from zakup.web import core
 from zakup.web.core import MAX_PAGE, Staff, User, _audit, same_origin, templates
 
@@ -61,10 +62,12 @@ def _own_shop(conn, user: int) -> dict:
     return current
 
 
-def _product_form(request: Request, current: dict, item: dict, error: str | None = None, status_code: int = 200):
+def _product_form(request: Request, current: dict, item: dict, error: str | None = None, status_code: int = 200,
+                  photo_list: list | None = None, photo_error: str | None = None):
     return templates.TemplateResponse(request, "shop_product.html", {
         "shop": current, "item": item, "error": error, "units": shop.UNITS, "divisions": catalog.DIVISIONS,
-        "max_tiers": shop.MAX_TIERS, "product_path": products.path}, status_code=status_code)
+        "max_tiers": shop.MAX_TIERS, "product_path": products.path, "photos": photo_list or [],
+        "photo_error": photo_error, "max_photos": photos.MAX_PER_PRODUCT}, status_code=status_code)
 
 
 @router.get("/my/shop/products/new")
@@ -81,9 +84,10 @@ def product_edit(request: Request, user: User, product_id: int):
     with core.pool.connection() as conn:
         current = _own_shop(conn, user)
         item = shop.product(conn, current["id"], product_id)
-    if item is None:
-        raise HTTPException(404, "Нет такого товара")
-    return _product_form(request, current, item)
+        if item is None:
+            raise HTTPException(404, "Нет такого товара")
+        photo_list = photos.listing(conn, product_id)
+    return _product_form(request, current, item, photo_list=photo_list)
 
 
 @router.post("/my/shop/products", dependencies=[Depends(same_origin)])
@@ -124,10 +128,94 @@ def product_sale(request: Request, user: User, product_id: int, on: Field = ""):
 def product_delete(request: Request, user: User, product_id: int):
     with core.pool.connection() as conn:
         current = _own_shop(conn, user)
-        if not shop.delete_product(conn, current["id"], product_id):
+        keys = shop.delete_product(conn, current["id"], product_id)
+        if keys is None:
             raise HTTPException(404, "Нет такого товара")
+    photos.remove(keys)  # файлы — после коммита: откат не оставит товар без фото
     _audit(request, user, "shop_product", str(product_id), op="delete")
     return RedirectResponse("/my/shop?saved=deleted", status_code=303)
+
+
+def _own_product(conn, user: int, product_id: int) -> tuple[dict, dict]:
+    current = _own_shop(conn, user)
+    item = shop.product(conn, current["id"], product_id)
+    if item is None:
+        raise HTTPException(404, "Нет такого товара")
+    return current, item
+
+
+def _convert_all(contents: list[bytes]) -> list[tuple | str]:
+    """Сжатие — до соединения с базой (секунды на фото): сжатое или текст ошибки."""
+    done: list[tuple | str] = []
+    for content in contents:
+        try:
+            done.append(photos.convert(content))
+        except ValueError as error:
+            done.append(str(error))
+    return done
+
+
+def _save_photos(request: Request, user: int, product_id: int, converted: list[tuple | str]):
+    """Сохраняет сжатые фото; не подошедшие — сообщением на форме товара."""
+    errors = [c for c in converted if isinstance(c, str)]
+    saved = 0
+    with core.pool.connection() as conn:
+        current, item = _own_product(conn, user, product_id)
+        for c in converted:
+            if isinstance(c, str):
+                continue
+            try:
+                photos.add(conn, product_id, c)
+                saved += 1
+            except ValueError as error:
+                errors.append(str(error))
+        conn.commit()
+        if saved:
+            _audit(request, user, "shop_product", str(product_id), op="photos", count=saved)
+        if not errors:
+            return None
+        return _product_form(request, current, item, photo_list=photos.listing(conn, product_id),
+                             photo_error=errors[0], status_code=422)
+
+
+@router.post("/my/shop/products/{product_id}/photos", dependencies=[Depends(same_origin)])
+async def photos_upload(request: Request, user: User, product_id: int):
+    """Загрузка фото товара (несколько сразу). Предел запроса шлюза на этом адресе — больше
+    обычного (deploy/gateway/default.conf); каждый файл — не больше photos.MAX_BYTES."""
+    with core.pool.connection() as conn:
+        _own_product(conn, user, product_id)  # чужой товар — 404 до разбора файлов
+    form = await request.form()
+    uploads = [f for f in form.getlist("files") if hasattr(f, "read")][:photos.MAX_PER_PRODUCT]
+    contents = [await f.read(photos.MAX_BYTES + 1) for f in uploads]
+    contents = [c for c in contents if c] or [b""]
+    # Сжатие картинок и база — не в цикле событий; сжатие — без соединения с базой.
+    converted = await run_in_threadpool(_convert_all, contents)
+    failed = await run_in_threadpool(_save_photos, request, user, product_id, converted)
+    if failed is not None:
+        return failed
+    return RedirectResponse(f"/my/shop/products/{product_id}#photos", status_code=303)
+
+
+@router.post("/my/shop/products/{product_id}/photos/{photo_id}/delete", dependencies=[Depends(same_origin)])
+def photo_delete(request: Request, user: User, product_id: int, photo_id: int):
+    with core.pool.connection() as conn:
+        _own_product(conn, user, product_id)
+        key = photos.delete(conn, product_id, photo_id)
+        if key is None:
+            raise HTTPException(404, "Нет такого фото")
+    photos.remove([key])
+    _audit(request, user, "shop_product", str(product_id), op="photo_delete")
+    return RedirectResponse(f"/my/shop/products/{product_id}#photos", status_code=303)
+
+
+@router.post("/my/shop/products/{product_id}/photos/{photo_id}/main", dependencies=[Depends(same_origin)])
+def photo_main(request: Request, user: User, product_id: int, photo_id: int):
+    with core.pool.connection() as conn:
+        _own_product(conn, user, product_id)
+        if not photos.make_main(conn, product_id, photo_id):
+            raise HTTPException(404, "Нет такого фото")
+    _audit(request, user, "shop_product", str(product_id), op="photo_main")
+    return RedirectResponse(f"/my/shop/products/{product_id}#photos", status_code=303)
 
 
 @router.get("/staff/sellers")
