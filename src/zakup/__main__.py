@@ -7,7 +7,7 @@ import time
 from datetime import date, datetime, timedelta
 from datetime import time as day_time
 
-from zakup import audit, auth, bot, config, db, details, incidents, marks, matcher, results, sync
+from zakup import applications, audit, auth, bot, config, db, details, incidents, marks, matcher, results, sync
 from zakup.goszakup import ENTITIES, PORTAL_TZ, Client
 
 # Сколько истории грузить, если start-from не запускали.
@@ -377,6 +377,12 @@ def _details(conn, client: Client, limit: int, part: str = "all") -> int:
             print(f"finished details: {details.refresh_finished(conn, client, limit)}, "
                   f"protocols: {results.parse_pending(conn, PROTOCOLS_PER_RUN)}, "
                   f"old actions purged: {audit.purge(conn)}")
+            # Необязательная проверка — после основной работы и не роняет её.
+            try:
+                print(f"trd-app: {applications.check(conn, client)}")
+            except Exception:
+                conn.rollback()
+                logging.getLogger(__name__).exception("trd-app check")
     except Exception as error:
         # Недоступность портала — одно сообщение за перерыв; остальное — на автоисправление.
         conn.rollback()

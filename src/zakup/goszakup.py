@@ -68,6 +68,13 @@ class Client:
         items = [normalize(item) for item in data.get("items") or []]
         return Page(items, next_after(data.get("next_page")), data.get("total"))
 
+    def total(self, path: str) -> int:
+        """Сколько записей в реестре OWS (path — например «/v3/trd-app»): одна запись на запрос."""
+        data = self._get(path, {"limit": 1})
+        if data.get("total") is not None:
+            return int(data["total"])
+        return len(data.get("items") or [])  # некоторые реестры total не отдают
+
     def get(self, entity: str, item_id: int) -> dict[str, Any] | None:
         try:
             return normalize(self._get(f"{ENTITIES[entity]}/{item_id}", {}))
