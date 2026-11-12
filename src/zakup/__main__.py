@@ -7,6 +7,8 @@ import time
 from datetime import date, datetime, timedelta
 from datetime import time as day_time
 
+import psycopg
+
 from zakup import applications, audit, auth, bot, config, db, details, incidents, marks, matcher, results, sync
 from zakup.goszakup import ENTITIES, PORTAL_TZ, Client
 
@@ -52,6 +54,8 @@ def _parser() -> argparse.ArgumentParser:
     specs_cmd = sub.add_parser("specs", help="заранее разобрать техспецификации открытых лотов")
     specs_cmd.add_argument("--limit", type=int, default=200)
     specs_cmd.add_argument("--loop", action="store_true", help="работать постоянно")
+    skk_cmd = sub.add_parser("skk", help="закупки Самрук-Казыны с платформы zakup.gov.kz")
+    skk_cmd.add_argument("--loop", action="store_true", help="работать постоянно (проход раз в 10 минут)")
     research_cmd = sub.add_parser("research", help="поиск товаров под лоты с ИИ (работает постоянно)")
     research_cmd.add_argument("--providers", default="claude_code",
                               help="через запятую: claude_code, anthropic, openai")
@@ -168,6 +172,7 @@ LOCAL = {
     "specs": lambda args: _specs(args.limit, args.loop),
     "scores": lambda args: _scores(args.loop),
     "securities": lambda args: _securities(args.loop),
+    "skk": lambda args: _skk(args.loop),
     "set-password": lambda args: _set_password(args.email),
 }
 
@@ -208,6 +213,31 @@ def _scores(loop: bool) -> int:
     from zakup import scores
 
     return scores.run(config.database_url(), loop)
+
+
+SKK_PAUSE = 600
+
+
+def _skk(loop: bool) -> int:
+    from zakup import skk
+
+    client = skk.Client()
+    try:
+        while True:
+            started = time.monotonic()
+            try:
+                with db.connect(config.database_url()) as conn:
+                    print(f"skk: {skk.run(conn, client)}", flush=True)
+            except (skk.PlatformError, psycopg.OperationalError, ValueError) as error:
+                # Платформа или база недоступны — не падаем, пробуем на следующем проходе.
+                logging.warning("skk: %s", error)
+                if not loop:
+                    return 1
+            if not loop:
+                return 0
+            time.sleep(max(60, SKK_PAUSE - (time.monotonic() - started)))
+    finally:
+        client.close()
 
 
 SPECS_BATCH = 50
@@ -335,14 +365,15 @@ def _rescan(conn, client: Client, days: int, max_pages: int) -> int:
     # Граница по id: самое старое объявление, опубликованное за эти дни. Черновики,
     # созданные раньше и опубликованные позже, сюда не попадут, но таких единицы.
     floor = conn.execute(
-        "SELECT min(id) FROM announcements WHERE publish_date >= now() - make_interval(days => %s)",
+        "SELECT min(id) FROM announcements WHERE publish_date >= now() - make_interval(days => %s)"
+        " AND system = 1",
         (days,),
     ).fetchone()[0]
     if floor is None:
         print("Нечего перечитывать: объявлений за эти дни нет.")
         return 0
     lot_floor = conn.execute(
-        "SELECT min(id) FROM lots WHERE trd_buy_id >= %s", (floor,)
+        "SELECT min(id) FROM lots WHERE trd_buy_id >= %s AND system = 1", (floor,)
     ).fetchone()[0]
     # Быстрый и медленный круги перечитывают одно и то же: по очереди, не вместе.
     if not conn.execute("SELECT pg_try_advisory_lock(%s)", (RESCAN_LOCK,)).fetchone()[0]:

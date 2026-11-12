@@ -35,6 +35,7 @@ from zakup import (
     research,
     results,
     securities,
+    skk,
     spec,
     subjects,
     suppliers,
@@ -594,7 +595,7 @@ def lot_rows(conn, shown: str, params: dict) -> list[tuple]:
                    r.outcome, r.winner_name, r.winner_total,
                    jsonb_array_length(r.offers), r.reason,
                    l.name_kz, a.name_kz,
-                   l.extra_desc_kz, l.unit_name_kz
+                   l.extra_desc_kz, l.unit_name_kz, a.system
             FROM ({shown}) shown
             JOIN lots l ON l.id = shown.id JOIN announcements a ON a.id = l.trd_buy_id
             LEFT JOIN lot_results r ON r.lot_id = l.id
@@ -658,7 +659,7 @@ def announcements_search(request: Request, user: Viewer, page: int = 1, per_page
                        (SELECT array_agg(DISTINCT coalesce(p.prepayment, 0) ORDER BY coalesce(p.prepayment, 0))
                         FROM lots p WHERE p.trd_buy_id = a.id),
                        a.name_kz, a.detail->'RefTradeMethods'->>'nameKz',
-                       a.detail->'RefBuyStatus'->>'nameKz', a.detail->'Organizer'->>'nameKz'
+                       a.detail->'RefBuyStatus'->>'nameKz', a.detail->'Organizer'->>'nameKz', a.system
                 -- Сначала номера нужной страницы, потом поля из detail только для них: иначе
                 -- detail (сотни КБ) разворачивался у всех подходящих до сортировки — 5 с.
                 FROM (SELECT a.id, row_number() OVER (ORDER BY {current.order_by("announcements")}) AS n
@@ -855,8 +856,11 @@ def _announcement_context(request: Request, user: int | None, announcement_id: i
         "fetched_at": fetched_at,
         "refresh_error": None,
         "spec_file": spec.spec_file,
-        "portal_url": PORTAL_ANNOUNCEMENT_URL.format(announcement_id),
-        "portal_old_url": PORTAL_OLD_URL.format(announcement_id),
+        # Самрук-Казына — на единой платформе zakup.gov.kz, старой версии портала у неё нет.
+        "portal_url": skk.PORTAL_URL.format(detail["platformId"]) if detail.get("system") == skk.SYSTEM
+        else PORTAL_ANNOUNCEMENT_URL.format(announcement_id),
+        "portal_old_url": None if detail.get("system") == skk.SYSTEM else PORTAL_OLD_URL.format(announcement_id),
+        "skk": detail.get("system") == skk.SYSTEM,
         "status_names": STATUS_NAMES,
     }
 
@@ -866,13 +870,18 @@ def _load_announcement(conn, user: int | None, announcement_id: int, background:
     """(подробности, когда загружены, итоги, когда проверены итоги). Если подробностей нет —
     загружаем с портала сразу (для вошедших); если устарели — обновим после ответа."""
     row = conn.execute(
-        """SELECT detail, details_fetched_at, end_date, results, results_fetched_at
+        """SELECT detail, details_fetched_at, end_date, results, results_fetched_at, system
            FROM announcements WHERE id = %s""",
         (announcement_id,),
     ).fetchone()
     if row is None:
         raise HTTPException(404, "Такого объявления нет в базе")
-    detail, fetched_at, end_date, outcome, results_at = row
+    detail, fetched_at, end_date, outcome, results_at, system = row
+    if system != 1:
+        # Самрук-Казына и др.: подробности кладёт свой сборщик (zakup.skk), в OWS их нет.
+        if detail is None:
+            raise HTTPException(404, "Подробности объявления ещё загружаются")
+        return detail, fetched_at, outcome, results_at
     stale = fetched_at is None or now - fetched_at > (
         DETAIL_TTL if end_date and end_date > now else timedelta(days=1)
     )
@@ -952,7 +961,7 @@ def _lot_extras(request: Request, user: int | None, detail: dict, lots: list, in
             lot.get("customerBin") for lot in lots]
         org_cards = {b: subjects.card(conn, b) for b in dict.fromkeys(filter(None, org_bins))}
     missing = [b for b, found in org_cards.items() if found is None]
-    if missing and user is not None:
+    if missing and user is not None and detail.get("system") != skk.SYSTEM:
         # Карточки организации ещё нет — догрузим после ответа, следующий заход увидит.
         # Гостям и поисковым роботам — только база: обход сайта не должен бить по порталу.
         background.add_task(_subjects_in_background, missing)

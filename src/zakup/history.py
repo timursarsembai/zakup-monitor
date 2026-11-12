@@ -96,7 +96,8 @@ def _prepare(conn: psycopg.Connection, client: Client, run: int, since: date) ->
         _finish(conn, run, "failed", "На портале нет объявлений после этой даты.")
         return False
     upto = conn.execute(
-        "SELECT (min(publish_date) AT TIME ZONE 'Asia/Almaty')::date FROM announcements").fetchone()[0]
+        "SELECT (min(publish_date) AT TIME ZONE 'Asia/Almaty')::date FROM announcements"
+        " WHERE system = 1").fetchone()[0]
     bounds = {}
     for entity, floor in zip(ENTITIES, (first_announcement, first_lot), strict=True):
         previous = db.get_state(conn, f"backfill:{entity}")
@@ -105,7 +106,7 @@ def _prepare(conn: psycopg.Connection, client: Client, run: int, since: date) ->
             # опуститься из-за лотов, заведённых из карточек объявлений, и часть пропустилась бы.
             top = previous.resume_after
         else:
-            oldest = conn.execute(f"SELECT min(id) FROM {entity}").fetchone()[0]
+            oldest = conn.execute(f"SELECT min(id) FROM {entity} WHERE system = 1").fetchone()[0]
             # search_after=x отдаёт записи с id меньше x — то, чего в базе ещё нет.
             top = oldest
         top = top if top is not None and top > floor else None

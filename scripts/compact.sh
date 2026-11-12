@@ -20,7 +20,7 @@ size() { psql -c "SELECT pg_size_pretty(pg_total_relation_size('$1'))"; }
 db_size() { psql -c "SELECT pg_size_pretty(pg_database_size(current_database()))"; }
 
 # Останавливаем и потом поднимаем только те сборщики, что сейчас работают.
-collectors=$(docker compose ps --status running --services 2>/dev/null | grep -xE 'worker|archive|history|specs|securities|scores' | tr '\n' ' ')
+collectors=$(docker compose ps --status running --services 2>/dev/null | grep -xE 'worker|archive|history|specs|securities|scores|skk' | tr '\n' ' ')
 before_db=$(db_size); before_lots=$(size lots); before_ann=$(size announcements)
 started=$(date +%s)
 

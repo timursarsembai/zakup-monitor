@@ -26,7 +26,7 @@ from zakup.incidents import redact
 logger = logging.getLogger(__name__)
 
 REPO = Path(__file__).resolve().parents[2]
-SERVICES = ("worker", "archive", "specs", "research", "bot", "client-bot", "web", "web-2", "gateway")
+SERVICES = ("worker", "archive", "specs", "skk", "research", "bot", "client-bot", "web", "web-2", "gateway")
 # Здесь в логах — текст от посетителей сайта: только число строк.
 PUBLIC_SERVICES = ("web", "web-2", "gateway")
 DIFF_LIMIT = 40_000
@@ -34,8 +34,11 @@ TIMEOUT = 30 * 60
 TELEGRAM_LIMIT = 3900
 
 QUERIES = {
-    "новых объявлений за сутки": "SELECT count(*) FROM announcements WHERE publish_date > now() - interval '1 day'",
-    "последнее объявление в базе (publish_date)": "SELECT max(publish_date) FROM announcements",
+    # Госзакупки (OWS) отдельно от Самрук-Казыны: иначе остановка сборщика OWS не видна.
+    "новых объявлений за сутки": "SELECT count(*) FROM announcements WHERE system = 1 AND publish_date > now() - interval '1 day'",
+    "последнее объявление в базе (publish_date)": "SELECT max(publish_date) FROM announcements WHERE system = 1",
+    "новых объявлений Самрук-Казыны за сутки":
+        "SELECT count(*) FROM announcements WHERE system = 3 AND publish_date > now() - interval '1 day'",
     "сборщик обновлял состояние": "SELECT entity || ': ' || updated_at FROM sync_state",
     "сбои за сутки (статус: число)": "SELECT status || ': ' || count(*) FROM incidents "
                                      "WHERE last_at > now() - interval '1 day' GROUP BY status",

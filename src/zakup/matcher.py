@@ -17,7 +17,7 @@ import psycopg
 
 from zakup import SITE_URL, bot, telegram
 from zakup.auth import ENTITLED_SQL
-from zakup.filters import REGIONS, Filters
+from zakup.filters import REGIONS, SYSTEM_IDS, Filters
 from zakup.goszakup import PORTAL_TZ
 
 logger = logging.getLogger(__name__)
@@ -193,6 +193,7 @@ class PendingLot(NamedTuple):
     price: Decimal | None = None
     disable_person: bool | None = None
     langs: str = "both"  # ru | kk | both
+    system: int | None = 1  # 3 — Самрук-Казына (zakup.skk)
 
 
 # Язык уведомлений: у группы — свой, в личку — выбранный в настройках, иначе язык сайта.
@@ -206,7 +207,7 @@ _LOT_COLUMNS = """s.id,
                   l.prepayment, l.kato, l.trd_buy_id, coalesce(a.number_anno, l.number_anno),
                   a.name_ru, a.end_date,
                   coalesce(a.customer_name_ru, l.customer_name_ru, a.org_name_ru), a.kato,
-                  l.name_kz, a.name_kz, l.price, a.disable_person, """ + _LANGS_SQL
+                  l.name_kz, a.name_kz, l.price, a.disable_person, """ + _LANGS_SQL + ", a.system"
 LANGS = ("ru", "kk", "both")
 
 
@@ -273,6 +274,8 @@ def _part(lots: list[PendingLot], kazakh: bool) -> list[str]:
     if first.end_date:
         head.append(f"⏰ {first.end_date.astimezone(PORTAL_TZ):%d.%m %H:%M}")
     lines.append(" · ".join(head))
+    if first.system == SYSTEM_IDS["skk"]:
+        lines.append("Самұрық-Қазына" if kazakh else "Самрук-Казына")
     if first.disable_person:
         lines.append("♿ " + ("Мүгедектер ұйымдары арасында" if kazakh
                              else "Среди организаций инвалидов"))

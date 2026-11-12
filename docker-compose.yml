@@ -181,6 +181,22 @@ services:
     mem_limit: 256m
     logging: *logging
 
+  # Закупки Самрук-Казыны с единой платформы zakup.gov.kz (zakup.skk), проход раз в 10 минут.
+  skk:
+    <<: *hardening
+    image: zakup
+    container_name: zakup-skk
+    restart: unless-stopped
+    init: true
+    depends_on:
+      worker:
+        condition: service_started
+    entrypoint: ["zakup", "skk", "--loop"]
+    environment: *db-env
+    cpus: 0.5
+    mem_limit: 256m
+    logging: *logging
+
   # Поиск товаров под лоты через API OpenAI/Anthropic (ключи пользователей).
   # Claude Code по подписке работает не здесь, а на хосте: deploy/zakup-research.service.
   research:

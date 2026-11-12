@@ -93,7 +93,7 @@ def refresh(conn: psycopg.Connection, client: Client, limit: int = 300) -> int:
                 SELECT DISTINCT ON (b) b, priority FROM (
                     SELECT unnest(ARRAY[customer_bin, org_bin]) AS b,
                            CASE WHEN end_date > now() THEN 0 ELSE 2 END AS priority
-                    FROM announcements
+                    FROM announcements WHERE system = 1  -- организаций Самрук-Казыны в OWS нет
                     UNION ALL
                     SELECT winner_bin, 1 FROM lot_results WHERE outcome = 'winner'
                     UNION ALL

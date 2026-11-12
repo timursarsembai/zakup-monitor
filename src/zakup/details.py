@@ -256,6 +256,8 @@ def fill_codes(conn: psycopg.Connection, batch: int = 2000) -> int:
 
 
 def fetch_one(conn: psycopg.Connection, client: Client, announcement_id: int) -> bool:
+    if not is_goszakup(conn, announcement_id):  # в OWS есть только госзакупки
+        return False
     conn.commit()  # портал ждём без открытой транзакции
     data = client.graphql(BATCH_QUERY % {"limit": 1, "ids": json.dumps([announcement_id])})
     found = data.get("TrdBuy") or []
@@ -265,13 +267,19 @@ def fetch_one(conn: psycopg.Connection, client: Client, announcement_id: int) ->
     return bool(found)
 
 
+def is_goszakup(conn: psycopg.Connection, announcement_id: int) -> bool:
+    """Объявление госзакупок (OWS) — или ещё не в базе (тогда тоже из OWS)."""
+    row = conn.execute("SELECT system FROM announcements WHERE id = %s", (announcement_id,)).fetchone()
+    return row is None or row[0] == 1
+
+
 def refresh(conn: psycopg.Connection, client: Client, limit: int) -> int:
     """Дочитывает подробности открытых объявлений: новых, изменившихся и раз в сутки."""
     ids = [
         row[0]
         for row in conn.execute(
             """SELECT id FROM announcements
-               WHERE end_date > now()
+               WHERE end_date > now() AND system = 1  -- подробности — из OWS, только госзакупки
                  AND (details_fetched_at IS NULL OR detail IS NULL
                       OR NOT detail ? 'nameKz'
                       OR last_update_date > details_update_date
@@ -306,7 +314,7 @@ def refresh_finished(conn: psycopg.Connection, client: Client, limit: int) -> in
             # Условие — как у частичного индекса announcements_finished_incomplete (миграция 0031),
             # статусы — константой: с параметром планировщик не докажет, что индекс подходит.
             f"""SELECT id FROM announcements
-               WHERE status_id IN ({", ".join(map(str, FINISHED_STATUSES))})
+               WHERE status_id IN ({", ".join(map(str, FINISHED_STATUSES))}) AND system = 1
                  AND (detail IS NULL OR NOT detail ? 'nameKz'
                       OR (detail->>'refBuyStatusId')::int IS DISTINCT FROM status_id)
                  AND (details_fetched_at IS NULL OR details_fetched_at < now() - interval '1 hour')

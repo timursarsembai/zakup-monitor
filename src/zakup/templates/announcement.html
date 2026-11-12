@@ -22,6 +22,7 @@
 {% block main %}
 {% if refresh_error %}<p class="notice">{{ refresh_error }}</p>{% endif %}
 <div class="chips">
+  {% if skk %}<span class="chip" title="{{ _("Закупка по правилам фонда «Самрук-Казына», не по Закону о госзакупках") }}">{{ _("Самрук-Казына") }}</span>{% endif %}
   <span class="chip status">{{ loc(a.RefBuyStatus) or "" }}</span>
   {% if a.RefTradeMethods %}<span class="chip">{{ loc(a.RefTradeMethods) }}</span>{% endif %}
   {% if a.RefSubjectType %}<span class="chip">{{ loc(a.RefSubjectType) }}</span>{% endif %}
@@ -65,8 +66,8 @@
   <button role="tab" data-tab="winners" aria-selected="false">{{ _("Победители (") }}{{ results|length }})</button>
   <button role="tab" data-tab="contracts" aria-selected="false">{{ _("Договоры (") }}{{ contracts|length }})</button>
   <button role="tab" data-tab="appeals" aria-selected="false">{{ _("Апелляции (") }}{{ appeals|length }})</button>
-  <a href="{{ portal_url }}" target="_blank" rel="noopener" title="{{ _("Новая версия портала — подача заявок, вход по ЭЦП") }}">{{ _("На портале ↗") }}</a>
-  <a href="{{ portal_old_url }}" target="_blank" rel="noopener" class="muted" title="{{ _("Старая версия портала — открывается без входа") }}">{{ _("старая версия ↗") }}</a>
+  <a href="{{ portal_url }}" target="_blank" rel="noopener" title="{{ _("Единая платформа закупок zakup.gov.kz") if skk else _("Новая версия портала — подача заявок, вход по ЭЦП") }}">{{ _("На портале ↗") }}</a>
+  {% if portal_old_url %}<a href="{{ portal_old_url }}" target="_blank" rel="noopener" class="muted" title="{{ _("Старая версия портала — открывается без входа") }}">{{ _("старая версия ↗") }}</a>{% endif %}
 </nav>
 
 <section data-panel="lots">

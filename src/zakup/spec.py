@@ -236,7 +236,7 @@ def prefetch(conn: psycopg.Connection, limit: int) -> int:
         """SELECT l.id, l.spec_url FROM lots l
            JOIN announcements a ON a.id = l.trd_buy_id
            LEFT JOIN lot_specs s ON s.lot_id = l.id
-           WHERE a.end_date > now() AND l.spec_url IS NOT NULL
+           WHERE a.end_date > now() AND l.spec_url IS NOT NULL AND a.system = 1
              AND (s.lot_id IS NULL OR s.file_url <> l.spec_url
                   OR (s.text IS NULL AND s.attempts < %(max)s
                       AND s.fetched_at < now() - interval '1 hour' * s.attempts))

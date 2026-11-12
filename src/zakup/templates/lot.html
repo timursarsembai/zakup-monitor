@@ -126,7 +126,7 @@
 
 <div class="parent">
   <div>
-    <div class="muted">{{ _("Объявление №") }} {{ a.numberAnno or a.id }} · {{ loc(a.RefTradeMethods) or "" }} · {{ loc(a.RefBuyStatus) or "" }}</div>
+    <div class="muted">{% if skk %}<b>{{ _("Самрук-Казына") }}</b> · {% endif %}{{ _("Объявление №") }} {{ a.numberAnno or a.id }} · {{ loc(a.RefTradeMethods) or "" }} · {{ loc(a.RefBuyStatus) or "" }}</div>
     <a class="title" href="/a/{{ a.id }}">{{ loc(a) }}</a>
     <div class="muted">{{ org_link(a.orgBin, loc(a.Organizer) if a.Organizer else loc(a, "orgNameRu")) }}</div>
   </div>

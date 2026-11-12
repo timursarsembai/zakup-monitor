@@ -125,6 +125,7 @@ def prefetch(conn: psycopg.Connection, limit: int) -> int:
     rows = conn.execute(
         """SELECT id, detail FROM announcements
            WHERE end_date > now() + interval '1 hour' AND detail IS NOT NULL AND lots_ready
+             AND system = 1  -- документы госзакупок; у Самрук-Казыны свои правила
              AND NOT (trade_method_id = ANY(%s))
              AND (securities_at IS NULL
                   OR (securities ? 'error' AND securities_at < now() - %s::interval))

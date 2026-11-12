@@ -48,6 +48,8 @@ from zakup.filters import (
     STAGES,
     STATUS_NAMES,
     SUBJECTS,
+    SYSTEM_IDS,
+    SYSTEMS,
     Filters,
     deadline_by_rule,
     fin_years,
@@ -79,6 +81,8 @@ templates.env.globals["asset_v"] = hashlib.sha1(b"".join(
 
 
 templates.env.globals["announcement_url"] = "/a/{}".format
+# Номер системы Самрук-Казыны — для метки в списках (столбец a.system).
+templates.env.globals["skk_system"] = SYSTEM_IDS["skk"]
 
 
 def _money(value) -> str:
@@ -472,6 +476,7 @@ def _search_context(request: Request, current: Filters, scope: str, total: int, 
         "years": fin_years(today),
         "sorts": SORTS,
         "disable_options": DISABLE_PERSON,
+        "system_options": SYSTEMS,
         "repeat_options": REPEATS,
         "own_supplier_options": OWN_SUPPLIER,
         # Ссылки на другую страницу поиска, сортировку и страницы — из самого фильтра,

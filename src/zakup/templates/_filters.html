@@ -234,6 +234,7 @@
   "advance": (_("аванс") ~ " " ~ (f.advance_min ~ "–" ~ f.advance_max ~ "%")) if f.advance_only or f.advance_min > 0 or f.advance_max < 100 else "",
   "disable": _("Инвалиды") if f.disable_person == "only" else (_("Без инвалидов") if f.disable_person == "exclude" else ""),
   "method": (_("Способ") ~ " · " ~ f.methods|length) if f.methods else "",
+  "system": _(system_options[f.system]) if f.system else "",
   "subject": (_("Предмет") ~ " · " ~ f.subjects|length) if f.subjects else "",
   "dates": _("Даты ✓") if f.start_from or f.start_to or f.itogi_from or f.itogi_to or (f.published_from and f.published_from != "today") or f.published_to else "",
   "year": short_list(f.years | map("string") | list) if f.years else "",
@@ -243,7 +244,7 @@
   "scores": (_("Оценки") ~ " · " ~ f.score_labels()|length) if f.score_labels() else "",
 } %}
 {% set chip_names = [("region", _("Регион")), ("category", _("Категория")), ("sum", _("Сумма")), ("deadline", _("Срок")),
-  ("open_now", _("Только открытые")), ("today_only", _("Опубликованы сегодня")), ("status", _("Статус")), ("advance", _("Аванс")),
+  ("open_now", _("Только открытые")), ("today_only", _("Опубликованы сегодня")), ("status", _("Статус")), ("system", _("Система")), ("advance", _("Аванс")),
   ("disable", _("Инвалиды")), ("method", _("Способ")), ("subject", _("Предмет")), ("words", _("Слова")),
   ("customer", _("Заказчик")), ("dates", _("Даты")), ("year", _("Фин. год")), ("number", _("Номер, ЕНС ТРУ")), ("scores", _("Выгода и риски"))] %}
 <div class="chipbar" data-chipbar>
@@ -310,6 +311,8 @@
           {% endfor %}
         </div>
       </details></div>
+    <div data-chip="system"><span class="fl">{{ _("Система закупок") }}</span>
+      <div class="radio-list">{% for key, name in system_options.items() %}<label class="check"><input type="radio" name="system" value="{{ key }}" {% if f.system == key %}checked{% endif %}> {{ _(name) }}</label>{% endfor %}</div></div>
     <div data-chip="method"><span class="fl">{{ _("Способ закупки") }}</span>
       {% set method_labels = {} %}{% for k, v in methods.items() %}{% set __ = method_labels.update({k: v[0]}) %}{% endfor %}
       {{ multi("method", method_labels, f.methods, _("Все способы")) }}</div>

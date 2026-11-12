@@ -186,6 +186,8 @@ def _save_protocol(conn: psycopg.Connection, detail: dict, url: str) -> int:
 
 def refresh(conn: psycopg.Connection, client: Client, announcement_id: int) -> None:
     """Дочитывает договоры, апелляции и, если появился, разбирает протокол итогов."""
+    if not details.is_goszakup(conn, announcement_id):  # в OWS есть только госзакупки
+        return
     data = client.graphql(CONTRACTS_QUERY % {"id": announcement_id})
     conn.execute(
         "UPDATE announcements SET results = %s, results_fetched_at = now() WHERE id = %s",
@@ -237,7 +239,7 @@ def parse_pending(conn: psycopg.Connection, limit: int) -> int:
                        CASE WHEN jsonb_typeof(a.detail->'Files') = 'array'
                             THEN a.detail->'Files' ELSE '[]' END) f
                    WHERE lower(trim(f->>'nameRu')) = %s LIMIT 1) p
-           WHERE a.status_id = 350 AND a.detail IS NOT NULL
+           WHERE a.status_id = 350 AND a.detail IS NOT NULL AND a.system = 1
              AND a.protocol_url IS DISTINCT FROM p.url
            ORDER BY a.end_date DESC LIMIT %s""",
         (PROTOCOL_NAME, limit),
@@ -261,7 +263,7 @@ def follow(conn: psycopg.Connection, client: Client, limit: int = 50) -> int:
             """SELECT DISTINCT a.id, a.results_fetched_at FROM lot_marks m
                JOIN lots l ON l.id = m.lot_id
                JOIN announcements a ON a.id = l.trd_buy_id
-               WHERE m.status NOT IN ('', 'rejected')
+               WHERE m.status NOT IN ('', 'rejected') AND a.system = 1
                  AND a.end_date < now() AND a.end_date > now() - %s
                  AND (NOT EXISTS (SELECT 1 FROM lot_results r WHERE r.lot_id = l.id)
                       OR a.results_fetched_at IS NULL

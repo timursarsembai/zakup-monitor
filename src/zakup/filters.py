@@ -91,16 +91,21 @@ REGIONS = {
 }
 # Способы закупки, сгруппированные как на портале: ключ — id справочника.
 METHODS = {
-    "zcp": ("Запрос ценовых предложений", [3, 126]),
+    # 10 000+ — способы Самрук-Казыны (zakup.skk.METHOD_OFFSET): ЗЦП, ЗЦП на понижение,
+    # открытый тендер, открытый тендер на понижение.
+    "zcp": ("Запрос ценовых предложений", [3, 126, 10012, 10062, 10063]),
     "single": ("Из одного источника", [6, 125]),
     "contest": ("Конкурс", [2, 120, 121, 188, 201]),
-    "tender": ("Тендер", [124]),
+    "tender": ("Тендер", [124, 10065, 10066]),
     "auction": ("Аукцион", [78]),
     "special": ("Особый порядок", [130]),
     "other": ("Прочие (жилище, соцзаказ)", [50, 52]),
 }
 METHOD_NAMES = {i: name for name, ids in METHODS.values() for i in ids}
 SUBJECTS = {1: "Товары", 2: "Работы", 3: "Услуги"}
+# Система закупок (announcements.system, миграция 0033): госзакупки (OWS) и Самрук-Казына.
+SYSTEMS = {"": "Все системы", "goszakup": "Госзакупки", "skk": "Самрук-Казына"}
+SYSTEM_IDS = {"goszakup": 1, "skk": 3}
 REPEATS = {"": "Все", "any": "Повторная закупка", "failed": "Повторная: прошлая не состоялась"}
 OWN_SUPPLIER = {"": "Все", "hide": "Скрыть заказчиков со «своим» поставщиком",
                 "only": "Только заказчики со «своим» поставщиком"}
@@ -169,6 +174,8 @@ class Filters:
     methods: list[str] = field(default_factory=list)
     subjects: list[int] = field(default_factory=list)
     years: list[int] = field(default_factory=list)
+    # "" — все, "goszakup" — госзакупки, "skk" — Самрук-Казына (SYSTEMS).
+    system: str = ""
     min_sum: Decimal | None = Decimal(300_000)
     max_sum: Decimal | None = None
     # Окончание приёма. DEADLINE_RULE — от сегодня по день по правилу выше (каждый день
@@ -270,6 +277,7 @@ class Filters:
             methods=[v for v in form.get("method", []) if v in METHODS],
             subjects=ints("subject", SUBJECTS),
             years=ints("year", range(2000, 2100)),
+            system=one("system") if one("system") in SYSTEM_IDS else "",
             min_sum=_decimal(one("min_sum")),
             max_sum=_decimal(one("max_sum")),
             # Заполненная дата «по» важнее выбранного режима.
@@ -303,6 +311,7 @@ class Filters:
         """Сколько условий задано (для кнопки «Фильтры» на телефоне)."""
         flags = [self.q, self.exclude, self.number, self.lot_number, self.enstru, self.customer,
                  self.regions, self.categories, self.methods, self.subjects, self.years, self.disable_person,
+                 self.system,
                  self.min_sum is not None or self.max_sum is not None, self.deadline,
                  self.start_from or self.start_to, self.published_from or self.published_to,
                  self.end_from,  # «Только с открытым приёмом» (и «Окончание с») — тоже условие
@@ -378,6 +387,10 @@ class Filters:
         if self.subjects:
             clauses.append("a.subject_type_id = ANY(%(subjects)s)")
             params["subjects"] = self.subjects
+        if self.system in SYSTEM_IDS:
+            # Число — из своего справочника, не из запроса: константой в тексте условия
+            # планировщик видит частичный индекс announcements_other_systems.
+            clauses.append(f"a.system = {SYSTEM_IDS[self.system]}")
         if self.years:
             clauses.append("a.fin_years && %(years)s::integer[]")
             params["years"] = self.years
@@ -618,6 +631,8 @@ class Filters:
         if self.disable_person:
             add(_("среди организаций инвалидов") if self.disable_person == "only"
                 else _("без закупок среди организаций инвалидов"), disable_person="")
+        if self.system in SYSTEM_IDS:
+            add(_(SYSTEMS[self.system]), system="")
         if self.methods:
             add(", ".join(_(METHODS[m][0]) for m in self.methods if m in METHODS), methods=[])
         if self.subjects:
@@ -672,6 +687,8 @@ class Filters:
             parts.append(_("среди организаций инвалидов"))
         elif self.disable_person == "exclude":
             parts.append(_("без закупок среди организаций инвалидов"))
+        if self.system in SYSTEM_IDS:
+            parts.append(_(SYSTEMS[self.system]))
         if self.methods:
             parts.append(", ".join(_(METHODS[m][0]) for m in self.methods if m in METHODS))
         if self.subjects:
