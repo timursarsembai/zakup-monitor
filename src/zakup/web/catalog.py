@@ -2,14 +2,15 @@
 поисковикам (решение владельца 2026-11-12, docs/CATALOG_PLAN.md). Лоты, где товар находили, —
 по подписке; телефоны — вошедшим."""
 
+from typing import Annotated
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
 
-from zakup import i18n, products, sellers
+from zakup import i18n, products, sellers, shop
 from zakup.web import core
-from zakup.web.core import MAX_PAGE, SITE_URL, Viewer, templates
+from zakup.web.core import MAX_PAGE, SITE_URL, User, Viewer, _audit, same_origin, templates
 
 router = APIRouter()
 
@@ -57,8 +58,12 @@ def product_page(request: Request, user: Viewer, key: str):
     другое название (товар переименовали, ссылку обрезали) — перенаправляем на верный."""
     with core.pool.connection() as conn:
         item = products.get(conn, _number_key(key))
-    if item is None or (item["seller_row"] and item["seller_row"]["status"] != "active"
-                        and not request.state.staff):
+    if item is None:
+        raise HTTPException(404, "Нет такого товара")
+    seller = item["seller_row"]
+    # Снятый с продажи или у магазина не на виду (на проверке, скрыт) — только владельцу и сотрудникам.
+    public = item["on_sale"] and (seller is None or seller["status"] == "active")
+    if not public and not request.state.staff and not (seller and user and seller["user_id"] == user):
         raise HTTPException(404, "Нет такого товара")
     canonical = products.path(item)
     # Временная (302): адрес — от названия, а его обновляет каждая находка поиска; постоянную
@@ -104,24 +109,53 @@ def sellers_page(request: Request, user: Viewer, q: str = "", city: str = "", ca
         "s": data, "sorts": sellers.SORTS, "seller_path": sellers.path, "sellers_url": url})
 
 
+def _seller_page(request: Request, conn, seller: dict, user: int | None, *, q: str = "", category: str = "",
+                 sort: str = "updated", page: int = 1, price_min: str = "", price_max: str = "",
+                 available: str = "", claim_error: str | None = None, status_code: int = 200):
+    """Страница продавца — и обычная, и с ошибкой в заявке «Это мой магазин»."""
+    owner = user is not None and seller["user_id"] == user
+    canonical = sellers.path(seller)
+    data = products.listing(conn, **_catalog_args(q, category, sort, page, price_min, price_max, available),
+                            seller_id=seller["id"], divisions=seller["divisions"],
+                            hidden=request.state.staff or owner)
+    return templates.TemplateResponse(request, "seller.html", {
+        "owner": owner, "claimed": shop.pending_claim(conn, seller["id"], user), "claim_error": claim_error,
+        "seller": seller, "p": data, "sorts": products.SORTS, "fresh_days": products.FRESH_DAYS,
+        "product_path": products.path, "seller_path": sellers.path,
+        "products_url": _catalog_url(canonical, data), "action": canonical}, status_code=status_code)
+
+
 @router.get("/sellers/{key}")
 def seller_page(request: Request, user: Viewer, key: str, q: str = "", category: str = "", sort: str = "updated",
                 page: int = 1, price_min: str = "", price_max: str = "", available: str = ""):
-    """Страница продавца: карточка и его каталог с фильтрами."""
+    """Страница продавца: карточка и его каталог с фильтрами. Не на виду (на проверке, скрыт) —
+    только владельцу и сотрудникам."""
     with core.pool.connection() as conn:
         seller = sellers.get(conn, _number_key(key))
-        if seller is None or (seller["status"] != "active" and not request.state.staff):
+        owner = seller is not None and user is not None and seller["user_id"] == user
+        if seller is None or (seller["status"] != "active" and not request.state.staff and not owner):
             raise HTTPException(404, "Нет такого продавца")
-        canonical = sellers.path(seller)
-        if (moved := _redirect(request, canonical)) is not None:
+        if (moved := _redirect(request, sellers.path(seller))) is not None:
             return moved
-        data = products.listing(conn, **_catalog_args(q, category, sort, page, price_min, price_max, available),
-                                seller_id=seller["id"], divisions=seller["divisions"],
-                                hidden=request.state.staff)
-    return templates.TemplateResponse(request, "seller.html", {
-        "seller": seller, "p": data, "sorts": products.SORTS, "fresh_days": products.FRESH_DAYS,
-        "product_path": products.path, "seller_path": sellers.path,
-        "products_url": _catalog_url(canonical, data), "action": canonical})
+        return _seller_page(request, conn, seller, user, q=q, category=category, sort=sort, page=page,
+                            price_min=price_min, price_max=price_max, available=available)
+
+
+@router.post("/sellers/{key}/claim", dependencies=[Depends(same_origin)])
+def seller_claim(request: Request, user: User, key: str, bin: Annotated[str, Form()] = "",
+                 comment: Annotated[str, Form()] = ""):
+    """«Это мой магазин»: заявка на найденный ИИ магазин — решает сотрудник (/staff/sellers)."""
+    with core.pool.connection() as conn:
+        seller = sellers.get(conn, _number_key(key))
+        if seller is None or seller["status"] != "active":
+            raise HTTPException(404, "Нет такого продавца")
+        try:
+            ok = shop.claim(conn, seller["id"], user, bin, comment)
+        except shop.Invalid as error:
+            return _seller_page(request, conn, seller, user, claim_error=str(error), status_code=422)
+    if ok:
+        _audit(request, user, "seller_claim", str(seller["id"]))
+    return RedirectResponse(sellers.path(seller) + "?claimed=1", status_code=303)
 
 
 def _url(path: str) -> str:
@@ -142,7 +176,7 @@ def _structured(item: dict, path: str) -> list[dict]:
     if item.get("price") is not None:
         offer: dict = {"@type": "Offer", "price": f"{item['price']:.2f}", "priceCurrency": "KZT",
                        "availability": "https://schema.org/" + ("InStock" if item["available"] else "OutOfStock"),
-                       "url": item["url"]}
+                       "url": item["url"] or url}
         if item.get("seller"):
             offer["seller"] = {"@type": "Organization", "name": item["seller"]}
         product["offers"] = offer

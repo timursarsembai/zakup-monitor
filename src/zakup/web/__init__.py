@@ -12,7 +12,7 @@ import psycopg
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from zakup.web import accounts, ai, billing, cabinet, catalog, core, middleware, public, settings, staff
+from zakup.web import accounts, ai, billing, cabinet, catalog, core, middleware, public, settings, shop, staff
 
 
 @asynccontextmanager
@@ -39,5 +39,5 @@ app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None
 app.mount("/static", StaticFiles(directory=str(files("zakup").joinpath("static"))), name="static")
 middleware.install(app)
 # Порядок разделов — как порядок адресов в прежнем общем файле (важен при совпадении путей).
-for section in (public, accounts, billing, staff, catalog, cabinet, ai, settings):
+for section in (public, accounts, billing, staff, catalog, shop, cabinet, ai, settings):
     app.include_router(section.router)

@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{# Сотрудникам: модерация продавцов (web/shop.py, zakup.shop.moderation) — магазины на проверке,
+   заявки «Это мой магазин», скрытые. #}
+{% block title %}{{ _("Продавцы: модерация") }}{% endblock %}
+{% block style %}
+  table.mod td { vertical-align: top; font-size: 14px; }
+  .row-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+  .row-actions form { margin: 0; }
+  button.danger { color: var(--bad); }
+  section { margin-top: 22px; }
+{% endblock %}
+{% block main %}
+<h1>{{ _("Продавцы: модерация") }}</h1>
+{% if done %}<p class="note">{{ _("Готово.") }}{% if done == "gone" %} {{ _("Заявку уже решили.") }}{% endif %}</p>{% endif %}
+
+<section>
+  <h2>{{ _("Магазины на проверке") }} ({{ pending|length }})</h2>
+  <p class="muted">{{ _("Без БИН или БИН не нашёлся в реестре. Пока на проверке — магазин и товары видит только владелец.") }}</p>
+  <div class="table-wrap"><table class="mod">
+    <tr><th>{{ _("Магазин") }}</th><th>{{ _("БИН/ИИН") }}</th><th>{{ _("Владелец") }}</th><th>{{ _("Товаров") }}</th><th></th></tr>
+    {% for r in pending %}
+    <tr><td><a href="{{ seller_path(r) }}">{{ r.name }}</a>{% if r.city %}<div class="muted">{{ r.city }}</div>{% endif %}<div class="muted">{{ (r.created_at|local).strftime("%d.%m.%Y %H:%M") }}</div></td>
+      <td>{{ r.bin or "—" }}</td><td>{{ r.login or "—" }}</td><td>{{ r.products }}</td>
+      <td><div class="row-actions">
+        <form method="post" action="/staff/sellers/{{ r.id }}/status"><input type="hidden" name="status" value="active"><button class="primary">{{ _("Одобрить") }}</button></form>
+        <form method="post" action="/staff/sellers/{{ r.id }}/status" data-confirm="{{ _("Скрыть магазин и его товары?") }}"><input type="hidden" name="status" value="hidden"><button class="danger">{{ _("Скрыть") }}</button></form>
+      </div></td></tr>
+    {% else %}<tr><td colspan="5" class="muted">{{ _("Нет.") }}</td></tr>{% endfor %}
+  </table></div>
+</section>
+
+<section>
+  <h2>{{ _("Заявки «Это мой магазин»") }} ({{ claims|length }})</h2>
+  <div class="table-wrap"><table class="mod">
+    <tr><th>{{ _("Магазин") }}</th><th>{{ _("Кто просит") }}</th><th>{{ _("БИН/ИИН и реестр") }}</th><th>{{ _("Как подтверждает") }}</th><th></th></tr>
+    {% for c in claims %}
+    <tr><td><a href="{{ seller_path({"id": c.seller_id, "name": c.name}) }}">{{ c.name }}</a>{% if c.domain %}<div class="muted">{{ c.domain }}</div>{% endif %}</td>
+      <td>{{ c.login }}<div class="muted">{{ (c.created_at|local).strftime("%d.%m.%Y %H:%M") }}</div></td>
+      <td>{{ c.bin or "—" }}{% if c.registry %}<div class="muted">{{ c.registry }}</div>{% endif %}</td>
+      <td style="white-space:pre-line">{{ c.comment }}</td>
+      <td><div class="row-actions">
+        <form method="post" action="/staff/claims/{{ c.id }}" data-confirm="{{ _("Передать магазин этому пользователю?") }}"><input type="hidden" name="decision" value="approve"><button class="primary">{{ _("Передать") }}</button></form>
+        <form method="post" action="/staff/claims/{{ c.id }}"><input type="hidden" name="decision" value="reject"><button class="danger">{{ _("Отклонить") }}</button></form>
+      </div></td></tr>
+    {% else %}<tr><td colspan="5" class="muted">{{ _("Нет.") }}</td></tr>{% endfor %}
+  </table></div>
+</section>
+
+<section>
+  <h2>{{ _("Скрытые") }} ({{ hidden|length }})</h2>
+  <div class="table-wrap"><table class="mod">
+    {% for r in hidden %}
+    <tr><td><a href="{{ seller_path(r) }}">{{ r.name }}</a></td><td>{{ (r.updated_at|local).strftime("%d.%m.%Y") }}</td>
+      <td><form method="post" action="/staff/sellers/{{ r.id }}/status"><input type="hidden" name="status" value="active"><button>{{ _("Вернуть") }}</button></form></td></tr>
+    {% else %}<tr><td class="muted">{{ _("Нет.") }}</td></tr>{% endfor %}
+  </table></div>
+</section>
+{% endblock %}

@@ -26,6 +26,11 @@ from zakup.goszakup import PORTAL_TZ
 FRESH_DAYS = 3
 CANDIDATES = 12
 HISTORY_MAX = 30
+# Кому товар виден в каталоге (таблица — под именем p): не снят с продажи, и продавец не на
+# проверке и не скрыт. Одно правило для списка, похожих, подбора под лот и счётчиков.
+SELLER_ACTIVE = ("(p.seller_id IS NULL OR EXISTS (SELECT 1 FROM sellers vs "
+                 "WHERE vs.id = p.seller_id AND vs.status = 'active'))")
+VISIBLE = f"p.on_sale AND {SELLER_ACTIVE}"
 _TRACKING = re.compile(r"^(utm_.*|gclid|yclid|fbclid|_openstat|from|ref|srsltid)$", re.IGNORECASE)
 
 
@@ -133,8 +138,8 @@ def candidates(conn: psycopg.Connection, lot_id: int, name: str, exclude: list[s
     cursor = conn.execute(
         """SELECT url, name, seller, city, price, price_unit, specs, checked_at,
                   checked_at > now() - make_interval(days => %(fresh)s) AS fresh
-           FROM product_catalog
-           WHERE available
+           FROM product_catalog p
+           WHERE available AND NOT own AND {VISIBLE}  -- свои товары продавцов — этап 5
              -- те же слова названия в том же разделе — или уже находили для этого же лота
              -- («Электроутюг» в лоте, «Утюг» у продавца)
              AND ((tsv @@ to_tsquery('russian', %(words)s)
@@ -144,7 +149,7 @@ def candidates(conn: psycopg.Connection, lot_id: int, name: str, exclude: list[s
              AND (%(max_price)s::numeric IS NULL OR price IS NULL OR price_unit NOT IN ('', 'шт')
                   OR price < %(max_price)s::numeric)
            ORDER BY %(lot)s = ANY(lots) DESC, ts_rank(tsv, to_tsquery('russian', %(words)s)) DESC, checked_at DESC
-           LIMIT %(limit)s""",
+           LIMIT %(limit)s""".replace("{VISIBLE}", VISIBLE),
         {"words": words, "lot": lot_id, "division": division, "fresh": FRESH_DAYS, "limit": limit, "max_price": max_price,
          "exclude": [url_key(u) for u in exclude or []]})
     names = [column.name for column in cursor.description]
@@ -194,7 +199,8 @@ def _divisions(conn: psycopg.Connection) -> list:
     if _divisions_cache and _divisions_cache[0] > time.monotonic():
         return _divisions_cache[1]
     rows = conn.execute(
-        "SELECT division, count(*) FROM product_catalog WHERE division IS NOT NULL GROUP BY 1 ORDER BY 2 DESC"
+        f"SELECT division, count(*) FROM product_catalog p WHERE division IS NOT NULL AND {VISIBLE} "
+        "GROUP BY 1 ORDER BY 2 DESC"
     ).fetchall()
     _divisions_cache = (time.monotonic() + DIVISIONS_TTL, rows)
     return rows
@@ -227,8 +233,10 @@ def listing(conn: psycopg.Connection, q: str = "", division: str = "", sort: str
     if available:
         clauses.append("p.available")
     # Скрытые продавцы (модерация) — без их товаров.
+    # Снятые с продажи — нигде; товары продавцов не на виду — только сотруднику и владельцу.
+    clauses.append("p.on_sale")
     if not hidden:
-        clauses.append("(p.seller_id IS NULL OR s.status = 'active')")
+        clauses.append(SELLER_ACTIVE)
     where = " AND ".join(clauses)
     joins = "FROM product_catalog p LEFT JOIN sellers s ON s.id = p.seller_id"
     total = conn.execute(f"SELECT count(*) {joins} WHERE {where}", params).fetchone()[0]
@@ -245,7 +253,7 @@ def listing(conn: psycopg.Connection, q: str = "", division: str = "", sort: str
     if divisions is None:
         divisions = _divisions(conn) if seller_id is None else conn.execute(
             """SELECT division, count(*) FROM product_catalog WHERE seller_id = %s AND division IS NOT NULL
-               GROUP BY 1 ORDER BY 2 DESC""", (seller_id,)).fetchall()
+               AND on_sale GROUP BY 1 ORDER BY 2 DESC""", (seller_id,)).fetchall()
     return {"rows": rows, "total": total, "page": max(page, 1), "pages": max(1, -(-total // PAGE_SIZE)),
             "sort": sort, "q": q, "division": division, "divisions": divisions,
             "price_min": price_min, "price_max": price_max, "available": available,
@@ -302,14 +310,18 @@ def get(conn: psycopg.Connection, product_id: int) -> dict[str, Any] | None:
     cur = conn.cursor(row_factory=dict_row)
     item = cur.execute(
         f"""SELECT id, url, name, seller, city, phone, image, price, price_unit, specs, division, lots,
-                   available, first_seen_at, checked_at, price_history, seller_id,
+                   available, first_seen_at, checked_at, price_history, seller_id, own, on_sale,
+                   description, enstru,
                    checked_at > now() - make_interval(days => {FRESH_DAYS}) AS fresh
             FROM product_catalog WHERE id = %s""", (product_id,)).fetchone()
     if item is None:
         return None
     item["seller_row"] = cur.execute(
-        "SELECT id, name, kind, verified, status FROM sellers WHERE id = %s", (item["seller_id"],)
-    ).fetchone() if item["seller_id"] else None
+        "SELECT id, name, kind, verified, status, user_id, prices_with_vat FROM sellers WHERE id = %s",
+        (item["seller_id"],)).fetchone() if item["seller_id"] else None
+    # Цены по количеству (свои товары продавцов): розница и оптовые ступени.
+    item["tiers"] = cur.execute("SELECT min_qty, price FROM product_prices WHERE product_id = %s ORDER BY min_qty",
+                                (product_id,)).fetchall()
     # Лоты — новые первыми (в lots — по порядку находок); удалённых из базы нет и в счёте.
     item["found_count"] = cur.execute("SELECT count(*) AS n FROM lots WHERE id = ANY(%s)",
                                       (item["lots"],)).fetchone()["n"]
@@ -321,9 +333,9 @@ def get(conn: psycopg.Connection, product_id: int) -> dict[str, Any] | None:
     # сначала из той же категории, внутри — по близости названия.
     item["similar"] = cur.execute(
         """SELECT id, name, seller, city, image, price, price_unit, checked_at
-           FROM product_catalog
-           WHERE id <> %(id)s AND (division = %(division)s OR name %% %(name)s)
+           FROM product_catalog p
+           WHERE id <> %(id)s AND {VISIBLE} AND (division = %(division)s OR name %% %(name)s)
            ORDER BY (division IS NOT DISTINCT FROM %(division)s) DESC, similarity(name, %(name)s) DESC, id DESC
-           LIMIT %(limit)s""",
+           LIMIT %(limit)s""".replace("{VISIBLE}", VISIBLE),
         {"id": product_id, "division": item["division"], "name": item["name"], "limit": SIMILAR}).fetchall()
     return item

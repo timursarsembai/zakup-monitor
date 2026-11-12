@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{# Кабинет → «Мой магазин» (web/shop.py, zakup.shop): магазин и его товары. docs/CATALOG_PLAN.md, этап 3. #}
+{% block title %}{{ _("Мой магазин") }}{% endblock %}
+{% block style %}
+  .shop-grid { display: grid; gap: 18px; max-width: 980px; }
+  .box { border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+  .box h2 { margin: 0 0 10px; font-size: 19px; }
+  .form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px 16px; }
+  .form-grid .wide { grid-column: 1 / -1; }
+  .fld { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+  .fld input, .fld textarea, .fld select { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); font: inherit; font-size: 15px; }
+  .fld textarea { min-height: 90px; }
+  .check-line { display: flex; gap: 8px; align-items: center; font-size: 15px; }
+  .err { color: var(--bad); font-weight: 600; }
+  .note { color: var(--good, #2e7d32); }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 13px; white-space: nowrap; border: 1px solid var(--line); }
+  .badge.sub { background: color-mix(in srgb, var(--accent) 14%, transparent); border-color: transparent; }
+  .badge.warn { color: #b26a00; border-color: #b26a00; }
+  .head-line { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: baseline; }
+  .head-line h1 { margin: 0; }
+  table.mine td { vertical-align: top; font-size: 14px; }
+  .row-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+  .row-actions form { margin: 0; }
+  tr.off td { opacity: .6; }
+  button.danger { color: var(--bad); }
+{% endblock %}
+{% block main %}
+<div class="shop-grid">
+<div class="head-line">
+  <h1>{{ _("Мой магазин") }}</h1>
+  {% if shop %}
+    {% if shop.status == "pending" %}<span class="badge warn" title="{{ _("БИН не указан или его нет в реестре — магазин проверит сотрудник. До проверки магазин и товары видите только вы.") }}">{{ _("на проверке") }}</span>
+    {% elif shop.status == "hidden" %}<span class="badge warn">{{ _("скрыт модератором") }}</span>
+    {% elif shop.verified %}<span class="badge sub">✓ {{ _("проверен") }}</span>{% endif %}
+    <a href="{{ seller_path(shop) }}">{{ _("Страница магазина") }} →</a>
+  {% endif %}
+</div>
+{% if not shop %}
+<p>{{ _("Выложите свои товары с ценами — их увидят тендерщики, которые ищут, где купить товар под лот. Бесплатно. Заказов и оплаты на сайте нет: покупатель звонит вам напрямую.") }}</p>
+{% endif %}
+{% if error %}<p class="err" role="alert">{{ _(error) }}</p>{% endif %}
+{% if saved == "shop" %}<p class="note">{{ _("Магазин сохранён.") }}{% if shop and shop.status == "pending" %} {{ _("Его проверит сотрудник — обычно в течение рабочего дня.") }}{% endif %}</p>
+{% elif saved == "product" %}<p class="note">{{ _("Товар сохранён.") }}</p>
+{% elif saved == "deleted" %}<p class="note">{{ _("Товар удалён.") }}</p>{% endif %}
+
+<section class="box">
+  <h2>{{ _("Магазин") if shop else _("Стать продавцом") }}</h2>
+  <form method="post" action="/my/shop" class="form-grid">
+    <label class="fld wide">{{ _("Название магазина *") }}<input name="name" value="{{ form.get('name') or '' }}" maxlength="150" required></label>
+    {% set phones = form.get('phones') or [] %}
+    {% for i in range(3) %}<label class="fld">{{ _("Телефон") }}{{ " *" if i == 0 }}<input name="phone" type="tel" value="{{ phones[i].number if phones|length > i else '' }}" placeholder="+7 7xx xxx-xx-xx" {% if i == 0 %}required{% endif %}></label>{% endfor %}
+    <label class="fld">WhatsApp<input name="whatsapp" type="tel" value="{{ form.get('whatsapp') or '' }}" placeholder="+7 7xx xxx-xx-xx"></label>
+    <label class="fld">E-mail<input name="email" type="email" value="{{ form.get('email') or '' }}" maxlength="200"></label>
+    <label class="fld">{{ _("Сайт") }}<input name="website" value="{{ form.get('website') or '' }}" maxlength="300" placeholder="example.kz"></label>
+    <label class="fld">{{ _("Город") }}<input name="city" value="{{ form.get('city') or '' }}" maxlength="80"></label>
+    <label class="fld">{{ _("Доставка в регионы (через запятую)") }}<input name="regions" value="{{ (form.get('regions') or []) | join(', ') }}"></label>
+    <label class="fld">{{ _("БИН/ИИН") }}<input name="bin" value="{{ form.get('bin') or '' }}" inputmode="numeric" maxlength="12" pattern="\d{12}" placeholder="{{ _("12 цифр") }}"></label>
+    <label class="fld wide">{{ _("О магазине") }}<textarea name="description" maxlength="3000">{{ form.get('description') or '' }}</textarea></label>
+    <label class="check-line wide"><input type="checkbox" name="prices_with_vat" value="1" {% if form.get('prices_with_vat') %}checked{% endif %}> {{ _("Цены указаны с НДС") }}</label>
+    <p class="muted wide" style="margin:0">{{ _("По БИН проверим организацию в реестре юрлиц: найдём — у магазина будет значок «проверен» и он появится в каталоге сразу. Без БИН или если в реестре нет — магазин проверит сотрудник.") }}</p>
+    <div class="wide"><button class="primary">{{ _("Сохранить") if shop else _("Создать магазин") }}</button></div>
+  </form>
+</section>
+
+{% if shop %}
+<section class="box">
+  <div class="head-line"><h2>{{ _("Мои товары") }}</h2><a class="icon-button primary-link" href="/my/shop/products/new">+ {{ _("Добавить товар") }}</a></div>
+  <form method="get" action="/my/shop" class="row-actions" style="margin:10px 0">
+    <input type="search" name="q" value="{{ items.q }}" placeholder="{{ _("Поиск по названию") }}" aria-label="{{ _("Поиск по названию") }}">
+    <button>{{ _("Найти") }}</button>
+  </form>
+  <p>{{ _("Товаров:") }} <b>{{ items.total }}</b></p>
+  <div class="table-wrap"><table class="mine">
+    <tr><th>{{ _("Товар") }}</th><th class="num">{{ _("Цена, ₸") }}</th><th>{{ _("Опт") }}</th><th>{{ _("Наличие") }}</th><th></th></tr>
+    {% for r in items.rows %}
+    <tr class="{{ 'off' if not r.on_sale }}">
+      <td>{% if r.own %}<a href="/my/shop/products/{{ r.id }}">{{ r.name }}</a>{% else %}{{ r.name }} <span class="badge" title="{{ _("Найден поиском с ИИ на вашем сайте: изменить нельзя, можно снять с продажи") }}">{{ _("найден в интернете") }}</span>{% endif %}
+        {% if not r.on_sale %}<div class="muted">{{ _("снят с продажи") }}</div>{% endif %}</td>
+      <td class="num">{{ r.price | money if r.price is not none else "—" }}{% if r.price_unit %} <span class="muted">/ {{ r.price_unit }}</span>{% endif %}</td>
+      <td>{{ r.wholesale or "—" }}</td>
+      <td>{{ _("в наличии") if r.available else _("нет") }}</td>
+      <td><div class="row-actions">
+        <a href="{{ product_path(r) }}">{{ _("Открыть") }}</a>
+        <form method="post" action="/my/shop/products/{{ r.id }}/sale"><input type="hidden" name="on" value="{{ '' if r.on_sale else '1' }}"><button>{{ _("Снять с продажи") if r.on_sale else _("Вернуть в продажу") }}</button></form>
+        {% if r.own %}<form method="post" action="/my/shop/products/{{ r.id }}/delete" data-confirm="{{ _("Удалить товар?") }}"><button class="danger">{{ _("Удалить") }}</button></form>{% endif %}
+      </div></td>
+    </tr>
+    {% else %}
+    <tr><td colspan="5" class="muted">{{ _("Товаров пока нет — добавьте первый.") if not items.q else _("Ничего не нашлось.") }}</td></tr>
+    {% endfor %}
+  </table></div>
+  {% if items.pages > 1 %}<p>{% if items.page > 1 %}<a href="/my/shop?q={{ items.q | urlencode }}&page={{ items.page - 1 }}">← {{ _("Назад") }}</a>{% endif %} <span class="muted">{{ _("стр.") }} {{ items.page }} {{ _("из") }} {{ items.pages }}</span> {% if items.page < items.pages %}<a href="/my/shop?q={{ items.q | urlencode }}&page={{ items.page + 1 }}">{{ _("Дальше") }} →</a>{% endif %}</p>{% endif %}
+</section>
+{% endif %}
+</div>
+{% endblock %}

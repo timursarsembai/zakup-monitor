@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {# Страница товара каталога (web/catalog.py, zakup.products.get): открыта всем и поисковикам;
-   лоты, где товар находили, — по подписке. Продавец пока текстом — страницы продавцов на
-   этапе 2 (docs/CATALOG_PLAN.md). #}
+   лоты, где товар находили, — по подписке. Свой товар продавца (own) — с описанием и оптовыми
+   ценами (product_prices), без ссылки на чужой сайт. #}
 {% block title %}{{ item.name }}{% if item.price is not none %} — {{ item.price | money }} ₸{% endif %}{% endblock %}
 {% block description %}{{ item.name }}{% if item.price is not none %}: {{ item.price | money }} ₸{% if item.price_unit %} / {{ item.price_unit }}{% endif %}, {{ _("цена на") }} {{ (item.checked_at|local).strftime("%d.%m.%Y") }}{% endif %}{% if item.seller %}, {{ _("продавец") }} {{ item.seller }}{% endif %}{% if item.city %} ({{ item.city }}){% endif %}.{% endblock %}
 {% block structured %}<script type="application/ld+json">{{ structured | tojson }}</script>{% endblock %}
@@ -37,6 +37,8 @@
     {% if item.price is not none %}
     <div class="price">{{ item.price | money }} ₸{% if item.price_unit %} <span class="muted" style="font-size:16px;font-weight:400">/ {{ item.price_unit }}</span>{% endif %}</div>
     {% endif %}
+    {% if item.seller_row and item.seller_row.prices_with_vat is not none %}<div class="muted">{{ _("с НДС") if item.seller_row.prices_with_vat else _("без НДС") }}</div>{% endif %}
+    {% if not item.on_sale %}<div class="gone">{{ _("снят с продажи") }}</div>{% endif %}
     <div class="{{ 'gone' if not item.available else ('muted' if item.fresh else 'stale') }}">{% if not item.available %}{{ _("нет в наличии на") }}{% else %}{{ _("цена на") }}{% endif %} {{ (item.checked_at|local).strftime("%d.%m.%Y") }}{% if item.available and not item.fresh %} · {{ _("цене больше") }} {{ fresh_days }} {{ _("дн. — уточняйте у продавца") }}{% endif %}</div>
     <dl class="facts">
       <dt>{{ _("Продавец") }}</dt><dd>{% if item.seller_row %}<a href="{{ seller_path(item.seller_row) }}">{{ item.seller_row.name }}</a>{% if item.seller_row.kind == "found" %} <span class="badge">{{ _("найден в интернете") }}</span>{% elif item.seller_row.verified %} <span class="badge sub">✓ {{ _("проверен") }}</span>{% endif %}{% else %}{{ item.seller or "—" }}{% endif %}</dd>
@@ -45,11 +47,30 @@
          (личные номера ИП не должны попадать в индекс); вошедшим — да. #}
       {% if item.phone %}<dt>{{ _("Телефон") }}</dt><dd>{% if request.state.user_id %}<a href="tel:{{ item.phone | replace(' ', '') }}">{{ item.phone }}</a>{% else %}<a href="/login?next={{ product_path(item) | urlencode }}">{{ _("Войдите, чтобы увидеть") }}</a>{% endif %}</dd>{% endif %}
       {% if item.division %}<dt>{{ _("Категория") }}</dt><dd>{{ division_name(item.division) or item.division }}</dd>{% endif %}
+      {% if item.enstru %}<dt>{{ _("Код ЕНС ТРУ") }}</dt><dd>{{ item.enstru }}</dd>{% endif %}
       <dt>{{ _("В каталоге с") }}</dt><dd>{{ (item.first_seen_at|local).strftime("%d.%m.%Y") }}</dd>
     </dl>
-    <a class="icon-button" href="{{ item.url }}" target="_blank" rel="noopener noreferrer nofollow">{{ _("На сайте продавца") }} ↗</a>
+    {% if item.url %}<a class="icon-button" href="{{ item.url }}" target="_blank" rel="noopener noreferrer nofollow">{{ _("На сайте продавца") }} ↗</a>{% endif %}
+    {% if item.seller_row and request.state.user_id and item.seller_row.user_id == request.state.user_id and item.own %}<a class="icon-button" href="/my/shop/products/{{ item.id }}">{{ _("Изменить") }}</a>{% endif %}
   </div>
 </div>
+
+{% if item.tiers|length > 1 %}
+<section>
+  <h2>{{ _("Цены по количеству") }}</h2>
+  <div class="table-wrap"><table>
+    <tr><th>{{ _("Количество") }}</th><th class="num">{{ _("Цена за единицу, ₸") }}</th></tr>
+    {% for t in item.tiers %}<tr><td>{{ _("от") }} {{ '%g'|format(t.min_qty) }}{% if item.price_unit %} {{ item.price_unit }}{% endif %}</td><td class="num"><b>{{ t.price | money }}</b></td></tr>{% endfor %}
+  </table></div>
+</section>
+{% endif %}
+
+{% if item.description %}
+<section>
+  <h2>{{ _("Описание") }}</h2>
+  <p style="white-space:pre-line">{{ item.description }}</p>
+</section>
+{% endif %}
 
 {% if item.specs %}
 <section>

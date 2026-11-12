@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{# Кабинет → «Мой магазин» → товар: добавить или изменить (web/shop.py, zakup.shop.parse_product).
+   Цены: розница обязательна, оптовые ступени «от N — цена за единицу» — по желанию. #}
+{% block title %}{{ _("Изменить товар") if item.id else _("Новый товар") }} — {{ shop.name }}{% endblock %}
+{% block style %}
+  .box { border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; max-width: 980px; }
+  .form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px 16px; }
+  .form-grid .wide { grid-column: 1 / -1; }
+  .fld { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+  .fld input, .fld textarea, .fld select { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); font: inherit; font-size: 15px; }
+  .fld textarea { min-height: 90px; }
+  .check-line { display: flex; gap: 8px; align-items: center; font-size: 15px; }
+  .err { color: var(--bad); font-weight: 600; }
+  table.tiers td { padding: 4px 8px 4px 0; }
+  table.tiers input { width: 140px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); font: inherit; }
+  .crumbs { margin: 4px 0 10px; font-size: 14px; }
+{% endblock %}
+{% block main %}
+<nav class="crumbs muted"><a href="/my/shop">{{ _("Мой магазин") }}</a></nav>
+<h1>{{ _("Изменить товар") if item.id else _("Новый товар") }}</h1>
+{% if error %}<p class="err" role="alert">{{ _(error) }}</p>{% endif %}
+<form method="post" action="/my/shop/products" class="box">
+  <input type="hidden" name="product_id" value="{{ item.id or '' }}">
+  <div class="form-grid">
+    <label class="fld wide">{{ _("Название *") }}<input name="name" value="{{ item.name or '' }}" maxlength="300" required></label>
+    <label class="fld">{{ _("Категория") }}<select name="category"><option value="">{{ _("— выберите —") }}</option>
+      {% for code in divisions %}<option value="{{ code }}" {% if item.division == code %}selected{% endif %}>{{ division_name(code) }}</option>{% endfor %}</select></label>
+    <label class="fld">{{ _("Код ЕНС ТРУ (по желанию — точнее подбор под лоты)") }}<input name="enstru" value="{{ item.enstru or '' }}" placeholder="139224.992.000000" maxlength="17"></label>
+    <label class="fld">{{ _("Единица измерения *") }}<input name="unit" value="{{ item.price_unit or '' }}" list="units" maxlength="30" required></label>
+    <datalist id="units">{% for u in units %}<option value="{{ u }}">{% endfor %}</datalist>
+    <label class="fld">{{ _("Цена за единицу, ₸ *") }}<input name="retail" inputmode="decimal" value="{{ item.retail if item.retail is defined else (item.price if item.price is not none else '') }}" required></label>
+    <label class="check-line"><input type="checkbox" name="available" value="1" {% if item.available %}checked{% endif %}> {{ _("В наличии") }}</label>
+
+    <div class="wide">
+      <b>{{ _("Оптовые цены") }}</b>
+      <p class="muted" style="margin:4px 0 8px">{{ _("Цена за единицу при покупке от указанного количества. Чем больше количество — тем цена ниже или такая же. В подборе под лот возьмём цену по количеству лота.") }} {{ _("Цены — в тенге") }}{% if shop.prices_with_vat %} {{ _("с НДС") }}{% elif shop.prices_with_vat is not none %} {{ _("без НДС") }}{% endif %} ({{ _("как в настройках магазина") }}).</p>
+      {% set rows = item.raw_tiers if item.raw_tiers is defined else item.tiers[1:] %}
+      <table class="tiers">
+        <tr><th>{{ _("От, единиц") }}</th><th>{{ _("Цена за единицу, ₸") }}</th></tr>
+        {% for n, p in rows %}<tr><td><input name="qty" inputmode="decimal" value="{{ n }}"></td><td><input name="tier_price" inputmode="decimal" value="{{ p }}"></td></tr>{% endfor %}
+        {% for i in range([max_tiers - rows|length, 3]|min) %}<tr><td><input name="qty" inputmode="decimal" placeholder="10"></td><td><input name="tier_price" inputmode="decimal"></td></tr>{% endfor %}
+      </table>
+    </div>
+
+    <label class="fld wide">{{ _("Описание") }}<textarea name="description" maxlength="5000">{{ item.description or '' }}</textarea></label>
+    <label class="fld wide">{{ _("Характеристики — по строке «название: значение»") }}<textarea name="specs" placeholder="{{ _("Цвет: белый") }}&#10;{{ _("Размер: 50×70 см") }}">{% if item.specs_text is defined %}{{ item.specs_text }}{% else %}{% for s in item.specs %}{{ s.name }}: {{ s.value }}
+{% endfor %}{% endif %}</textarea></label>
+    <div class="wide"><button class="primary">{{ _("Сохранить") }}</button> <a href="/my/shop">{{ _("Отмена") }}</a></div>
+  </div>
+</form>
+{% endblock %}

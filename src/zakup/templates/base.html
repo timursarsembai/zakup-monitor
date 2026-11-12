@@ -331,7 +331,7 @@
     <a href="/matches" {% if not request.state.paid %}data-paid {% endif %}class="{{ 'guest-hide ' if not request.state.user_id }}{{ 'on' if path == '/matches' }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg><span>{{ _("nav:Лента") }}</span></a>
     {% if not request.state.user_id %}<a href="/login?next={{ path | urlencode }}" class="nav-auth"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3"/></svg><span>{{ _("Вход") }}</span></a>
     <a href="/register" class="nav-auth"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="4"/><path d="M2 21a7 7 0 0 1 14 0M19 8v6M16 11h6"/></svg><span>{{ _("Регистрация") }}</span></a>{% endif %}
-    <button type="button" class="nav-more {{ 'on' if path.startswith('/orgs') or (not request.state.user_id and path in ('/my', '/research', '/matches')) or path in ('/subscriptions', '/categories', '/regions', '/analytics', '/settings', '/pricing', '/balance', '/dashboard', '/products') or path.startswith(('/org/', '/category/', '/region/')) }}" data-more aria-expanded="false" aria-controls="more-sheet"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg><span>{{ _("nav:Ещё") }}</span></button>
+    <button type="button" class="nav-more {{ 'on' if path.startswith('/orgs') or (not request.state.user_id and path in ('/my', '/research', '/matches')) or path in ('/subscriptions', '/categories', '/regions', '/analytics', '/settings', '/pricing', '/balance', '/dashboard', '/products', '/staff/sellers') or path.startswith(('/org/', '/category/', '/region/', '/my/shop', '/sellers')) }}" data-more aria-expanded="false" aria-controls="more-sheet"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg><span>{{ _("nav:Ещё") }}</span></button>
   </nav>
   <div class="logout">
     {% if request.state.user_id %}<span class="muted who">{{ request.state.email }}</span>{% endif %}
@@ -408,10 +408,12 @@
     {{ tile("/calculator", _("Калькулятор маржи"), '<rect x="5" y="2" width="14" height="20" rx="2"/><path d="M8 6h8M8 11h.01M12 11h.01M16 11h.01M8 15h.01M12 15h.01M16 15h.01M8 19h.01M12 19h4"/>', path == "/calculator") }}
     {% if request.state.staff %}{{ tile("/dashboard", _("Дашборд"), '<rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>', path == "/dashboard") }}{% endif %}
     {{ tile("/products", _("Каталог товаров"), '<path d="M3 7l9-4 9 4-9 4-9-4z"/><path d="M3 7v10l9 4 9-4V7"/><path d="M12 11v10"/>', path.startswith("/products")) }}
+    {% if request.state.staff %}{{ tile("/staff/sellers", _("Продавцы: модерация"), '<path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/><path d="m9 12 2 2 4-4"/>', path == "/staff/sellers") }}{% endif %}
   </div>
   <div class="more-head">{{ _("Аккаунт") }}</div>
   <div class="more-grid g1">
     {% if request.state.user_id and not request.state.staff %}{{ tile("/balance", _("Поиски:") ~ " " ~ request.state.searches, '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>', path == "/balance") }}{% endif %}
+    {% if request.state.user_id %}{{ tile("/my/shop", _("Мой магазин"), '<path d="M3 9l1.5-5h15L21 9M3 9h18v2a3 3 0 0 1-6 0 3 3 0 0 1-6 0 3 3 0 0 1-6 0zM5 13v8h14v-8M10 21v-5h4v5"/>', path.startswith("/my/shop")) }}{% endif %}
     {{ tile("/pricing", _("Тариф"), '<path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/>', path == "/pricing") }}
     {{ tile("/settings", _("Настройки"), '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1 7 17M17 7l2.1-2.1"/>', path == "/settings") }}
     {% if request.state.user_id %}
