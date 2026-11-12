@@ -62,13 +62,12 @@ def test_catalog_candidates_go_into_next_search(conn, monkeypatch):
     assert "страницу НЕ открывай" in prompts[1]
 
 
-def test_products_page_staff_only(client, conn):
+def test_products_page_open_to_all(client, conn):
     _lot(conn)
     products.remember(conn, 90, [{"name": "Стол дубовый", "url": "https://mebel.kz/stol", "price": 90000,
                                   "price_unit": "шт", "specs": [{"name": "Материал", "value": "дуб"}]}])
     conn.commit()
-    assert client.get("/products", follow_redirects=False).status_code != 200
-    _login(client)
+    # Каталог открыт всем (решение владельца 2026-11-12), без входа.
     page = client.get("/products?q=стол&sort=price").text
     assert "Стол дубовый" in page and "Материал: дуб" in page and "цена на" in page
     assert "Ничего не нашлось" in client.get("/products?q=диван").text

@@ -1,4 +1,4 @@
-"""Для сотрудников: дашборд платформы, журнал действий, каталог товаров из поиска."""
+"""Для сотрудников: дашборд платформы, журнал действий. Каталог товаров — web/catalog.py."""
 
 from datetime import datetime, timedelta
 from urllib.parse import parse_qs, urlencode
@@ -8,7 +8,6 @@ from fastapi import APIRouter, HTTPException, Request
 from zakup import (
     audit,
     insights,
-    products,
 )
 from zakup.goszakup import PORTAL_TZ
 from zakup.web import core
@@ -33,20 +32,6 @@ def dashboard_data(staff: Staff, section: str = "overview", days: int = 30):
         raise HTTPException(404)
     with core.pool.connection() as conn:
         return insights.section(conn, section, days)
-
-
-@router.get("/products")
-def products_page(request: Request, _: Staff, q: str = "", category: str = "", sort: str = "updated",
-                  page: int = 1):
-    """Каталог товаров, найденных поиском с ИИ (zakup.products) — пока только сотрудникам."""
-    page = min(max(page, 1), MAX_PAGE)
-    with core.pool.connection() as conn:
-        data = products.listing(conn, q[:200], category[:2] if category.isdigit() else "", sort, page)
-    return templates.TemplateResponse(request, "products.html", {
-        "p": data, "sorts": products.SORTS, "fresh_days": products.FRESH_DAYS,
-        "products_url": lambda **changes: "/products?" + urlencode(
-            {k: v for k, v in {"q": data["q"], "category": data["division"], "sort": data["sort"],
-                               "page": data["page"], **changes}.items() if v and not (k == "page" and v == 1)})})
 
 
 LOG_PAGE_SIZES = (20, 50, 100)

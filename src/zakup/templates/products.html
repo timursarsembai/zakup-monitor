@@ -1,7 +1,8 @@
 {% extends "base.html" %}
-{# Каталог товаров из поиска с ИИ (zakup.products) — пока только сотрудникам. Вид «таблица /
-   плитка» — общий переключатель data-rview (app.js). #}
+{# Каталог товаров из поиска с ИИ (zakup.products) — открыт всем (web/catalog.py); лоты, где
+   товар находили, — по подписке. Вид «таблица / плитка» — общий переключатель data-rview (app.js). #}
 {% block title %}{{ _("Каталог товаров") }}{% endblock %}
+{% block description %}{{ _("Товары для госзакупок с ценами продавцов Казахстана: характеристики, цена на дату, где купить.") }}{% endblock %}
 {% block style %}
   .p-tools { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: end; margin: 12px 0; }
   .p-tools label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
@@ -33,7 +34,7 @@
 {% endblock %}
 {% block main %}
 <h1>{{ _("Каталог товаров") }}</h1>
-<p class="muted">{{ _("Товары, которые нашёл поиск с ИИ. Новый поиск сначала берёт подходящее отсюда: цену, проверенную не раньше чем") }} {{ fresh_days }} {{ _("дн. назад, — без открытия страницы, более старую — перепроверяет. Видно только администраторам и модераторам.") }}</p>
+<p class="muted">{{ _("Товары, которые нашёл поиск с ИИ под лоты госзакупок, — с ценой на дату проверки. Новый поиск сначала берёт подходящее отсюда: цену, проверенную не раньше чем") }} {{ fresh_days }} {{ _("дн. назад, — без открытия страницы, более старую — перепроверяет.") }}</p>
 <form method="get" action="/products" class="p-tools">
   <label>{{ _("Название или продавец") }}<input type="search" name="q" value="{{ p.q }}" placeholder="{{ _("например, огнетушитель") }}"></label>
   <label>{{ _("Категория") }}<select name="category"><option value="">{{ _("Все") }}</option>
@@ -51,14 +52,14 @@
   {% for r in p.rows %}
   <tr>
     <td class="p-img">{% if r.image %}<img src="{{ r.image }}" alt="" loading="lazy" referrerpolicy="no-referrer">{% endif %}</td>
-    <td class="p-name"><a class="title" href="{{ r.url }}" target="_blank" rel="noopener noreferrer nofollow">{{ r.name }}</a>
+    <td class="p-name"><a class="title" href="{{ product_path(r) }}">{{ r.name }}</a>
       {% if r.specs %}<ul class="specs">{% for s in r.specs[:5] %}<li>{{ s.name }}: {{ s.value }}</li>{% endfor %}{% if r.specs|length > 5 %}<li>{{ _("и ещё") }} {{ r.specs|length - 5 }}</li>{% endif %}</ul>{% endif %}</td>
-    <td data-label="{{ _("Продавец") }}">{{ r.seller or "—" }}{% if r.city %}<div class="muted">{{ r.city }}</div>{% endif %}{% if r.phone %}<div class="muted">{{ r.phone }}</div>{% endif %}</td>
+    <td data-label="{{ _("Продавец") }}">{{ r.seller or "—" }}{% if r.city %}<div class="muted">{{ r.city }}</div>{% endif %}{% if r.phone and request.state.user_id %}<div class="muted">{{ r.phone }}</div>{% endif %}</td>
     <td class="p-price" data-label="{{ _("Цена, ₸") }}">{% if r.price is not none %}<b>{{ r.price | money }}</b>{% if r.price_unit %} <span class="muted">/ {{ r.price_unit }}</span>{% endif %}{% else %}—{% endif %}
       <div class="{{ 'gone' if not r.available else ('muted' if r.fresh else 'stale') }}">{% if not r.available %}{{ _("нет в наличии на") }}{% else %}{{ _("цена на") }}{% endif %} {{ (r.checked_at|local).strftime("%d.%m.%Y") }}{% if r.available and not r.fresh %} · {{ _("перепроверим") }}{% endif %}</div>
       {% if r.price_history %}{% set prev = r.price_history[0] %}<div class="muted" title="{{ _("Прежняя цена") }}">{{ _("было") }} {{ prev.price | money }} ({{ prev.at[8:10] }}.{{ prev.at[5:7] }})</div>{% endif %}</td>
     <td data-label="{{ _("Категория") }}">{{ division_name(r.division) if r.division else "—" }}</td>
-    <td data-label="{{ _("Найден в лотах") }}">{% for lot in r.lots[-3:]|reverse %}<a href="/lots/{{ lot }}">{{ lot }}</a>{{ ", " if not loop.last }}{% endfor %}{% if r.lots|length > 3 %} <span class="muted">{{ _("и ещё") }} {{ r.lots|length - 3 }}</span>{% endif %}</td>
+    <td data-label="{{ _("Найден в лотах") }}">{% if not r.lots_found %}—{% elif request.state.paid %}{% for lot in r.lots[-3:]|reverse %}<a href="/lots/{{ lot }}">{{ lot }}</a>{{ ", " if not loop.last }}{% endfor %}{% if r.lots|length > 3 %} <span class="muted">{{ _("и ещё") }} {{ r.lots|length - 3 }}</span>{% endif %}{% else %}{{ r.lots_found }} · <button type="button" class="link-button" data-paid data-feature="catalog_lots">{{ _("по подписке") }} 🔒</button>{% endif %}</td>
   </tr>
   {% else %}
   <tr><td colspan="6" class="muted">{{ _("Пока пусто: каталог пополняется с каждым поиском товаров.") if not p.q and not p.division else _("Ничего не нашлось.") }}</td></tr>

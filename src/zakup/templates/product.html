@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{# Страница товара каталога (web/catalog.py, zakup.products.get): открыта всем и поисковикам;
+   лоты, где товар находили, — по подписке. Продавец пока текстом — страницы продавцов на
+   этапе 2 (docs/CATALOG_PLAN.md). #}
+{% block title %}{{ item.name }}{% if item.price is not none %} — {{ item.price | money }} ₸{% endif %}{% endblock %}
+{% block description %}{{ item.name }}{% if item.price is not none %}: {{ item.price | money }} ₸{% if item.price_unit %} / {{ item.price_unit }}{% endif %}, {{ _("цена на") }} {{ (item.checked_at|local).strftime("%d.%m.%Y") }}{% endif %}{% if item.seller %}, {{ _("продавец") }} {{ item.seller }}{% endif %}{% if item.city %} ({{ item.city }}){% endif %}.{% endblock %}
+{% block structured %}<script type="application/ld+json">{{ structured | tojson }}</script>{% endblock %}
+{% block style %}
+  .crumbs { margin: 4px 0 10px; font-size: 14px; }
+  .prod { display: grid; grid-template-columns: minmax(0, 320px) minmax(0, 1fr); gap: 20px 28px; align-items: start; }
+  @media (max-width: 720px) { .prod { grid-template-columns: minmax(0, 1fr); } }
+  .prod-img { border: 1px solid var(--line); border-radius: 12px; background: #fff; aspect-ratio: 1; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  .prod-img img { max-width: 100%; max-height: 100%; object-fit: contain; }
+  .prod-img .none { color: #888; font-size: 14px; }
+  .prod h1 { margin: 0 0 8px; font-size: 24px; line-height: 1.25; overflow-wrap: anywhere; }
+  .price { font-size: 26px; font-weight: 700; margin: 6px 0 2px; }
+  .facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 14px; margin: 14px 0; }
+  .facts dt { color: var(--muted); } .facts dd { margin: 0; overflow-wrap: anywhere; }
+  .stale { color: #b26a00; } .gone { color: var(--bad); }
+  table.specs td { vertical-align: top; } table.specs td:first-child { color: var(--muted); width: 40%; }
+  .similar { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+  .similar a.card { display: flex; flex-direction: column; gap: 6px; border: 1px solid var(--line); border-radius: 12px; padding: 10px; color: inherit; text-decoration: none; }
+  .similar a.card:hover { border-color: var(--accent); }
+  .similar img { width: 100%; height: 120px; object-fit: contain; background: #fff; border-radius: 8px; }
+  .similar .name { font-weight: 600; font-size: 14px; overflow-wrap: anywhere; }
+  section { margin-top: 24px; }
+{% endblock %}
+{% block main %}
+<nav class="crumbs muted"><a href="/products">{{ _("Каталог товаров") }}</a>{% if item.division %} › <a href="/products?category={{ item.division }}">{{ division_name(item.division) or item.division }}</a>{% endif %}</nav>
+<div class="prod">
+  <div class="prod-img">{% if item.image %}<img src="{{ item.image }}" alt="{{ item.name }}" referrerpolicy="no-referrer">{% else %}<span class="none">{{ _("Нет фото") }}</span>{% endif %}</div>
+  <div>
+    <h1>{{ item.name }}</h1>
+    {% if item.price is not none %}
+    <div class="price">{{ item.price | money }} ₸{% if item.price_unit %} <span class="muted" style="font-size:16px;font-weight:400">/ {{ item.price_unit }}</span>{% endif %}</div>
+    {% endif %}
+    <div class="{{ 'gone' if not item.available else ('muted' if item.fresh else 'stale') }}">{% if not item.available %}{{ _("нет в наличии на") }}{% else %}{{ _("цена на") }}{% endif %} {{ (item.checked_at|local).strftime("%d.%m.%Y") }}{% if item.available and not item.fresh %} · {{ _("цене больше") }} {{ fresh_days }} {{ _("дн. — уточняйте у продавца") }}{% endif %}</div>
+    <dl class="facts">
+      <dt>{{ _("Продавец") }}</dt><dd>{{ item.seller or "—" }}</dd>
+      {% if item.city %}<dt>{{ _("Город") }}</dt><dd>{{ item.city }}</dd>{% endif %}
+      {# Телефон взят со страницы продавца поиском с ИИ — гостям и поисковикам не показываем
+         (личные номера ИП не должны попадать в индекс); вошедшим — да. #}
+      {% if item.phone %}<dt>{{ _("Телефон") }}</dt><dd>{% if request.state.user_id %}<a href="tel:{{ item.phone | replace(' ', '') }}">{{ item.phone }}</a>{% else %}<a href="/login?next={{ product_path(item) | urlencode }}">{{ _("Войдите, чтобы увидеть") }}</a>{% endif %}</dd>{% endif %}
+      {% if item.division %}<dt>{{ _("Категория") }}</dt><dd>{{ division_name(item.division) or item.division }}</dd>{% endif %}
+      <dt>{{ _("В каталоге с") }}</dt><dd>{{ (item.first_seen_at|local).strftime("%d.%m.%Y") }}</dd>
+    </dl>
+    <a class="icon-button" href="{{ item.url }}" target="_blank" rel="noopener noreferrer nofollow">{{ _("На сайте продавца") }} ↗</a>
+  </div>
+</div>
+
+{% if item.specs %}
+<section>
+  <h2>{{ _("Характеристики") }}</h2>
+  <div class="table-wrap"><table class="specs">{% for s in item.specs %}<tr><td>{{ s.name }}</td><td>{{ s.value }}</td></tr>{% endfor %}</table></div>
+</section>
+{% endif %}
+
+{% if item.price_history %}
+<section>
+  <h2>{{ _("История цены") }}</h2>
+  <div class="table-wrap"><table>
+    <tr><th>{{ _("Дата") }}</th><th class="num">{{ _("Цена, ₸") }}</th></tr>
+    <tr><td>{{ (item.checked_at|local).strftime("%d.%m.%Y") }}</td><td class="num"><b>{{ item.price | money if item.price is not none else "—" }}</b></td></tr>
+    {% for h in item.price_history %}<tr><td>{{ h.at[8:10] }}.{{ h.at[5:7] }}.{{ h.at[:4] }}</td><td class="num">{{ h.price | money }}</td></tr>{% endfor %}
+  </table></div>
+</section>
+{% endif %}
+
+{% if item.found_count %}
+<section>
+  <h2>{{ _("Найден в лотах госзакупок") }}</h2>
+  {% if request.state.paid %}
+  <ul>{% for lot in item.found_in %}<li><a href="/lots/{{ lot.id }}">{{ pick(lot.name_ru, lot.name_kz) or lot.id }}</a> <span class="muted">— {{ lot.amount | money }} ₸{% if lot.count %}, {{ '%g'|format(lot.count) }} {{ (lot.unit_name or "")|lower }}{% endif %}</span></li>{% endfor %}</ul>
+  {% else %}
+  <p>{{ _("Под этот товар уже были лоты:") }} <b>{{ item.found_count }}</b>. <button type="button" class="link-button" data-paid data-feature="catalog_lots">{{ _("Какие — по подписке") }} 🔒</button></p>
+  {% endif %}
+</section>
+{% endif %}
+
+{% if item.similar %}
+<section>
+  <h2>{{ _("Похожие товары") }}</h2>
+  <div class="similar">{% for s in item.similar %}
+    <a class="card" href="{{ product_path(s) }}">{% if s.image %}<img src="{{ s.image }}" alt="" loading="lazy" referrerpolicy="no-referrer">{% endif %}
+      <span class="name">{{ s.name }}</span>
+      <span>{% if s.price is not none %}<b>{{ s.price | money }} ₸</b>{% if s.price_unit %} <span class="muted">/ {{ s.price_unit }}</span>{% endif %}{% else %}—{% endif %}</span>
+      <span class="muted">{{ s.seller or "" }}{% if s.city %}, {{ s.city }}{% endif %}</span></a>
+  {% endfor %}</div>
+</section>
+{% endif %}
+{% endblock %}

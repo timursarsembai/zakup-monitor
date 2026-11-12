@@ -5,7 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg_pool import ConnectionPool
 
-from zakup import auth, branding, catalog, db, orgs, outcomes, suppliers, tariff, web
+from zakup import auth, branding, catalog, db, orgs, outcomes, products, suppliers, tariff, web
 from zakup.goszakup import Page
 
 
@@ -109,6 +109,7 @@ def client(conn, monkeypatch):
     # Тариф кэшируется в памяти процесса — между тестами сбрасываем.
     monkeypatch.setattr(tariff, "_cache", None)
     monkeypatch.setattr(branding, "_cache", None)
+    monkeypatch.setattr(products, "_divisions_cache", None)
     monkeypatch.setattr(outcomes, "_summaries", {})
     monkeypatch.setattr(suppliers, "_name_cache", {})
     monkeypatch.setattr(suppliers, "_history_cache", {})

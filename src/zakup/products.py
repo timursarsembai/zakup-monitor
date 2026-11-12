@@ -12,11 +12,13 @@
 """
 
 import re
+import time
 from datetime import datetime
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import psycopg
+from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from zakup.goszakup import PORTAL_TZ
@@ -176,6 +178,21 @@ _ORDER = {"updated": "checked_at DESC, id DESC", "price": "price NULLS LAST, id 
 PAGE_SIZE = 50
 
 
+DIVISIONS_TTL = 600  # список категорий меняется редко, а страница открыта всем и роботам
+_divisions_cache: tuple[float, list] | None = None
+
+
+def _divisions(conn: psycopg.Connection) -> list:
+    global _divisions_cache
+    if _divisions_cache and _divisions_cache[0] > time.monotonic():
+        return _divisions_cache[1]
+    rows = conn.execute(
+        "SELECT division, count(*) FROM product_catalog WHERE division IS NOT NULL GROUP BY 1 ORDER BY 2 DESC"
+    ).fetchall()
+    _divisions_cache = (time.monotonic() + DIVISIONS_TTL, rows)
+    return rows
+
+
 def listing(conn: psycopg.Connection, q: str = "", division: str = "", sort: str = "updated",
             page: int = 1) -> dict[str, Any]:
     """Страница каталога: поиск по названию и продавцу, раздел, сортировка."""
@@ -192,14 +209,14 @@ def listing(conn: psycopg.Connection, q: str = "", division: str = "", sort: str
     cursor = conn.execute(
         f"""SELECT id, url, name, seller, city, phone, image, price, price_unit, specs, division, lots,
                    available, first_seen_at, checked_at, price_history,
-                   checked_at > now() - make_interval(days => {FRESH_DAYS}) AS fresh
+                   checked_at > now() - make_interval(days => {FRESH_DAYS}) AS fresh,
+                   -- лоты, которые есть в базе (удалённых не считаем — как на странице товара)
+                   (SELECT count(*) FROM lots l WHERE l.id = ANY(product_catalog.lots)) AS lots_found
             FROM product_catalog WHERE {where} ORDER BY {_ORDER[sort]}
             LIMIT {PAGE_SIZE} OFFSET {(max(page, 1) - 1) * PAGE_SIZE}""", params)
     names = [column.name for column in cursor.description]
     rows = [dict(zip(names, row, strict=True)) for row in cursor.fetchall()]
-    divisions = conn.execute(
-        "SELECT division, count(*) FROM product_catalog WHERE division IS NOT NULL GROUP BY 1 ORDER BY 2 DESC"
-    ).fetchall()
+    divisions = _divisions(conn)
     return {"rows": rows, "total": total, "page": max(page, 1), "pages": max(1, -(-total // PAGE_SIZE)),
             "sort": sort, "q": q, "division": division, "divisions": divisions}
 
@@ -221,3 +238,53 @@ def backfill(conn: psycopg.Connection) -> int:
         count += len(items)
     conn.commit()
     return count
+
+
+_TRANSLIT = dict(zip("абвгдеёжзийклмнопрстуфхцчшщъыьэюяәғқңөұүһі",
+                     ["a", "b", "v", "g", "d", "e", "e", "zh", "z", "i", "i", "k", "l", "m", "n", "o", "p", "r",
+                      "s", "t", "u", "f", "kh", "ts", "ch", "sh", "shch", "", "y", "", "e", "iu", "ia",
+                      "a", "g", "k", "n", "o", "u", "u", "h", "i"], strict=True))
+SLUG_MAX = 60
+SIMILAR = 8
+FOUND_IN = 20  # лотов на странице товара
+
+
+def slug(name: str) -> str:
+    """Читаемая часть адреса товара латиницей: «Подушка спальная» → «podushka-spalnaia».
+    Адрес держится на номере, slug — для людей и поисковиков (неверный — перенаправляем)."""
+    text = "".join(_TRANSLIT.get(ch, ch) for ch in (name or "").lower())
+    words = re.sub(r"[^a-z0-9]+", "-", text).strip("-")
+    return words[:SLUG_MAX].rstrip("-") or "tovar"
+
+
+def path(row: dict[str, Any]) -> str:
+    return f"/products/{row['id']}-{slug(row['name'])}"
+
+
+def get(conn: psycopg.Connection, product_id: int) -> dict[str, Any] | None:
+    """Товар для его страницы, с лотами, где его находили, и похожими."""
+    cur = conn.cursor(row_factory=dict_row)
+    item = cur.execute(
+        f"""SELECT id, url, name, seller, city, phone, image, price, price_unit, specs, division, lots,
+                   available, first_seen_at, checked_at, price_history,
+                   checked_at > now() - make_interval(days => {FRESH_DAYS}) AS fresh
+            FROM product_catalog WHERE id = %s""", (product_id,)).fetchone()
+    if item is None:
+        return None
+    # Лоты — новые первыми (в lots — по порядку находок); удалённых из базы нет и в счёте.
+    item["found_count"] = cur.execute("SELECT count(*) AS n FROM lots WHERE id = ANY(%s)",
+                                      (item["lots"],)).fetchone()["n"]
+    item["found_in"] = cur.execute(
+        """SELECT id, name_ru, name_kz, amount, count, unit_name FROM lots
+           WHERE id = ANY(%s) ORDER BY array_position(%s, id) DESC LIMIT %s""",
+        (item["lots"], item["lots"], FOUND_IN)).fetchall()
+    # Похожие: та же категория или близкое название (pg_trgm, индекс миграции 0035) —
+    # сначала из той же категории, внутри — по близости названия.
+    item["similar"] = cur.execute(
+        """SELECT id, name, seller, city, image, price, price_unit, checked_at
+           FROM product_catalog
+           WHERE id <> %(id)s AND (division = %(division)s OR name %% %(name)s)
+           ORDER BY (division IS NOT DISTINCT FROM %(division)s) DESC, similarity(name, %(name)s) DESC, id DESC
+           LIMIT %(limit)s""",
+        {"id": product_id, "division": item["division"], "name": item["name"], "limit": SIMILAR}).fetchall()
+    return item
