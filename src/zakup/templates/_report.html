@@ -1,0 +1,27 @@
+{# «Пожаловаться» на товар или продавца каталога (zakup.reports, web/catalog.py). action — адрес
+   страницы, к нему добавляется /report; итог — ?report=… после отправки. #}
+{% macro report_block(action) %}
+{% set result = request.query_params.get("report") %}
+<div id="report" class="report">
+  {% if result in report_results %}<p class="{{ 'note' if result in ('sent', 'dup') else 'gone' }}" role="status">{{ _(report_results[result]) }}</p>{% endif %}
+  {% if result not in ("sent", "dup") %}
+  <details {% if result in report_results %}open{% endif %}>
+    <summary class="link-button muted">⚑ {{ _("Пожаловаться") }}</summary>
+    {% if request.state.user_id %}
+    <form method="post" action="{{ action }}/report" class="report-form">
+      <label>{{ _("Что не так") }}<select name="reason" required><option value="">{{ _("— выберите —") }}</option>
+        {% for key, name in report_reasons.items() %}<option value="{{ key }}">{{ _(name) }}</option>{% endfor %}</select></label>
+      <label>{{ _("Подробнее (по желанию)") }}<textarea name="comment" maxlength="1000" rows="3"></textarea></label>
+      <div><button>{{ _("Отправить") }}</button></div>
+    </form>
+    {% else %}<p><a href="/login?next={{ action | urlencode }}">{{ _("Войдите") }}</a>{{ _(", чтобы пожаловаться.") }}</p>{% endif %}
+  </details>
+  {% endif %}
+</div>
+{% endmacro %}
+{% macro report_styles() %}
+  .report { margin-top: 28px; font-size: 14px; }
+  .report-form { display: flex; flex-direction: column; gap: 8px; max-width: 520px; margin-top: 8px; }
+  .report-form label { display: flex; flex-direction: column; gap: 4px; color: var(--muted); }
+  .report-form select, .report-form textarea { padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); font: inherit; }
+{% endmacro %}

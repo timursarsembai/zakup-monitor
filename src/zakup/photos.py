@@ -21,6 +21,7 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 MAX_BYTES = 5 * 1024 * 1024
 MAX_PIXELS = 40_000_000  # 8000×5000: больше — не фото товара, а риск съесть память
 MAX_PER_PRODUCT = 8
+DAILY = 300  # фото магазина за сутки (защита от спама)
 LARGE = 1600
 THUMB = 400
 FORMATS = {"JPEG", "PNG", "WEBP", "MPO"}  # MPO — JPEG с телефонов (несколько кадров)
@@ -117,6 +118,7 @@ def _main(conn: psycopg.Connection, product_id: int) -> None:
 
 
 LIMIT_MESSAGE = "У товара уже 8 фото — больше нельзя."
+DAILY_MESSAGE = "За сутки загружено 300 фото — остальные завтра."
 
 
 def add(conn: psycopg.Connection, product_id: int, converted: tuple[bytes, bytes, int, int]) -> int:
@@ -126,6 +128,12 @@ def add(conn: psycopg.Connection, product_id: int, converted: tuple[bytes, bytes
     count = conn.execute("SELECT count(*) FROM product_photos WHERE product_id = %s", (product_id,)).fetchone()[0]
     if count >= MAX_PER_PRODUCT:
         raise ValueError(LIMIT_MESSAGE)
+    today = conn.execute(
+        """SELECT count(*) FROM product_photos ph JOIN product_catalog p ON p.id = ph.product_id
+           WHERE p.seller_id = (SELECT seller_id FROM product_catalog WHERE id = %s)
+             AND ph.created_at > now() - interval '1 day'""", (product_id,)).fetchone()[0]
+    if today >= DAILY:
+        raise ValueError(DAILY_MESSAGE)
     large, thumb, width, height = converted
     key = secrets.token_hex(16)
     _write(_path(key), large)

@@ -13,6 +13,7 @@
 
 import re
 import secrets
+from contextlib import contextmanager
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -24,6 +25,11 @@ from psycopg.types.json import Jsonb
 from zakup import catalog, contacts, legal_entities, photos, products
 
 MAX_PRODUCTS = 2000
+# Защита от спама (этап 6): новых товаров магазина и загрузок файла каталога — в сутки.
+DAILY_PRODUCTS = 300
+DAILY_IMPORTS = 20
+LIMIT_MESSAGE = "В магазине — не больше 2000 товаров и 300 новых в сутки."
+IMPORTS_MESSAGE = "Загрузок файла за сутки — уже 20, попробуйте завтра."
 MAX_PHONES = 3
 MAX_TIERS = 10
 MAX_SPECS = 30
@@ -228,6 +234,37 @@ def parse_product(*, name: str, unit: str, retail: str, quantities: list[str], p
             "specs": parse_specs(specs), "available": available == "1"}
 
 
+def room(conn: psycopg.Connection, seller_id: int) -> int:
+    """Сколько ещё новых товаров можно добавить: и всего, и за сутки."""
+    # Под блокировкой магазина (до конца транзакции; загрузка файла держит её всю загрузку,
+    # room_lock): параллельные добавления не превысят пределы.
+    conn.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (f"shop_room:{seller_id}",))
+    total, today = conn.execute(
+        """SELECT count(*), count(*) FILTER (WHERE first_seen_at > now() - interval '1 day')
+           FROM product_catalog WHERE seller_id = %s AND own""", (seller_id,)).fetchone()
+    return min(MAX_PRODUCTS - total, DAILY_PRODUCTS - today)
+
+
+@contextmanager
+def room_lock(conn: psycopg.Connection, seller_id: int):
+    """Блокировка места в магазине на всю загрузку файла (она сохраняет частями, с commit)."""
+    key = f"shop_room:{seller_id}"
+    conn.execute("SELECT pg_advisory_lock(hashtext(%s))", (key,))
+    try:
+        yield
+        conn.commit()
+    finally:
+        conn.rollback()  # после ошибки — иначе соединение не примет unlock
+        conn.execute("SELECT pg_advisory_unlock(hashtext(%s))", (key,))
+        conn.commit()
+
+
+def imports_today(conn: psycopg.Connection, user: int) -> int:
+    return conn.execute(
+        """SELECT count(*) FROM user_actions WHERE user_id = %s AND action = 'shop_product'
+           AND details->>'op' = 'import_try' AND at > now() - interval '1 day'""", (user,)).fetchone()[0]
+
+
 def save_product(conn: psycopg.Connection, seller: dict[str, Any], data: dict[str, Any],
                  product_id: int | None = None, limit_checked: bool = False) -> int | None:
     """Новый товар магазина или правка своего. None — нет такого товара у магазина.
@@ -238,10 +275,8 @@ def save_product(conn: psycopg.Connection, seller: dict[str, Any], data: dict[st
               "specs": Jsonb(data["specs"]), "division": data["division"], "enstru": data["enstru"],
               "description": data["description"], "available": data["available"], "id": product_id}
     if product_id is None and not limit_checked:
-        count = conn.execute("SELECT count(*) FROM product_catalog WHERE seller_id = %s AND own",
-                             (seller["id"],)).fetchone()[0]
-        if count >= MAX_PRODUCTS:
-            raise Invalid(f"В магазине — не больше {MAX_PRODUCTS} товаров.")
+        if room(conn, seller["id"]) <= 0:
+            raise Invalid(LIMIT_MESSAGE)
     if product_id is None:
         product_id = conn.execute(
             """INSERT INTO product_catalog (url_key, name, seller, seller_id, city, phone, price, price_unit, specs,
@@ -297,7 +332,7 @@ def listing(conn: psycopg.Connection, seller_id: int, q: str = "", page: int = 1
     total = cur.execute(f"SELECT count(*) AS n FROM product_catalog WHERE {where}", params).fetchone()["n"]
     page = max(page, 1)
     rows = cur.execute(
-        f"""SELECT id, name, price, price_unit, available, on_sale, own, division, updated_at,
+        f"""SELECT id, name, price, price_unit, available, on_sale, blocked, own, division, updated_at,
                    (SELECT count(*) FROM product_prices pp WHERE pp.product_id = p.id AND pp.min_qty > 1) AS wholesale
             FROM product_catalog p WHERE {where} ORDER BY own DESC, updated_at DESC, id DESC
             LIMIT {PAGE_SIZE} OFFSET {(page - 1) * PAGE_SIZE}""", params).fetchall()

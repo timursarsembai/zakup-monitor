@@ -83,9 +83,9 @@
   <div class="table-wrap"><table class="mine">
     <tr><th>{{ _("Товар") }}</th><th class="num">{{ _("Цена, ₸") }}</th><th>{{ _("Опт") }}</th><th>{{ _("Наличие") }}</th><th></th></tr>
     {% for r in items.rows %}
-    <tr class="{{ 'off' if not r.on_sale }}">
+    <tr class="{{ 'off' if not r.on_sale or r.blocked }}">
       <td>{% if r.own %}<a href="/my/shop/products/{{ r.id }}">{{ r.name }}</a>{% else %}{{ r.name }} <span class="badge" title="{{ _("Найден поиском с ИИ на вашем сайте: изменить нельзя, можно снять с продажи") }}">{{ _("найден в интернете") }}</span>{% endif %}
-        {% if not r.on_sale %}<div class="muted">{{ _("снят с продажи") }}</div>{% endif %}</td>
+        {% if r.blocked %}<div class="err">{{ _("скрыт модератором — напишите в поддержку") }}</div>{% elif not r.on_sale %}<div class="muted">{{ _("снят с продажи") }}</div>{% endif %}</td>
       <td class="num">{{ r.price | money if r.price is not none else "—" }}{% if r.price_unit %} <span class="muted">/ {{ r.price_unit }}</span>{% endif %}</td>
       <td>{{ r.wholesale or "—" }}</td>
       <td>{{ _("в наличии") if r.available else _("нет") }}</td>

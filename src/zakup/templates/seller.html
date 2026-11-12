@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "_products_table.html" import products_table, products_styles with context %}
+{% from "_report.html" import report_block, report_styles with context %}
 {# Страница продавца (web/catalog.py, zakup.sellers.get): карточка и его каталог с фильтрами.
    Телефоны — вошедшим (как на странице товара). Найденный ИИ магазин — кнопка «Это мой магазин»
    (заявка сотруднику, zakup.shop.claim); свой — владельцу ссылка в кабинет, сотруднику — скрыть. #}
@@ -7,6 +8,7 @@
 {% block description %}{{ seller.name }}{% if seller.city %}, {{ seller.city }}{% endif %}: {{ _("товаров в каталоге") }} {{ seller.products }}{% if seller.divisions %} — {% for code, n in seller.divisions[:3] %}{{ division_name(code) or code }}{{ ", " if not loop.last }}{% endfor %}{% endif %}.{% endblock %}
 {% block style %}
 {{ products_styles() }}
+{{ report_styles() }}
   .s-head { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; }
   .s-head h1 { margin: 0; overflow-wrap: anywhere; }
   .facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 14px; margin: 12px 0; }
@@ -53,4 +55,5 @@
 {% endif %}
 {% if seller.divisions|length > 1 %}<p>{% for code, n in seller.divisions %}<a class="chip-link" href="{{ products_url(category=code, page=1) }}">{{ division_name(code) or code }} ({{ n }})</a> {% endfor %}</p>{% endif %}
 {{ products_table() }}
+{% if not owner and seller.status == 'active' %}{{ report_block(seller_path(seller)) }}{% endif %}
 {% endblock %}

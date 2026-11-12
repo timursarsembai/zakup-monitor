@@ -412,6 +412,19 @@ def _live_lots() -> list[tuple[int, Any]]:
         return _sitemap_lots["rows"]
 
 
+_sitemap_catalog: dict[str, Any] = {"at": 0.0, "n": (0, 0)}
+
+
+def _catalog_counts() -> tuple[int, int]:
+    """Товаров и продавцов для sitemap — раз в час, как лоты (обход каталога не на каждый заход)."""
+    with _sitemap_lock:
+        if time.monotonic() - _sitemap_catalog["at"] > SITEMAP_TTL:
+            with core.pool.connection() as conn:
+                _sitemap_catalog["n"] = (products.sitemap_count(conn), sellers.sitemap_count(conn))
+            _sitemap_catalog["at"] = time.monotonic()
+        return _sitemap_catalog["n"]
+
+
 @router.get("/sitemap.xml")
 def sitemap_index() -> Response:
     """Открытые объявления и лоты — для поисковиков. Индекс ведёт на части по 20 000."""
@@ -421,10 +434,14 @@ def sitemap_index() -> Response:
     lots_n = len(_live_lots())
     with core.pool.connection() as conn:
         orgs_n = len(orgs.sitemap_bins(conn))
+    products_n, sellers_n = _catalog_counts()
     parts = [f"{SITE_URL}/sitemap-static.xml"]
     parts += [f"{SITE_URL}/sitemap-a-{i}.xml" for i in range((anns + SITEMAP_CHUNK - 1) // SITEMAP_CHUNK)]
     parts += [f"{SITE_URL}/sitemap-l-{i}.xml" for i in range((lots_n + SITEMAP_CHUNK - 1) // SITEMAP_CHUNK)]
     parts += [f"{SITE_URL}/sitemap-o-{i}.xml" for i in range((orgs_n + SITEMAP_CHUNK - 1) // SITEMAP_CHUNK)]
+    # Каталог товаров и продавцы (открыты поисковикам, docs/CATALOG_PLAN.md).
+    parts += [f"{SITE_URL}/sitemap-p-{i}.xml" for i in range((products_n + SITEMAP_CHUNK - 1) // SITEMAP_CHUNK)]
+    parts += [f"{SITE_URL}/sitemap-s-{i}.xml" for i in range((sellers_n + SITEMAP_CHUNK - 1) // SITEMAP_CHUNK)]
     body = "".join(f"<sitemap><loc>{url}</loc></sitemap>" for url in parts)
     return Response('<?xml version="1.0" encoding="UTF-8"?>'
                     f'<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{body}</sitemapindex>',
@@ -438,10 +455,10 @@ def sitemap_part(kind: str) -> Response:
             catalog_paths = catalog.sitemap_paths(conn)
         urls = [(f"{SITE_URL}{path}", None) for path in (
             "/", "/announcements", "/lots", "/orgs/customers", "/orgs/suppliers", "/results", "/analytics", "/calculator", "/pricing", "/offer", "/privacy", "/contacts",
-            *catalog_paths)]
+            "/products", "/sellers", *catalog_paths)]
     else:
         prefix, _, index = kind.partition("-")
-        if prefix not in ("a", "l", "o") or not index.isdigit():
+        if prefix not in ("a", "l", "o", "p", "s") or not index.isdigit():
             raise HTTPException(404, "Нет такой части")
         offset = int(index) * SITEMAP_CHUNK
         with core.pool.connection() as conn:
@@ -451,6 +468,9 @@ def sitemap_part(kind: str) -> Response:
                        WHERE end_date > now() AND detail IS NOT NULL ORDER BY id
                        LIMIT %s OFFSET %s""", (SITEMAP_CHUNK, offset)).fetchall()
                 urls = [(f"{SITE_URL}/a/{i}", d) for i, d in rows]
+            elif prefix in ("p", "s"):
+                rows = (products if prefix == "p" else sellers).sitemap_rows(conn, offset, SITEMAP_CHUNK)
+                urls = [(f"{SITE_URL}{path}", d) for path, d in rows]
             elif prefix == "o":
                 bins = orgs.sitemap_bins(conn)[offset:offset + SITEMAP_CHUNK]
                 urls = [(f"{SITE_URL}/org/{b}", None) for b in bins]

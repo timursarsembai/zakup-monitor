@@ -116,6 +116,7 @@ def client(conn, monkeypatch):
     monkeypatch.setattr(web.public, "_lot_numbers_cache", {})
     # Список лотов для sitemap кэшируется на час — в каждом тесте свой.
     monkeypatch.setattr(web.public, "_sitemap_lots", {"at": 0.0, "rows": []})
+    monkeypatch.setattr(web.public, "_sitemap_catalog", {"at": 0.0, "n": (0, 0)})
     monkeypatch.setattr(catalog, "_counts", {"at": 0.0, "rows": {}})
     monkeypatch.setattr(catalog, "_pages", {})
     monkeypatch.setattr(orgs, "_sitemap", {"at": 0.0, "bins": []})

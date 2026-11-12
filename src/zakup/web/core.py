@@ -31,6 +31,7 @@ from zakup import (
     i18n,
     legal,
     orgs,
+    reports,
     subjects,
     tariff,
     visits,
@@ -129,6 +130,9 @@ def _time_left(end: datetime | None) -> str:
 
 
 templates.env.globals["time_left"] = _time_left
+# Жалобы в каталоге (_report.html): причины и итоги.
+templates.env.globals["report_reasons"] = reports.REASONS
+templates.env.globals["report_results"] = reports.RESULTS
 
 
 def _hours_left(end: datetime | None) -> float | None:

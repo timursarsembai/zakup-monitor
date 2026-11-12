@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import RedirectResponse, Response
 
-from zakup import catalog, photos, products, sellers, shop, shop_import
+from zakup import catalog, photos, products, reports, sellers, shop, shop_import
 from zakup.web import core
 from zakup.web.core import MAX_PAGE, Staff, User, _audit, same_origin, templates
 
@@ -253,6 +253,11 @@ def import_template(user: User):
 def _import(request: Request, user: int, content: bytes, filename: str):
     with core.pool.connection() as conn:
         current = _own_shop(conn, user)
+        if shop.imports_today(conn, user) >= shop.DAILY_IMPORTS:
+            return _import_page(request, current, error=shop.IMPORTS_MESSAGE,
+                                status_code=429)
+        # Попытка — в журнал до разбора: предел считает и файлы с ошибками.
+        _audit(request, user, "shop_product", str(current["id"]), op="import_try", size=len(content))
         try:
             rows = shop_import.read(content, filename)
         except ValueError as error:
@@ -280,8 +285,24 @@ async def import_upload(request: Request, user: User):
 def moderation_page(request: Request, staff: Staff, done: str = ""):
     with core.pool.connection() as conn:
         data = shop.moderation(conn)
+        complaints = reports.open_reports(conn)
+        blocked = reports.blocked_products(conn)
     return templates.TemplateResponse(request, "staff_sellers.html", {
-        **data, "done": done, "seller_path": sellers.path})
+        **data, "done": done, "seller_path": sellers.path, "product_path": products.path,
+        "complaints": complaints, "blocked": blocked, "reasons": reports.REASONS})
+
+
+@router.post("/staff/reports", dependencies=[Depends(same_origin)])
+def moderation_report(request: Request, staff: Staff, action: Field = "", product_id: Field = "",
+                      seller_id: Field = ""):
+    """Решение по жалобам: скрыть товар или продавца, вернуть товар, отклонить."""
+    pid = int(product_id) if product_id.isdigit() and len(product_id) < 19 else None  # в bigint
+    sid = int(seller_id) if seller_id.isdigit() and len(seller_id) < 19 else None
+    with core.pool.connection() as conn:
+        if not reports.decide(conn, staff, action, product_id=pid, seller_id=sid):
+            raise HTTPException(422, "Нет такого действия")
+    _audit(request, staff, "seller_moderation", f"report:{pid or ''}:{sid or ''}", decision=action)
+    return RedirectResponse("/staff/sellers?done=report", status_code=303)
 
 
 @router.post("/staff/sellers/{seller_id}/status", dependencies=[Depends(same_origin)])

@@ -110,7 +110,7 @@ def get(conn: psycopg.Connection, seller_id: int) -> dict[str, Any] | None:
         """SELECT s.*, (SELECT mode() WITHIN GROUP (ORDER BY p.city) FROM product_catalog p
                         WHERE p.seller_id = s.id AND p.city IS NOT NULL) AS city_guess,
                   -- в счёте — что видно в каталоге (снятые с продажи — нет)
-                  (SELECT count(*) FROM product_catalog p WHERE p.seller_id = s.id AND p.on_sale) AS products
+                  (SELECT count(*) FROM product_catalog p WHERE p.seller_id = s.id AND p.on_sale AND NOT p.blocked) AS products
            FROM sellers s WHERE s.id = %s""", (seller_id,)).fetchone()
     if seller is None:
         return None
@@ -119,7 +119,7 @@ def get(conn: psycopg.Connection, seller_id: int) -> dict[str, Any] | None:
                             for p in _phones(conn, seller)]
     seller["divisions"] = conn.execute(
         """SELECT division, count(*) FROM product_catalog WHERE seller_id = %s AND division IS NOT NULL
-           AND on_sale GROUP BY 1 ORDER BY 2 DESC""", (seller_id,)).fetchall()
+           AND on_sale AND NOT blocked GROUP BY 1 ORDER BY 2 DESC""", (seller_id,)).fetchall()
     return seller
 
 
@@ -141,7 +141,7 @@ def listing(conn: psycopg.Connection, q: str = "", city: str = "", division: str
     base = f"""SELECT s.id, s.name, s.kind, s.verified, s.domain, s.created_at, count(p.id) AS products,
                       coalesce(s.city, mode() WITHIN GROUP (ORDER BY p.city)) AS city,
                       (array_agg(p.division ORDER BY p.division) FILTER (WHERE p.division IS NOT NULL)) AS divisions
-               FROM sellers s LEFT JOIN product_catalog p ON p.seller_id = s.id AND p.on_sale
+               FROM sellers s LEFT JOIN product_catalog p ON p.seller_id = s.id AND p.on_sale AND NOT p.blocked
                WHERE {" AND ".join(where)} GROUP BY s.id HAVING {" AND ".join(having)}"""
     cur = conn.cursor(row_factory=dict_row)
     total = cur.execute(f"SELECT count(*) AS n FROM ({base}) x", params).fetchone()["n"]
@@ -157,8 +157,22 @@ def listing(conn: psycopg.Connection, q: str = "", city: str = "", division: str
     cities = [r[0] for r in conn.execute(
         """SELECT city, count(*) FROM (
                SELECT coalesce(s.city, mode() WITHIN GROUP (ORDER BY p.city)) AS city
-               FROM sellers s LEFT JOIN product_catalog p ON p.seller_id = s.id AND p.on_sale
+               FROM sellers s LEFT JOIN product_catalog p ON p.seller_id = s.id AND p.on_sale AND NOT p.blocked
                WHERE s.status = 'active' GROUP BY s.id HAVING count(p.id) > 0 OR s.kind = 'own') x
            WHERE city IS NOT NULL GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 30""")]
     return {"rows": rows, "total": total, "page": max(page, 1), "pages": max(1, -(-total // PAGE_SIZE)),
             "sort": sort, "q": q, "city": city, "division": division, "cities": cities}
+
+
+# Продавцы для sitemap — как в списке /sellers: на виду и с товарами (или свой магазин).
+_SITEMAP = """FROM sellers s WHERE s.status = 'active' AND (s.kind = 'own' OR EXISTS (
+                  SELECT 1 FROM product_catalog p WHERE p.seller_id = s.id AND p.on_sale AND NOT p.blocked))"""
+
+
+def sitemap_count(conn: psycopg.Connection) -> int:
+    return conn.execute(f"SELECT count(*) {_SITEMAP}").fetchone()[0]
+
+
+def sitemap_rows(conn: psycopg.Connection, offset: int, limit: int) -> list[tuple[str, Any]]:
+    return [(path({"id": sid, "name": name}), updated) for sid, name, updated in conn.execute(
+        f"SELECT s.id, s.name, s.updated_at {_SITEMAP} ORDER BY s.id LIMIT %s OFFSET %s", (limit, offset))]

@@ -193,9 +193,14 @@ def _merge(data: dict[str, Any], old: dict[str, Any]) -> dict[str, Any]:
 
 def run(conn: psycopg.Connection, seller: dict[str, Any], rows: list[tuple[int, list[str]]]) -> dict[str, Any]:
     """Сохраняет верные строки; {"created", "updated", "errors": [(номер строки, текст)]}."""
+    with shop.room_lock(conn, seller["id"]):
+        return _run(conn, seller, rows)
+
+
+def _run(conn: psycopg.Connection, seller: dict[str, Any], rows: list[tuple[int, list[str]]]) -> dict[str, Any]:
     existing = {name.lower(): pid for pid, name in conn.execute(
         "SELECT id, name FROM product_catalog WHERE seller_id = %s AND own", (seller["id"],))}
-    room = shop.MAX_PRODUCTS - len(existing)
+    room = shop.room(conn, seller["id"])
     created = updated = 0
     errors: list[tuple[int, str]] = []
     for index, (number, row) in enumerate(rows):
@@ -205,7 +210,7 @@ def run(conn: psycopg.Connection, seller: dict[str, Any], rows: list[tuple[int, 
             if pid is None:
                 data.pop("given")
                 if room <= 0:
-                    raise shop.Invalid(f"В магазине — не больше {shop.MAX_PRODUCTS} товаров.")
+                    raise shop.Invalid(shop.LIMIT_MESSAGE)
             else:
                 data = _merge(data, shop.product(conn, seller["id"], pid))
             with conn.transaction():

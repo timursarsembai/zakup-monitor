@@ -28,6 +28,7 @@ ACTIONS = {
     "shop_save": "Сохранил свой магазин",
     "shop_product": "Изменил товар своего магазина",
     "seller_moderation": "Модерация продавца",
+    "catalog_report": "Жалоба в каталоге",
     "view_announcement": "Открыл объявление",
     "view_lot": "Открыл лот",
     "view_page": "Открыл страницу",

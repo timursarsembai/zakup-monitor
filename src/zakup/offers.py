@@ -133,7 +133,7 @@ def alerts(conn: psycopg.Connection, send) -> int:
         """SELECT s.id, s.name, u.telegram_chat_id, l.id, l.name_ru, l.seen_seq, min(p.name)
            FROM sellers s
            JOIN users u ON u.id = s.user_id AND u.telegram_chat_id IS NOT NULL AND NOT u.disabled
-           JOIN product_catalog p ON p.seller_id = s.id AND p.own AND p.on_sale AND p.available
+           JOIN product_catalog p ON p.seller_id = s.id AND p.own AND p.on_sale AND NOT p.blocked AND p.available
            JOIN lots l ON l.seen_seq > %(from)s AND l.seen_seq <= %(end)s AND l.status_id = ANY(%(open)s)
                 AND ((p.enstru IS NOT NULL AND EXISTS (SELECT 1 FROM unnest(l.enstru) c WHERE c LIKE p.enstru || '%%'))
                      OR (l.tsv @@ plainto_tsquery('russian', p.name)

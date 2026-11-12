@@ -14,6 +14,25 @@
 {% if done %}<p class="note">{{ _("Готово.") }}{% if done == "gone" %} {{ _("Заявку уже решили.") }}{% endif %}</p>{% endif %}
 
 <section>
+  <h2>{{ _("Жалобы") }} ({{ complaints|length }})</h2>
+  <div class="table-wrap"><table class="mod">
+    <tr><th>{{ _("На что") }}</th><th>{{ _("Жалоб") }}</th><th>{{ _("Причины и слова") }}</th><th></th></tr>
+    {% for c in complaints %}
+    <tr><td>{% if c.product_id %}{{ _("Товар") }}: <a href="{{ product_path({"id": c.product_id, "name": c.product_name}) }}">{{ c.product_name }}</a>{% if c.blocked %} <span class="muted">({{ _("скрыт") }})</span>{% endif %}{% if c.owner_id %}<div class="muted">{{ _("продавец") }}: <a href="{{ seller_path({"id": c.owner_id, "name": c.seller_name}) }}">{{ c.seller_name }}</a></div>{% endif %}
+        {% else %}{{ _("Продавец") }}: <a href="{{ seller_path({"id": c.seller_id, "name": c.seller_name}) }}">{{ c.seller_name }}</a>{% endif %}
+        <div class="muted">{{ (c.last_at|local).strftime("%d.%m.%Y %H:%M") }}</div></td>
+      <td>{{ c.n }}</td>
+      <td>{% for r in c.reasons %}{{ _(reasons[r]) }}{{ "; " if not loop.last }}{% endfor %}{% for m in c.comments or [] %}<div class="muted" style="white-space:pre-line">«{{ m }}»</div>{% endfor %}</td>
+      <td><div class="row-actions">
+        {% if c.product_id and not c.blocked %}<form method="post" action="/staff/reports"><input type="hidden" name="action" value="block_product"><input type="hidden" name="product_id" value="{{ c.product_id }}"><button class="danger">{{ _("Скрыть товар") }}</button></form>{% endif %}
+        {% if c.owner_id or c.seller_id %}<form method="post" action="/staff/reports" data-confirm="{{ _("Скрыть продавца и все его товары?") }}"><input type="hidden" name="action" value="hide_seller"><input type="hidden" name="seller_id" value="{{ c.seller_id or c.owner_id }}"><button class="danger">{{ _("Скрыть продавца") }}</button></form>{% endif %}
+        <form method="post" action="/staff/reports"><input type="hidden" name="action" value="dismiss"><input type="hidden" name="product_id" value="{{ c.product_id or '' }}"><input type="hidden" name="seller_id" value="{{ c.seller_id or '' }}"><button>{{ _("Отклонить") }}</button></form>
+      </div></td></tr>
+    {% else %}<tr><td colspan="4" class="muted">{{ _("Нет.") }}</td></tr>{% endfor %}
+  </table></div>
+</section>
+
+<section>
   <h2>{{ _("Магазины на проверке") }} ({{ pending|length }})</h2>
   <p class="muted">{{ _("Без БИН или БИН не нашёлся в реестре. Пока на проверке — магазин и товары видит только владелец.") }}</p>
   <div class="table-wrap"><table class="mod">
@@ -43,6 +62,16 @@
         <form method="post" action="/staff/claims/{{ c.id }}"><input type="hidden" name="decision" value="reject"><button class="danger">{{ _("Отклонить") }}</button></form>
       </div></td></tr>
     {% else %}<tr><td colspan="5" class="muted">{{ _("Нет.") }}</td></tr>{% endfor %}
+  </table></div>
+</section>
+
+<section>
+  <h2>{{ _("Скрытые товары") }} ({{ blocked|length }})</h2>
+  <div class="table-wrap"><table class="mod">
+    {% for r in blocked %}
+    <tr><td><a href="{{ product_path(r) }}">{{ r.name }}</a></td><td>{{ (r.updated_at|local).strftime("%d.%m.%Y") }}</td>
+      <td><form method="post" action="/staff/reports"><input type="hidden" name="action" value="unblock_product"><input type="hidden" name="product_id" value="{{ r.id }}"><button>{{ _("Вернуть") }}</button></form></td></tr>
+    {% else %}<tr><td class="muted">{{ _("Нет.") }}</td></tr>{% endfor %}
   </table></div>
 </section>
 

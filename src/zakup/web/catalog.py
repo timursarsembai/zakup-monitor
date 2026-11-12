@@ -8,7 +8,7 @@ from urllib.parse import urlencode
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
 
-from zakup import i18n, products, sellers, shop
+from zakup import i18n, products, reports, sellers, shop
 from zakup.web import core
 from zakup.web.core import MAX_PAGE, SITE_URL, User, Viewer, _audit, same_origin, templates
 
@@ -52,6 +52,11 @@ def products_page(request: Request, user: Viewer, q: str = "", category: str = "
         "products_url": _catalog_url("/products", data), "action": "/products"})
 
 
+def _product_public(item: dict) -> bool:
+    seller = item["seller_row"]
+    return bool(item["on_sale"] and not item["blocked"] and (seller is None or seller["status"] == "active"))
+
+
 @router.get("/products/{key}")
 def product_page(request: Request, user: Viewer, key: str):
     """Страница товара: /products/<номер>-<название латиницей>. Адрес держится на номере:
@@ -61,9 +66,9 @@ def product_page(request: Request, user: Viewer, key: str):
     if item is None:
         raise HTTPException(404, "Нет такого товара")
     seller = item["seller_row"]
+    owner = bool(seller and user and seller["user_id"] == user)
     # Снятый с продажи или у магазина не на виду (на проверке, скрыт) — только владельцу и сотрудникам.
-    public = item["on_sale"] and (seller is None or seller["status"] == "active")
-    if not public and not request.state.staff and not (seller and user and seller["user_id"] == user):
+    if not _product_public(item) and not request.state.staff and not owner:
         raise HTTPException(404, "Нет такого товара")
     canonical = products.path(item)
     # Временная (302): адрес — от названия, а его обновляет каждая находка поиска; постоянную
@@ -73,7 +78,7 @@ def product_page(request: Request, user: Viewer, key: str):
         return moved
     return templates.TemplateResponse(request, "product.html", {
         "item": item, "fresh_days": products.FRESH_DAYS, "product_path": products.path,
-        "seller_path": sellers.path,
+        "seller_path": sellers.path, "reportable": _product_public(item) and not owner,
         "structured": _structured(item, canonical)})
 
 
@@ -156,6 +161,36 @@ def seller_claim(request: Request, user: User, key: str, bin: Annotated[str, For
     if ok:
         _audit(request, user, "seller_claim", str(seller["id"]))
     return RedirectResponse(sellers.path(seller) + "?claimed=1", status_code=303)
+
+
+Report = Annotated[str, Form()]
+
+
+@router.post("/products/{key}/report", dependencies=[Depends(same_origin)])
+def product_report(request: Request, user: User, key: str, reason: Report = "", comment: Report = ""):
+    """«Пожаловаться» на товар (zakup.reports) — сотрудник смотрит на /staff/sellers."""
+    with core.pool.connection() as conn:
+        item = products.get(conn, _number_key(key))
+        # Жалоба — только на то, что видно всем, и не на свой товар.
+        seller = item and item["seller_row"]
+        if item is None or not _product_public(item) or (seller and seller["user_id"] == user):
+            raise HTTPException(404, "Нет такого товара")
+        result = reports.create(conn, user, reason, comment, product_id=item["id"])
+    if result == "sent":
+        _audit(request, user, "catalog_report", f"product:{item['id']}", reason=reason)
+    return RedirectResponse(f"{products.path(item)}?report={result}#report", status_code=303)
+
+
+@router.post("/sellers/{key}/report", dependencies=[Depends(same_origin)])
+def seller_report(request: Request, user: User, key: str, reason: Report = "", comment: Report = ""):
+    with core.pool.connection() as conn:
+        seller = sellers.get(conn, _number_key(key))
+        if seller is None or seller["status"] != "active" or seller["user_id"] == user:
+            raise HTTPException(404, "Нет такого продавца")
+        result = reports.create(conn, user, reason, comment, seller_id=seller["id"])
+    if result == "sent":
+        _audit(request, user, "catalog_report", f"seller:{seller['id']}", reason=reason)
+    return RedirectResponse(f"{sellers.path(seller)}?report={result}#report", status_code=303)
 
 
 def _url(path: str) -> str:

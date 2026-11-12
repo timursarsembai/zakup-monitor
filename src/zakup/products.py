@@ -31,7 +31,7 @@ HISTORY_MAX = 30
 # проверке и не скрыт. Одно правило для списка, похожих, подбора под лот и счётчиков.
 SELLER_ACTIVE = ("(p.seller_id IS NULL OR EXISTS (SELECT 1 FROM sellers vs "
                  "WHERE vs.id = p.seller_id AND vs.status = 'active'))")
-VISIBLE = f"p.on_sale AND {SELLER_ACTIVE}"
+VISIBLE = f"p.on_sale AND NOT p.blocked AND {SELLER_ACTIVE}"
 _TRACKING = re.compile(r"^(utm_.*|gclid|yclid|fbclid|_openstat|from|ref|srsltid)$", re.IGNORECASE)
 
 
@@ -239,7 +239,7 @@ def listing(conn: psycopg.Connection, q: str = "", division: str = "", sort: str
     # Снятые с продажи — нигде; товары продавцов не на виду — только сотруднику и владельцу.
     clauses.append("p.on_sale")
     if not hidden:
-        clauses.append(SELLER_ACTIVE)
+        clauses.append(f"NOT p.blocked AND {SELLER_ACTIVE}")
     where = " AND ".join(clauses)
     joins = "FROM product_catalog p LEFT JOIN sellers s ON s.id = p.seller_id"
     total = conn.execute(f"SELECT count(*) {joins} WHERE {where}", params).fetchone()[0]
@@ -256,7 +256,7 @@ def listing(conn: psycopg.Connection, q: str = "", division: str = "", sort: str
     if divisions is None:
         divisions = _divisions(conn) if seller_id is None else conn.execute(
             """SELECT division, count(*) FROM product_catalog WHERE seller_id = %s AND division IS NOT NULL
-               AND on_sale GROUP BY 1 ORDER BY 2 DESC""", (seller_id,)).fetchall()
+               AND on_sale AND NOT blocked GROUP BY 1 ORDER BY 2 DESC""", (seller_id,)).fetchall()
     return {"rows": rows, "total": total, "page": max(page, 1), "pages": max(1, -(-total // PAGE_SIZE)),
             "sort": sort, "q": q, "division": division, "divisions": divisions,
             "price_min": price_min, "price_max": price_max, "available": available,
@@ -266,6 +266,17 @@ def listing(conn: psycopg.Connection, q: str = "", division: str = "", sort: str
 def price_text(value: float | None) -> str:
     """Цена в поле фильтра и в ссылке: 1234567 → «1234567», 99.5 → «99.5» (без 1.23e+06)."""
     return "" if value is None else f"{value:.2f}".rstrip("0").rstrip(".")
+
+
+def sitemap_count(conn: psycopg.Connection) -> int:
+    return conn.execute(f"SELECT count(*) FROM product_catalog p WHERE {VISIBLE}").fetchone()[0]
+
+
+def sitemap_rows(conn: psycopg.Connection, offset: int, limit: int) -> list[tuple[str, Any]]:
+    """(адрес страницы, когда менялась) товаров на виду — для sitemap."""
+    return [(path({"id": pid, "name": name}), updated) for pid, name, updated in conn.execute(
+        f"SELECT id, name, updated_at FROM product_catalog p WHERE {VISIBLE} ORDER BY id LIMIT %s OFFSET %s",
+        (limit, offset))]
 
 
 def backfill(conn: psycopg.Connection) -> int:
@@ -313,7 +324,7 @@ def get(conn: psycopg.Connection, product_id: int) -> dict[str, Any] | None:
     cur = conn.cursor(row_factory=dict_row)
     item = cur.execute(
         f"""SELECT id, url, name, seller, city, phone, image, price, price_unit, specs, division, lots,
-                   available, first_seen_at, checked_at, price_history, seller_id, own, on_sale,
+                   available, first_seen_at, checked_at, price_history, seller_id, own, on_sale, blocked,
                    description, enstru,
                    checked_at > now() - make_interval(days => {FRESH_DAYS}) AS fresh
             FROM product_catalog WHERE id = %s""", (product_id,)).fetchone()
