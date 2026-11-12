@@ -229,18 +229,20 @@ def parse_product(*, name: str, unit: str, retail: str, quantities: list[str], p
 
 
 def save_product(conn: psycopg.Connection, seller: dict[str, Any], data: dict[str, Any],
-                 product_id: int | None = None) -> int | None:
-    """Новый товар магазина или правка своего. None — нет такого товара у магазина."""
+                 product_id: int | None = None, limit_checked: bool = False) -> int | None:
+    """Новый товар магазина или правка своего. None — нет такого товара у магазина.
+    limit_checked — предел товаров уже проверил вызывающий (импорт считает сам, один раз)."""
     retail = data["tiers"][0][1]
     values = {"name": data["name"], "seller": seller["name"], "seller_id": seller["id"], "city": seller["city"],
               "phone": (seller["phones"] or [{}])[0].get("number"), "price": retail, "unit": data["unit"],
               "specs": Jsonb(data["specs"]), "division": data["division"], "enstru": data["enstru"],
               "description": data["description"], "available": data["available"], "id": product_id}
-    if product_id is None:
+    if product_id is None and not limit_checked:
         count = conn.execute("SELECT count(*) FROM product_catalog WHERE seller_id = %s AND own",
                              (seller["id"],)).fetchone()[0]
         if count >= MAX_PRODUCTS:
             raise Invalid(f"В магазине — не больше {MAX_PRODUCTS} товаров.")
+    if product_id is None:
         product_id = conn.execute(
             """INSERT INTO product_catalog (url_key, name, seller, seller_id, city, phone, price, price_unit, specs,
                                             division, enstru, description, available, own)

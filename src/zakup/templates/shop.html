@@ -74,7 +74,7 @@
 </section>
 
 <section class="box">
-  <div class="head-line"><h2>{{ _("Мои товары") }}</h2><a class="icon-button primary-link" href="/my/shop/products/new">+ {{ _("Добавить товар") }}</a></div>
+  <div class="head-line"><h2>{{ _("Мои товары") }}</h2><a class="icon-button primary-link" href="/my/shop/products/new">+ {{ _("Добавить товар") }}</a><a class="icon-button" href="/my/shop/import">{{ _("Загрузить из Excel") }}</a></div>
   <form method="get" action="/my/shop" class="row-actions" style="margin:10px 0">
     <input type="search" name="q" value="{{ items.q }}" placeholder="{{ _("Поиск по названию") }}" aria-label="{{ _("Поиск по названию") }}">
     <button>{{ _("Найти") }}</button>

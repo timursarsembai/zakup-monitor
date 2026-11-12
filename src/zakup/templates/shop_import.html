@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{# Кабинет → «Мой магазин» → загрузка каталога из Excel/CSV (web/shop.py, zakup.shop_import). #}
+{% block title %}{{ _("Загрузить товары из Excel") }} — {{ shop.name }}{% endblock %}
+{% block style %}
+  .box { border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; max-width: 980px; margin-bottom: 16px; }
+  .err { color: var(--bad); font-weight: 600; }
+  .upload { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .crumbs { margin: 4px 0 10px; font-size: 14px; }
+  ol.cols { margin: 6px 0; padding-left: 22px; columns: 2; } @media (max-width: 720px) { ol.cols { columns: 1; } }
+{% endblock %}
+{% block main %}
+<nav class="crumbs muted"><a href="/my/shop">{{ _("Мой магазин") }}</a></nav>
+<h1>{{ _("Загрузить товары из Excel") }}</h1>
+
+{% if error %}<p class="err" role="alert">{{ _(error) }}</p>{% endif %}
+{% if result %}
+<section class="box" role="status">
+  <p><b>{{ _("Добавлено:") }} {{ result.created }}</b> · <b>{{ _("обновлено:") }} {{ result.updated }}</b>{% if result.errors %} · <span class="err">{{ _("с ошибками:") }} {{ result.errors|length }}</span>{% endif %}</p>
+  {% if result.errors %}
+  <p class="muted">{{ _("Строки с ошибками не загружены — исправьте их в файле и загрузите снова (уже загруженные обновятся, а не задвоятся).") }}</p>
+  <div class="table-wrap"><table>
+    <tr><th>{{ _("Строка") }}</th><th>{{ _("Что не так") }}</th></tr>
+    {% for number, message in result.errors[:200] %}<tr><td>{{ number }}</td><td>{{ _(message) }}</td></tr>{% endfor %}
+  </table></div>
+  {% if result.errors|length > 200 %}<p class="muted">{{ _("и ещё") }} {{ result.errors|length - 200 }}</p>{% endif %}
+  {% endif %}
+  <p><a href="/my/shop">{{ _("К моим товарам") }} →</a></p>
+</section>
+{% endif %}
+
+<section class="box">
+  <ol>
+    <li><a href="/my/shop/import/template.xlsx">{{ _("Скачайте шаблон") }}</a> {{ _("— в нём строка-пример.") }}</li>
+    <li>{{ _("Заполните: по товару в строке, первая строка — заголовки. Столбцы:") }}
+      <ol class="cols">{% for c in columns %}<li>{{ _(c) }}</li>{% endfor %}</ol>
+      <span class="muted">{{ _("* — обязательно. Оптовые цены — по желанию: от скольких единиц и цена за единицу, чем больше количество — тем ниже или такая же цена.") }}</span></li>
+    <li>{{ _("Загрузите файл .xlsx или .csv (до 5 МБ,") }} {{ max_rows }} {{ _("строк). Товар с тем же названием обновится, новый — добавится.") }}</li>
+  </ol>
+  <form method="post" action="/my/shop/import" enctype="multipart/form-data" class="upload">
+    <input type="file" name="file" accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" required aria-label="{{ _("Файл каталога") }}">
+    <button class="primary">{{ _("Загрузить") }}</button>
+  </form>
+  <p class="muted">{{ _("Фото по ссылкам из файла не загружаем — добавьте их в карточке товара.") }}</p>
+</section>
+{% endblock %}

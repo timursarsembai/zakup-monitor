@@ -5,9 +5,9 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, Response
 
-from zakup import catalog, photos, products, sellers, shop
+from zakup import catalog, photos, products, sellers, shop, shop_import
 from zakup.web import core
 from zakup.web.core import MAX_PAGE, Staff, User, _audit, same_origin, templates
 
@@ -228,6 +228,52 @@ def photo_main(request: Request, user: User, product_id: int, photo_id: int):
             raise HTTPException(404, "Нет такого фото")
     _audit(request, user, "shop_product", str(product_id), op="photo_main")
     return RedirectResponse(f"/my/shop/products/{product_id}#photos", status_code=303)
+
+
+def _import_page(request: Request, current: dict, *, result: dict | None = None, error: str | None = None,
+                 status_code: int = 200):
+    return templates.TemplateResponse(request, "shop_import.html", {
+        "shop": current, "result": result, "error": error, "columns": shop_import.COLUMNS,
+        "max_rows": shop_import.MAX_ROWS}, status_code=status_code)
+
+
+@router.get("/my/shop/import")
+def import_page(request: Request, user: User):
+    with core.pool.connection() as conn:
+        current = _own_shop(conn, user)
+    return _import_page(request, current)
+
+
+@router.get("/my/shop/import/template.xlsx")
+def import_template(user: User):
+    return Response(shop_import.template(), headers={"Content-Disposition": 'attachment; filename="tovary.xlsx"'},
+                    media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
+def _import(request: Request, user: int, content: bytes, filename: str):
+    with core.pool.connection() as conn:
+        current = _own_shop(conn, user)
+        try:
+            rows = shop_import.read(content, filename)
+        except ValueError as error:
+            return _import_page(request, current, error=str(error), status_code=422)
+        result = shop_import.run(conn, current, rows)
+    _audit(request, user, "shop_product", str(current["id"]), op="import", created=result["created"],
+           updated=result["updated"], errors=len(result["errors"]))
+    return _import_page(request, current, result=result)
+
+
+@router.post("/my/shop/import", dependencies=[Depends(same_origin)])
+async def import_upload(request: Request, user: User):
+    """Загрузка файла каталога (предел запроса шлюза здесь — 6 МБ, deploy/gateway/default.conf)."""
+    with core.pool.connection() as conn:
+        _own_shop(conn, user)
+    form = await request.form()
+    upload = form.get("file")
+    content = await upload.read(shop_import.MAX_BYTES + 1) if hasattr(upload, "read") else b""
+    filename = getattr(upload, "filename", "") or ""
+    # Разбор файла и сотни товаров — не в цикле событий.
+    return await run_in_threadpool(_import, request, user, content, filename)
 
 
 @router.get("/staff/sellers")
