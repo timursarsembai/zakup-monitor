@@ -2,7 +2,7 @@
 {% macro share_buttons(path, portal_url, title) %}
 <div class="share">
   <button type="button" data-share="{{ site_url }}{{ path }}" data-share-title="{{ title }}">{{ _("↗ Поделиться") }}</button>
-  <button type="button" data-share="{{ portal_url }}" data-share-title="{{ title }}">{{ _("↗ Ссылка на портал") }}</button>
+  <button type="button" data-share="{{ (site_url ~ portal_url) if portal_url.startswith('/') else portal_url }}" data-share-title="{{ title }}">{{ _("↗ Ссылка на портал") }}</button>
   <span class="muted" data-share-done hidden>{{ _("Ссылка скопирована") }}</span>
 </div>
 {% endmacro %}

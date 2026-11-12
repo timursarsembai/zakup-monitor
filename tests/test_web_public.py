@@ -120,9 +120,38 @@ def test_logo_and_share_buttons(client, conn):
     _login(client)
     page = client.get("/a/501").text
     assert 'data-share="https://zakup.sarsembai.com/a/501"' in page
-    assert 'data-share="https://v3bl.goszakup.gov.kz/ru/announce/index/501"' in page
-    assert 'href="https://old.goszakup.gov.kz/ru/announce/index/501"' in page
+    # Номер на платформе zakup.gov.kz ещё не знаем — переход через нас (найдёт по номеру).
+    assert 'data-share="https://zakup.sarsembai.com/a/501/portal"' in page and "goszakup.gov.kz/ru" not in page
     assert 'data-share="https://zakup.sarsembai.com/lots/5011"' in client.get("/lots/5011").text
+    conn.execute("UPDATE announcements SET platform_id = 41083105 WHERE id = 501")
+    conn.commit()
+    assert 'href="https://zakup.gov.kz/announcement/41083105"' in client.get("/a/501").text
+
+
+def test_portal_redirect_finds_platform_number(client, conn, monkeypatch):
+    from zakup import portal
+    db.upsert_announcement(conn, {"id": 17950444, "number_anno": "17950444-1", "name_ru": "Товары",
+                                  "end_date": "2099-01-01 09:00:00"})
+    conn.commit()
+    asked = []
+
+    def find(client, aid, number):
+        asked.append((aid, number))
+        return {"id": 41083105, "external_id": 17950444} if number == "17950444-1" else None
+    monkeypatch.setattr(portal, "find", find)
+    moved = client.get("/a/17950444/portal", follow_redirects=False)
+    assert moved.headers["location"] == "https://zakup.gov.kz/announcement/41083105"
+    assert conn.execute("SELECT platform_id FROM announcements WHERE id = 17950444").fetchone()[0] == 41083105
+    client.get("/a/17950444/portal", follow_redirects=False)
+    assert len(asked) == 1  # второй раз — из базы
+    # Нет такого объявления — на главную платформы; не нашли на платформе — тоже, и сутки не ищем.
+    assert client.get("/a/1/portal", follow_redirects=False).headers["location"] == portal.HOME
+    db.upsert_announcement(conn, {"id": 600, "number_anno": "600-1", "name_ru": "Старое",
+                                  "end_date": "2099-01-01 09:00:00"})
+    conn.commit()
+    for _ in range(2):
+        assert client.get("/a/600/portal", follow_redirects=False).headers["location"] == portal.HOME
+    assert [a for a, _ in asked].count(600) == 1
 
 
 def test_announcements_advance_column_groups_values(client, conn):

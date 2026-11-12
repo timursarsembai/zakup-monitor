@@ -22,9 +22,6 @@ from zakup.goszakup import PORTAL_TZ
 
 logger = logging.getLogger(__name__)
 
-# Новая версия портала — там подают заявки (вход по ЭЦП); старая открывается без входа.
-PORTAL_ANNOUNCEMENT_URL = "https://v3bl.goszakup.gov.kz/ru/announce/index/{}"
-PORTAL_OLD_URL = "https://old.goszakup.gov.kz/ru/announce/index/{}"
 # В одном блоке уведомления не больше стольких лотов, остальные — на сайте.
 LOTS_PER_BLOCK = 6
 

@@ -66,8 +66,7 @@
   <button role="tab" data-tab="winners" aria-selected="false">{{ _("Победители (") }}{{ results|length }})</button>
   <button role="tab" data-tab="contracts" aria-selected="false">{{ _("Договоры (") }}{{ contracts|length }})</button>
   <button role="tab" data-tab="appeals" aria-selected="false">{{ _("Апелляции (") }}{{ appeals|length }})</button>
-  <a href="{{ portal_url }}" target="_blank" rel="noopener" title="{{ _("Единая платформа закупок zakup.gov.kz") if skk else _("Новая версия портала — подача заявок, вход по ЭЦП") }}">{{ _("На портале ↗") }}</a>
-  {% if portal_old_url %}<a href="{{ portal_old_url }}" target="_blank" rel="noopener" class="muted" title="{{ _("Старая версия портала — открывается без входа") }}">{{ _("старая версия ↗") }}</a>{% endif %}
+  <a href="{{ portal_url }}" target="_blank" rel="noopener nofollow" title="{{ _("Единая платформа закупок zakup.gov.kz — подача заявок, вход по ЭЦП") }}">{{ _("На портале ↗") }}</a>
 </nav>
 
 <section data-panel="lots">

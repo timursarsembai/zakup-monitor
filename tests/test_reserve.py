@@ -90,9 +90,10 @@ def test_fresh_announcement_saved_before_ows_and_ows_completes_it(conn):
     conn.commit()
     stats = reserve.Reserve(platform).run(conn, NOW)
     assert stats["saved"] == 1 and ("/announcements/41000001/", {}) not in platform.calls
-    row = conn.execute("SELECT system, status_id, trade_method_id, disable_person, lots_ready, details_fetched_at "
-                       "FROM announcements WHERE id = 17946359").fetchone()
-    assert row == (1, 240, 3, True, True, None)  # подробности OWS — на ближайшем круге
+    row = conn.execute("SELECT system, status_id, trade_method_id, disable_person, lots_ready, details_fetched_at, "
+                       "platform_id FROM announcements WHERE id = 17946359").fetchone()
+    # подробности OWS — на ближайшем круге; номер платформы — для ссылки «На портале»
+    assert row == (1, 240, 3, True, True, None, 41074043)
     lot = conn.execute("SELECT trd_buy_id, price, unit_name, kato, customer_bin FROM lots WHERE id = 43878609").fetchone()
     assert lot[0] == 17946359 and float(lot[1]) == 3000 and lot[2] == "Штука" and lot[3] == ["194020100"]
     assert lot[4] == ORG
@@ -135,7 +136,7 @@ def test_old_and_lotless_skipped(conn):
     old = _row(41000002, 600, published=NOW - timedelta(days=2))
     platform = Platform([_row(41000003, 700), old], cards={41000003: _card(41000003, 700)}, lots={41000003: []})
     res = reserve.Reserve(platform)
-    assert res.run(conn, NOW) == {"listed": 1, "saved": 0, "plans": 0, "failed": 0}
+    assert res.run(conn, NOW) == {"listed": 1, "saved": 0, "plans": 0, "links": 0, "failed": 0}
     assert conn.execute("SELECT count(*) FROM announcements").fetchone()[0] == 0
     # Лотов на платформе нет — не спрашиваем снова до RETRY.
     platform.calls.clear()
@@ -167,6 +168,23 @@ def test_fills_missing_plans_into_ows_detail(conn):
     conn.execute("UPDATE announcements SET plans_missing = true WHERE id = 17946359")
     conn.commit()
     platform.rows = []
+    platform.calls.clear()
+    res.run(conn, NOW + timedelta(minutes=2))
+    assert platform.calls == []
+
+
+def test_links_backfill_open_announcements(conn):
+    db.upsert_announcement(conn, {"id": 17950444, "number_anno": "17950444-1", "name_ru": "Товары",
+                                  "end_date": "2099-01-01 09:00:00"})
+    db.upsert_announcement(conn, {"id": 600, "number_anno": "600-1", "name_ru": "Нет на платформе",
+                                  "end_date": "2099-01-01 09:00:00"})
+    conn.commit()
+    platform = Platform([_row(41083105, 17950444, published=NOW - timedelta(days=5))])
+    res = reserve.Reserve(platform)
+    res._fresh = lambda conn, now: []
+    assert res.run(conn, NOW)["links"] == 1
+    assert conn.execute("SELECT platform_id FROM announcements WHERE id = 17950444").fetchone()[0] == 41083105
+    # Не нашли — до RETRY не ищем снова.
     platform.calls.clear()
     res.run(conn, NOW + timedelta(minutes=2))
     assert platform.calls == []

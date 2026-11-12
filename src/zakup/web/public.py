@@ -33,6 +33,7 @@ from zakup import (
     og,
     orgs,
     outcomes,
+    portal,
     products,
     research,
     results,
@@ -52,7 +53,6 @@ from zakup.filters import (
     Filters,
 )
 from zakup.goszakup import PORTAL_TZ, GoszakupError, parse_date
-from zakup.matcher import PORTAL_ANNOUNCEMENT_URL, PORTAL_OLD_URL
 from zakup.web import core
 from zakup.web.ai import _research_view
 from zakup.web.core import (
@@ -377,7 +377,7 @@ def robots() -> Response:
              *[f"Disallow: {path}" for path in ("/settings", "/log", "/my", "/matches",
                                                 "/subscriptions", "/research", "/welcome",
                                                 "/staff", "/export.xlsx", "/lang/")],
-             "Disallow: /lots/*/research", "Disallow: /lots/*/questions",
+             "Disallow: /lots/*/research", "Disallow: /lots/*/questions", "Disallow: /a/*/portal",
              # Фильтры, сортировки и страницы поиска — бесконечное число адресов одного и
              # того же; в индекс идут сами закупки (sitemap) и чистые /lots, /announcements.
              "Disallow: /*?", "Allow: /*?lang=kk$", "Disallow: /balance", "Disallow: /pay/", "Disallow: /sources/",
@@ -832,6 +832,8 @@ def _announcement_context(request: Request, user: int | None, announcement_id: i
         detail, fetched_at, outcome, results_at = _load_announcement(
             conn, user, announcement_id, background, now)
         subscribed = _subscribed(conn, user, announcement_id)
+        platform = conn.execute("SELECT platform_id FROM announcements WHERE id = %s",
+                                (announcement_id,)).fetchone()
     documents, protocols = _files(detail)
     lots = [lot for lot in detail.get("Lots") or [] if not lot.get("isDeleted")]
     info = {lot["id"]: details.parse_lot(lot) for lot in lots}
@@ -862,10 +864,11 @@ def _announcement_context(request: Request, user: int | None, announcement_id: i
         "fetched_at": fetched_at,
         "refresh_error": None,
         "spec_file": spec.spec_file,
-        # Самрук-Казына — на единой платформе zakup.gov.kz, старой версии портала у неё нет.
-        "portal_url": skk.PORTAL_URL.format(detail["platformId"]) if detail.get("system") == skk.SYSTEM
-        else PORTAL_ANNOUNCEMENT_URL.format(announcement_id),
-        "portal_old_url": None if detail.get("system") == skk.SYSTEM else PORTAL_OLD_URL.format(announcement_id),
+        # Объявления — на единой платформе zakup.gov.kz (старый портал отключили); номер
+        # платформы ещё не знаем — переход /a/<id>/portal найдёт его (zakup.portal).
+        "portal_url": portal.url(detail.get("platformId") if detail.get("system") == skk.SYSTEM
+                                 else (platform[0] if platform else None) or detail.get("platformId"))
+        or f"/a/{announcement_id}/portal",
         "skk": detail.get("system") == skk.SYSTEM,
         "status_names": STATUS_NAMES,
     }
@@ -973,6 +976,14 @@ def _lot_extras(request: Request, user: int | None, detail: dict, lots: list, in
         background.add_task(_subjects_in_background, missing)
     return {"specs": specs, "summaries": summaries, "marks": lot_marks, "results": lot_results,
             "company_bin": company_bin, "org_cards": org_cards}
+
+
+@router.get("/a/{announcement_id}/portal")
+def announcement_portal(announcement_id: int):
+    """Переход на объявление на zakup.gov.kz: номер платформы из базы или поиском по номеру
+    объявления (один-два быстрых запроса); не нашли — главная платформы."""
+    platform_id = portal.lookup(core.pool, portal.quick(), announcement_id)
+    return RedirectResponse(portal.url(platform_id) or portal.HOME, status_code=302)
 
 
 @router.get("/a/{announcement_id}/lots/{lot_id}/spec")

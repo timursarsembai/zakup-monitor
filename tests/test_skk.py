@@ -164,6 +164,7 @@ def test_skk_announcement_page(client, conn, monkeypatch):
     assert page.status_code == 200
     assert "Самрук-Казына" in page.text and "https://zakup.gov.kz/announcement/41079505" in page.text
     assert "old.goszakup.gov.kz" not in page.text
+    assert conn.execute("SELECT platform_id FROM announcements WHERE id = %s", (aid,)).fetchone()[0] == 41079505
     lot = conn.execute("SELECT id FROM lots WHERE trd_buy_id = %s", (aid,)).fetchone()[0]
     assert "Самрук-Казына" in client.get(f"/lots/{lot}").text
     listing = client.get("/announcements?applied=1&system=skk")

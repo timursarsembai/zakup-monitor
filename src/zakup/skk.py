@@ -238,6 +238,9 @@ def save(conn: psycopg.Connection, item: dict[str, Any], card: dict[str, Any], l
     «увиденные» для подписок (в той же транзакции, как у догрузки истории)."""
     detail = to_detail(item, card, lots, names)
     db.upsert_announcement(conn, _rest(detail, item))
+    # Номер на платформе — для ссылки «На портале» (zakup.portal), как у госзакупок.
+    conn.execute("UPDATE announcements SET platform_id = %s WHERE id = %s AND platform_id IS DISTINCT FROM %s",
+                 (detail["platformId"], detail["id"], detail["platformId"]))
     for lot in detail["Lots"]:
         db.upsert_lot(conn, {"id": lot["id"], "trd_buy_id": detail["id"], "trd_buy_number_anno": detail["numberAnno"],
                              "lot_number": lot["lotNumber"], "name_ru": lot["nameRu"], "name_kz": lot["nameKz"],

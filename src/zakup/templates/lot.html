@@ -137,7 +137,7 @@
   </div>
 </div>
 
-{{ share_buttons("/lots/" ~ lot.id, portal_url ~ "?tab=lots", loc(lot) ~ " — " ~ _("лот") ~ " " ~ (lot.lotNumber or lot.id)) }}
+{{ share_buttons("/lots/" ~ lot.id, portal_url, loc(lot) ~ " — " ~ _("лот") ~ " " ~ (lot.lotNumber or lot.id)) }}
 {{ lot_card(lot, link=false) }}
 
 {# «Стоит ли участвовать» — главные цифры одним взглядом (zakup.bids, zakup.lot_insights).
@@ -343,7 +343,7 @@
 
 </div>{% endif %}
 
-<p class="muted" style="margin-top:24px">{{ _("Данные с портала обновлены") }} {{ (fetched_at|local).strftime("%d.%m.%Y %H:%M") if fetched_at else "—" }}. <a href="{{ portal_url }}" target="_blank" rel="noopener">{{ _("Объявление на портале ↗") }}</a></p>
+<p class="muted" style="margin-top:24px">{{ _("Данные с портала обновлены") }} {{ (fetched_at|local).strftime("%d.%m.%Y %H:%M") if fetched_at else "—" }}. <a href="{{ portal_url }}" target="_blank" rel="noopener nofollow">{{ _("Объявление на портале ↗") }}</a></p>
 <dialog class="search-confirm" id="search-confirm" aria-labelledby="sc-title">
   <form method="dialog" class="sc-wrap">
     <h2 id="sc-title">{{ _("Запустить поиск товаров?") }}</h2>

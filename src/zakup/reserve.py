@@ -22,7 +22,7 @@ from typing import Any
 
 import psycopg
 
-from zakup import db, details
+from zakup import db, details, portal
 from zakup.goszakup import parse_date
 from zakup.skk import Client, PlatformError, _bin, _iso, results
 
@@ -35,6 +35,8 @@ PAGE = 100
 CAUGHT_UP_PAGES = 2
 PER_RUN = 150  # объявлений за проход (по 2 запроса)
 PLANS_PER_RUN = 50
+LINKS_PER_RUN = 30  # добор номеров платформы открытым объявлениям (ссылка на портал)
+LINKS_SECONDS = 90  # …и не дольше стольких секунд сверх основного прохода
 PLANS_AGE = timedelta(days=3)  # пункты плана ищем у опубликованных не раньше
 # Неудачная попытка (на платформе нет лотов, ошибка) — не повторяем столько.
 RETRY = timedelta(minutes=30)
@@ -50,10 +52,7 @@ def _code(ref: dict | None) -> int | None:
     return int(value) if value.isdigit() else None
 
 
-def _ext(item: dict[str, Any]) -> int | None:
-    """Номер OWS у строки платформы (external_id), если он есть и это число."""
-    value = str(item.get("external_id") or "")
-    return int(value) if value.isdigit() else None
+_ext = portal.ext  # номер OWS у строки платформы
 
 
 def _kato(address: str | None) -> str | None:
@@ -173,6 +172,7 @@ def save(conn: psycopg.Connection, card: dict[str, Any], lots: list[dict[str, An
                              "customer_bin": lot["customerBin"], "customer_name_ru": lot["customerNameRu"],
                              "source": "platform"}, overwrite=False)
     details.save(conn, detail)
+    portal.remember(conn, [card])
     # Подробности OWS (файлы, протоколы) — на ближайшем круге: details.refresh берёт
     # непрочитанные первыми. details_update_date пуст — его пункты плана не затрут пустыми.
     conn.execute("UPDATE announcements SET details_fetched_at = NULL, details_update_date = NULL WHERE id = %s",
@@ -228,6 +228,7 @@ class Reserve:
                     logger.warning("reserve list %s: %s", system, error)
                     break
                 items = [i for i in results(page) if _ext(i)]
+                self._remember(conn, items)  # номер платформы — для ссылки на объявление
                 ready = {r[0] for r in conn.execute(
                     "SELECT id FROM announcements WHERE id = ANY(%s) AND lots_ready", ([_ext(i) for i in items],))}
                 conn.commit()
@@ -243,9 +244,10 @@ class Reserve:
         return todo
 
     def run(self, conn: psycopg.Connection, now: datetime | None = None,
-            limit: int = PER_RUN, plans_limit: int = PLANS_PER_RUN) -> dict[str, int]:
+            limit: int = PER_RUN, plans_limit: int = PLANS_PER_RUN,
+            links_limit: int = LINKS_PER_RUN) -> dict[str, int]:
         now = now or datetime.now(UTC)
-        stats = {"listed": 0, "saved": 0, "plans": 0, "failed": 0}
+        stats = {"listed": 0, "saved": 0, "plans": 0, "links": 0, "failed": 0}
         todo = self._fresh(conn, now)
         stats["listed"] = len(todo)
         deadline = time.monotonic() + PASS_SECONDS
@@ -267,6 +269,7 @@ class Reserve:
                 self.tried[aid] = now
                 stats["failed"] += result is None  # None — данные не сохранились (ошибка)
         stats["plans"] = self._plans(conn, now, plans_limit, stats)
+        stats["links"] = self._links(conn, now, links_limit, stats, deadline + LINKS_SECONDS)
         # Память попыток — только за RETRY.
         self.tried = {k: v for k, v in self.tried.items() if v > now - RETRY}
         return stats
@@ -304,15 +307,11 @@ class Reserve:
         for aid, number in rows:
             self.tried[-aid] = now  # ключ со знаком минус — отдельно от свежих объявлений
             try:
-                found = []
-                for system in SYSTEMS:
-                    page = self.client.get("/announcements/", {"system_id": system, "announcement_number": number})
-                    found = [i for i in results(page) if _ext(i) == aid]
-                    if found:
-                        break
-                if not found:
+                found = portal.find(self.client, aid, number)
+                if found is None:
                     continue
-                lots = self._lots(found[0]["id"])
+                self._remember(conn, [found])
+                lots = self._lots(found["id"])
             except PlatformError as error:
                 logger.warning("reserve plans %s: %s", aid, error)
                 stats["failed"] += 1
@@ -322,6 +321,50 @@ class Reserve:
             stats["failed"] += result is None
         return filled
 
+
+    def _remember(self, conn: psycopg.Connection, items: list[dict[str, Any]]) -> int:
+        """Номера платформы — польза сверху: сбой записи не должен стоить прохода."""
+        try:
+            count = portal.remember(conn, items)
+            conn.commit()
+            return count
+        except psycopg.Error as error:
+            conn.rollback()
+            logger.warning("reserve platform ids: %r", error)
+            return 0
+
+    def _links(self, conn: psycopg.Connection, now: datetime, limit: int, stats: dict[str, int],
+               deadline: float) -> int:
+        """Открытые объявления без номера платформы (старше списка резерва) — ищем по номеру:
+        по нему ссылка «На портале». Сначала не искавшиеся, внутри — что закрывается раньше;
+        не нашли — отметка в базе, снова не раньше чем через сутки."""
+        rows = conn.execute(
+            """SELECT id, number_anno FROM announcements
+               WHERE platform_id IS NULL AND system = 1 AND end_date > %s AND number_anno IS NOT NULL
+                 AND (platform_checked_at IS NULL OR platform_checked_at < %s)
+               ORDER BY platform_checked_at NULLS FIRST, end_date LIMIT %s""",
+            (now, now - portal.RECHECK, limit)).fetchall()
+        conn.commit()
+        linked = 0
+        for aid, number in rows:
+            if time.monotonic() > deadline:
+                break
+            try:
+                found = portal.find(self.client, aid, number)
+            except PlatformError as error:
+                logger.warning("reserve link %s: %s", aid, error)
+                stats["failed"] += 1
+                continue
+            if found is None:
+                try:
+                    portal.missed(conn, aid)
+                    conn.commit()
+                except psycopg.Error as error:
+                    conn.rollback()
+                    logger.warning("reserve link %s: %r", aid, error)
+                continue
+            linked += self._remember(conn, [found])
+        return linked
 
 def loop(database_url: str, pause: float = 120, once: bool = False) -> int:
     client = Client()
