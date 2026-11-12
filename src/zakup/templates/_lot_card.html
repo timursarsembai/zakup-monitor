@@ -100,7 +100,8 @@
       </div>
       <div class="lot-sum">
         <b>{{ lot.amount | money }} ₸</b>
-        <div class="muted">{% if i.price is not none %}{{ i.price | money }} ₸ × {% endif %}{{ '%g'|format(lot.count or 0) }} {{ (pick(i.unit_name, i.unit_name_kz) or "")|lower }}</div>
+        {# Пунктов плана ещё нет (OWS дописывает позже) — цена за единицу по сумме и количеству. #}
+        <div class="muted">{% if i.price is not none %}{{ i.price | money }} ₸ × {% elif not lot.get("Plans") and (lot.get("amount") or 0)|float > 0 and (lot.get("count") or 0)|float > 0 %}≈ {{ ((lot.amount|float) / (lot.count|float)) | money }} ₸ × {% endif %}{{ '%g'|format(lot.count or 0) }} {{ (pick(i.unit_name, i.unit_name_kz) or "")|lower }}</div>
         <div style="margin-top:8px">{{ mark_control(lot.id, marks.get(lot.id), here) }}</div>
       </div>
     </div>

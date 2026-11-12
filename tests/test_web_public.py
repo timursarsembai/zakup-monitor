@@ -723,3 +723,20 @@ def test_calculator_open_to_all_and_prefilled_from_lot(client, conn):
     # Сотрудник (платное) — подсказка про подписку не показывается.
     _login(client)
     assert "подставляются по подписке" not in client.get("/calculator?lot=5001").text
+
+
+def test_lot_card_unit_price_without_plans(client, conn):
+    """Пунктов плана ещё нет — цена за единицу по сумме и количеству, с «≈»."""
+    db.upsert_announcement(conn, {"id": 600, "name_ru": "Подушки", "ref_buy_status_id": 240,
+                                  "end_date": "2099-01-01 09:00:00"})
+    details.save(conn, {"id": 600, "Lots": [{"id": 6001, "trdBuyId": 600, "lotNumber": "L-1", "nameRu": "Подушка",
+                                            "amount": 1500000, "count": 500, "Plans": []}]})
+    conn.commit()
+    page = client.get("/lots/6001").text
+    assert "≈ 3 000" in page.replace("\xa0", " ")
+    # Пункты есть, но цены разные — средней не показываем.
+    details.save(conn, {"id": 600, "Lots": [{"id": 6001, "trdBuyId": 600, "lotNumber": "L-1", "nameRu": "Подушка",
+                                            "amount": 1500000, "count": 500,
+                                            "Plans": [{"price": 1000}, {"price": 5000}]}]})
+    conn.commit()
+    assert "≈" not in client.get("/lots/6001").text.split("lot-sum")[1][:300]

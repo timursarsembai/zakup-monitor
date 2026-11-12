@@ -119,7 +119,32 @@ def parse(item: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     return fields, lots
 
 
+def _no_plans(lot: dict[str, Any]) -> bool:
+    return not lot.get("isDeleted") and not lot.get("Plans")
+
+
+def _keep_plans(conn: psycopg.Connection, item: dict[str, Any]) -> bool:
+    """OWS отдаёт пункты плана (цена за единицу, единица, ЕНС ТРУ, аванс) с задержкой после
+    публикации, а у завершённых часто снова пустыми. Прочитанные раньше не затираем пустыми —
+    если объявление с тех пор не меняли. Возвращает: остались ли лоты без пунктов."""
+    if not any(_no_plans(lot) for lot in item.get("Lots") or []):
+        return False
+    row = conn.execute(
+        """SELECT a.details_update_date,
+                  (SELECT jsonb_object_agg(x->>'id', x->'Plans') FROM jsonb_array_elements(a.detail->'Lots') x
+                   WHERE jsonb_typeof(x->'Plans') = 'array' AND jsonb_array_length(x->'Plans') > 0)
+           FROM announcements a WHERE a.id = %s AND jsonb_typeof(a.detail->'Lots') = 'array'""",
+        (int(item["id"]),)).fetchone()
+    updated = parse_date(item.get("lastUpdateDate"))
+    if row and row[1] and not (updated and row[0] and updated > row[0]):
+        for lot in item.get("Lots") or []:
+            if _no_plans(lot) and str(lot.get("id")) in row[1]:
+                lot["Plans"] = row[1][str(lot["id"])]
+    return any(_no_plans(lot) for lot in item.get("Lots") or [])
+
+
 def save(conn: psycopg.Connection, item: dict[str, Any]) -> None:
+    plans_missing = _keep_plans(conn, item)
     fields, lots = parse(item)
     conn.execute(
         """UPDATE announcements SET
@@ -131,11 +156,13 @@ def save(conn: psycopg.Connection, item: dict[str, Any]) -> None:
                customer_bin = coalesce(%(customer_bin)s, customer_bin),
                customer_name_ru = coalesce(%(customer_name_ru)s, customer_name_ru),
                detail = %(detail)s, details_fetched_at = now(), lots_ready = %(lots_ready)s,
+               plans_missing = %(plans_missing)s AND system = 1,  -- перечитывает только OWS
                -- Когда лоты пришли впервые (справа — прежнее значение lots_ready): замер задержки.
                lots_ready_at = CASE WHEN %(lots_ready)s AND lots_ready_at IS NULL THEN now() ELSE lots_ready_at END,
                details_update_date = coalesce(%(last_update_date)s, last_update_date)
            WHERE id = %(id)s""",
-        {**fields, "detail": Jsonb(item), "lots_ready": bool(lots)},
+        {**fields, "detail": Jsonb(item), "lots_ready": bool(lots),
+         "plans_missing": plans_missing},
     )
     raw_lots = {int(lot["id"]): lot for lot in item.get("Lots") or []}
     for lot in lots:
@@ -289,7 +316,14 @@ def refresh(conn: psycopg.Connection, client: Client, limit: int) -> int:
                       -- 3 часа после публикации, дальше — раз в час (отменённые, без лотов совсем).
                       OR (NOT lots_ready AND details_fetched_at < now() - CASE
                               WHEN coalesce(publish_date, now()) > now() - interval '3 hours' THEN interval '1 minute'
-                              ELSE interval '1 hour' END))
+                              ELSE interval '1 hour' END)
+                      -- Пунктов плана (цена за единицу, единица) у части лотов ещё нет — OWS
+                      -- дописывает их позже: первые 6 часов раз в 10 минут, до 3 суток раз в 2 часа,
+                      -- дальше — как все, раз в сутки (бывают лоты, где пунктов так и нет).
+                      OR (plans_missing AND coalesce(publish_date, now()) > now() - interval '3 days'
+                          AND details_fetched_at < now() - CASE
+                              WHEN coalesce(publish_date, now()) > now() - interval '6 hours' THEN interval '10 minutes'
+                              ELSE interval '2 hours' END))
                -- Сначала новые и те, где ещё нет лотов: они не видны на сайте.
                ORDER BY details_fetched_at IS NOT NULL, lots_ready, details_fetched_at, end_date
                LIMIT %s""",

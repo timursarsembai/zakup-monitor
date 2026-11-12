@@ -190,3 +190,52 @@ def test_details_retry_announcement_after_deadlock(conn, monkeypatch):
     assert calls == [5, 6, 6]
     # Первое объявление сохранено своей транзакцией, откат второго его не задел.
     assert conn.execute("SELECT count(*) FROM announcements WHERE detail ? 'nameKz'").fetchone()[0] == 2
+
+
+def test_late_plans_refetched_and_not_wiped(conn):
+    """OWS дописывает пункты плана позже публикации, а у завершённых отдаёт их снова пустыми."""
+    from zakup import details
+
+    def item(plans):
+        return {"id": 5, "nameKz": "x", "Lots": [
+            {"id": 51, "nameRu": "Подушка", "count": 500, "amount": 1500000, "trdBuyId": 5, "Plans": plans}]}
+    plan = [{"price": 3000, "RefUnits": {"nameRu": "Штука", "nameKz": "Дана"}, "refEnstruCode": "139224.992.000000"}]
+
+    class Portal:
+        answer = item([])
+
+        def graphql(self, query):
+            self.asked = getattr(self, "asked", 0) + 1
+            return {"TrdBuy": [self.answer]}
+
+    portal = Portal()
+    db.upsert_announcement(conn, {"id": 5, "name_ru": "Подушки", "end_date": "2099-01-01 09:00:00",
+                                  "publish_date": "2026-11-12 09:00:00"})
+    conn.execute("UPDATE announcements SET publish_date = now() - interval '1 hour' WHERE id = 5")
+    details.refresh(conn, portal, 10)
+
+    def state():
+        return conn.execute("SELECT a.plans_missing, l.price, l.unit_name, a.detail->'Lots'->0->'Plans' "
+                            "FROM announcements a JOIN lots l ON l.trd_buy_id = a.id WHERE a.id = 5").fetchone()
+    assert state()[:3] == (True, None, None)
+    # Свежее, пунктов нет — перечитываем через 10 минут, а не через сутки.
+    conn.execute("UPDATE announcements SET details_fetched_at = now() - interval '11 minutes' WHERE id = 5")
+    portal.answer = item(plan)
+    details.refresh(conn, portal, 10)
+    assert portal.asked == 2 and state()[:3] == (False, 3000, "Штука")
+    # Без пропусков — как обычно, раз в сутки.
+    conn.execute("UPDATE announcements SET details_fetched_at = now() - interval '3 hours' WHERE id = 5")
+    details.refresh(conn, portal, 10)
+    assert portal.asked == 2
+    # Снова пусто (завершённое) — прочитанное раньше остаётся.
+    details.save(conn, item([]))
+    missing, price, unit, plans = state()
+    assert (missing, price, unit) == (False, 3000, "Штука") and plans == plan
+    # Объявление изменили (lastUpdateDate новее) — старые пункты не возвращаем, ждём новые.
+    conn.execute("UPDATE announcements SET details_update_date = '2026-11-12 09:00+05' WHERE id = 5")
+    details.save(conn, {**item([]), "lastUpdateDate": "2026-11-12 10:00:00"})
+    assert state()[0] is True and state()[3] == []
+    # Самрук-Казына (system 3) — флаг не ставим: её подробности не из OWS.
+    conn.execute("UPDATE announcements SET system = 3 WHERE id = 5")
+    details.save(conn, item([]))
+    assert state()[0] is False
