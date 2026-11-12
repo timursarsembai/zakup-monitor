@@ -1,0 +1,162 @@
+{% extends "base.html" %}
+{% block title %}{{ _("Калькулятор маржи для госзакупок") }}{% endblock %}
+{% block description %}{{ _("Сколько вы заработаете на госзакупке: чистая прибыль и маржа с учётом налогов (НДС 16%, упрощёнка, ИП, ТОО), обеспечений заявки и договора, аванса, антидемпинга и заморозки денег. Цена, ниже которой — в минус.") }}{% endblock %}
+{% block style %}
+  .calc-wrap { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 380px); gap: 20px; align-items: start; margin-top: 14px; }
+  @media (max-width: 860px) { .calc-wrap { grid-template-columns: 1fr; } }
+  .calc-form fieldset { border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px 14px; margin: 0 0 14px; }
+  .calc-form legend { font-weight: 600; padding: 0 6px; }
+  .calc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px 16px; }
+  .calc-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 14px; color: var(--muted); }
+  .calc-grid label.check { flex-direction: row; align-items: center; gap: 8px; color: var(--fg); }
+  .calc-form input:not([type=checkbox]):not([type=radio]), .calc-form select { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); font: inherit; font-variant-numeric: tabular-nums; }
+  .calc-form .hint { font-size: 13px; color: var(--muted); margin: 8px 0 0; }
+  .calc-form details summary { cursor: pointer; font-weight: 600; margin: 4px 0 12px; }
+  .calc-lot { border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; margin-top: 12px; font-size: 14px; }
+  .calc-out { border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; position: sticky; top: 12px; }
+  .calc-out h2 { margin: 0 0 8px; font-size: 17px; }
+  .calc-big { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px; margin-bottom: 10px; }
+  .calc-big div { font-size: 13px; color: var(--muted); }
+  .calc-big b { display: block; font-size: 22px; color: var(--fg); font-variant-numeric: tabular-nums; }
+  .calc-big b.neg { color: var(--bad); } .calc-big b.pos { color: var(--ok); }
+  .calc-out table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .calc-out td { padding: 4px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .calc-out td.num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; padding-left: 10px; }
+  .calc-out tr.total td { font-weight: 700; border-bottom: 0; }
+  .calc-out h3 { font-size: 15px; margin: 14px 0 4px; }
+  .calc-warn { margin: 8px 0 0; padding: 8px 12px; border-radius: 8px; background: color-mix(in srgb, #f0b429 16%, transparent); font-size: 14px; }
+  .calc-warn.bad { background: color-mix(in srgb, var(--bad) 14%, transparent); }
+  .calc-target { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 14px; }
+  .calc-target input { width: 70px !important; }
+  .calc-about { max-width: 760px; margin-top: 26px; font-size: 15px; }
+  .calc-about h2 { font-size: 18px; }
+{% endblock %}
+{% block main %}
+<h1>{{ _("Калькулятор маржи для госзакупок") }}</h1>
+<p class="muted">{{ _("Сколько останется на руках после налогов, обеспечений и заморозки денег — и ниже какой цены участвовать в убыток.") }}</p>
+
+{% if lot_missing %}<p class="calc-warn">{{ _("Лот не найден или у него нет плановой суммы — заполните поля вручную.") }}</p>{% endif %}
+{% set p = prefill or {} %}
+{% if prefill %}
+<div class="calc-lot">{{ _("Данные из лота") }} <a href="/lots/{{ p.id }}">{{ p.name or ("№" ~ p.id) }}</a>
+  {% if p.method %} · {{ _(p.method) }}{% endif %}{% if p.count %} · {{ _("количество:") }} {{ '%g'|format(p.count) }}{% endif %}.
+  {% if not request.state.paid %}<span class="muted">{{ _("Обычная цена заявки и себестоимость из поиска товаров подставляются по подписке.") }}</span>
+  {% elif not p.cost %}<span class="muted">{{ _("Себестоимость подставится, когда поиск товаров по лоту найдёт товар с ценой.") }}</span>{% endif %}
+</div>
+{% endif %}
+
+<div class="calc-wrap">
+{% set labels = {"above": _("цена выше плановой суммы — заявку отклонят"),
+                 "rejected": _("Цена ниже порога демпинга ({floor}) — для этой закупки заявку отклонят."),
+                 "anti": _("Цена ниже порога демпинга ({floor}): после победы вместе с обеспечением договора нужно внести антидемпинговую сумму {sum}. Её возвращают после исполнения договора."),
+                 "loss": _("При этой цене вы работаете в убыток."),
+                 "guarantee": _("гарантией")} %}
+<form class="calc-form" data-calc-form data-labels='{{ labels | tojson }}' onsubmit="return false" autocomplete="off">
+  <fieldset>
+    <legend>{{ _("Лот и цена") }}</legend>
+    <div class="calc-grid">
+      <label>{{ _("Плановая сумма лота, ₸") }}<input name="amount" type="number" min="0" step="any" inputmode="decimal" value="{{ '%.2f'|format(p.amount) if p.amount else '' }}" placeholder="1000000"></label>
+      <label>{{ _("Ваша цена заявки, ₸") }}<input name="price" type="number" min="0" step="any" inputmode="decimal" value="{{ '%.2f'|format(p.usual or p.amount) if p.amount else '' }}" placeholder="900000"></label>
+      <label>{{ _("Закупка товара (себестоимость), ₸") }}<input name="cost" type="number" min="0" step="any" inputmode="decimal" value="{{ '%.2f'|format(p.cost) if p.cost else '' }}" placeholder="700000"></label>
+      <label>{{ _("Доставка и прочие расходы, ₸") }}<input name="extra" type="number" min="0" step="any" inputmode="decimal" value="" placeholder="0"></label>
+    </div>
+  </fieldset>
+  <fieldset>
+    <legend>{{ _("Налоги") }}</legend>
+    <div class="calc-grid">
+      <label>{{ _("Налоговый режим") }}<select name="regime">
+        <option value="simple" data-rate="4">{{ _("Упрощённая декларация (ИП, ТОО) — % от дохода") }}</option>
+        <option value="ip" data-rate="10">{{ _("ИП на общем режиме — ИПН от прибыли") }}</option>
+        <option value="too" data-rate="20">{{ _("ТОО на общем режиме — КПН от прибыли") }}</option>
+      </select></label>
+      <label>{{ _("Ставка налога, %") }}<input name="tax_rate" type="number" min="0" max="50" step="any" value="4"></label>
+      <label class="check"><input name="vat" type="checkbox"> {{ _("Плательщик НДС (16%)") }}</label>
+      <label class="check"><input name="cost_vat" type="checkbox" checked> {{ _("Товар покупаю с НДС (зачёт)") }}</label>
+    </div>
+    <p class="hint">{{ _("Упрощёнка — 4% от дохода, маслихат может снизить или повысить ставку до 50% (2–6%): проверьте ставку своего города. ИП на общем режиме — 10% (15% с годового дохода выше 230 000 МРП), ТОО — 20%. Ставки — по Налоговому кодексу 2026 года.") }}</p>
+  </fieldset>
+  <details {% if prefill %}open{% endif %}>
+    <summary>{{ _("Подробнее: обеспечения, аванс, сроки, стоимость денег") }}</summary>
+    <fieldset>
+      <legend>{{ _("Обеспечения и аванс") }}</legend>
+      <div class="calc-grid">
+        <label>{{ _("Обеспечение заявки, % от плановой суммы") }}<input name="bid_pct" type="number" min="0" max="100" step="any" value="{{ '%g'|format(p.bid_pct) if p.bid_pct is not none and prefill else (0 if prefill else 1) }}"></label>
+        <label>{{ _("Обеспечение договора, % от цены") }}<input name="contract_pct" type="number" min="0" max="100" step="any" value="{{ '%g'|format(p.contract_pct) if p.contract_pct is not none and prefill else (0 if prefill else 3) }}"></label>
+        <label>{{ _("Аванс, % от цены") }}<input name="advance_pct" type="number" min="0" max="100" step="any" value="{{ '%g'|format(p.advance_pct) if p.advance_pct else 0 }}"></label>
+        <label>{{ _("Как вносить обеспечения") }}<select name="secure">
+          <option value="cash">{{ _("Деньгами (замораживаются)") }}</option>
+          <option value="guarantee">{{ _("Банковской гарантией (комиссия)") }}</option>
+        </select></label>
+        <label>{{ _("Комиссия банка за гарантию, % от суммы") }}<input name="guarantee_fee" type="number" min="0" max="20" step="any" value="2"></label>
+        <label class="check"><input name="kz_producer" type="checkbox"> {{ _("Я в реестре казахстанских товаропроизводителей") }}</label>
+      </div>
+      <p class="hint">{{ _("Обеспечение заявки возвращают после итогов, обеспечение договора и аванса — после исполнения договора. Обеспечение аванса равно авансу. Производители из реестра не вносят обеспечение договора и аванса (п. 538 Правил).") }}{% if prefill %} {{ _("Проценты — из документов объявления.") if p.source == "documents" else _("Проценты — по Правилам госзакупок для этого способа закупки.") }}{% endif %}</p>
+    </fieldset>
+    <fieldset>
+      <legend>{{ _("Демпинг") }}</legend>
+      <div class="calc-grid">
+        {% set dm = p.dumping if prefill else {"pct": dumping_pct, "allowed": true} %}
+        <label>{{ _("Порог демпинга, % ниже плановой суммы") }}<input name="dump_pct" type="number" min="0" max="100" step="any" value="{{ dm.pct if dm and dm.pct else 0 }}"></label>
+        <label class="check"><input name="dump_allowed" type="checkbox" {% if not dm or dm.allowed or dm.works %}checked{% endif %}> {{ _("Ниже порога можно с антидемпинговой суммой") }}</label>
+      </div>
+      <p class="hint">{{ _("Конкурс и запрос ценовых предложений (товары, услуги): порог — на 10% ниже плановой суммы; ниже можно, но после победы вносится антидемпинговая сумма: порог минус ваша цена (ст. 13 Закона). Услуги питания — ниже порога заявку отклонят. На аукционе порога нет — поставьте 0.") }}{% if prefill and p.dumping and p.dumping.works %} {{ _("У работ порог зависит от вида: СМР — 2% от сметы, текущий ремонт — 20%, проектирование — 10% (п. 85–89 Правил).") }}{% endif %}</p>
+    </fieldset>
+    <fieldset>
+      <legend>{{ _("Сроки и стоимость денег") }}</legend>
+      <div class="calc-grid">
+        <label>{{ _("Дней от заявки до итогов") }}<input name="bid_days" type="number" min="0" max="365" step="1" value="20"></label>
+        <label>{{ _("Дней на поставку") }}<input name="supply_days" type="number" min="0" max="730" step="1" value="30"></label>
+        <label>{{ _("Дней ждать оплату после поставки") }}<input name="pay_days" type="number" min="0" max="365" step="1" value="30"></label>
+        <label>{{ _("Стоимость денег, % годовых") }}<input name="money_rate" type="number" min="0" max="100" step="any" value="20"></label>
+      </div>
+      <p class="hint">{{ _("Заказчик должен оплатить не позже 30 дней после поставки. Стоимость денег — ставка кредита или то, что деньги заработали бы в другом месте: во столько обходится заморозка обеспечений и денег в товаре.") }}</p>
+    </fieldset>
+  </details>
+</form>
+
+<aside class="calc-out" aria-live="polite" data-calc-out>
+  <h2>{{ _("Результат") }}</h2>
+  <div class="calc-big">
+    <div>{{ _("Чистая прибыль") }}<b data-out="profit">—</b></div>
+    <div>{{ _("Маржа от цены без НДС") }}<b data-out="margin">—</b></div>
+    <div>{{ _("Цена без убытка") }}<b data-out="breakeven">—</b></div>
+    <div>{{ _("Нужно денег на пике") }}<b data-out="peak">—</b></div>
+  </div>
+  <div data-out="warnings"></div>
+  <table>
+    <tr><td>{{ _("Цена заявки") }}</td><td class="num" data-out="price">—</td></tr>
+    <tr data-row="vat"><td>{{ _("НДС к уплате (с учётом зачёта)") }}</td><td class="num" data-out="vat_pay">—</td></tr>
+    <tr><td>{{ _("Выручка без НДС") }}</td><td class="num" data-out="revenue">—</td></tr>
+    <tr><td>{{ _("Товар без НДС") }}</td><td class="num" data-out="cost">—</td></tr>
+    <tr><td>{{ _("Доставка и прочее") }}</td><td class="num" data-out="extra">—</td></tr>
+    <tr><td>{{ _("Гарантии банка") }}</td><td class="num" data-out="fees">—</td></tr>
+    <tr><td>{{ _("Заморозка денег") }}</td><td class="num" data-out="money">—</td></tr>
+    <tr><td>{{ _("Налог") }}</td><td class="num" data-out="tax">—</td></tr>
+    <tr class="total"><td>{{ _("Чистая прибыль") }}</td><td class="num" data-out="profit2">—</td></tr>
+  </table>
+  <h3>{{ _("Что заморозится") }}</h3>
+  <table>
+    <tr><td>{{ _("Обеспечение заявки — до итогов") }}</td><td class="num" data-out="bid_sec">—</td></tr>
+    <tr><td>{{ _("Обеспечение договора") }}</td><td class="num" data-out="contract_sec">—</td></tr>
+    <tr><td>{{ _("Обеспечение аванса") }}</td><td class="num" data-out="advance_sec">—</td></tr>
+    <tr><td>{{ _("Антидемпинговая сумма") }}</td><td class="num" data-out="anti">—</td></tr>
+    <tr><td>{{ _("Деньги в товаре (за вычетом аванса)") }}</td><td class="num" data-out="goods">—</td></tr>
+  </table>
+  <h3>{{ _("Какую цену ставить") }}</h3>
+  <div class="calc-target"><label>{{ _("Хочу маржу") }} <input data-target type="number" min="0" max="90" step="any" value="10"> %</label> → <b data-out="target_price">—</b></div>
+  <p class="muted" style="font-size:13px;margin:10px 0 0">{{ _("Расчёт ориентировочный и не заменяет бухгалтера.") }}</p>
+</aside>
+</div>
+
+<section class="calc-about">
+  <h2>{{ _("Как считается") }}</h2>
+  <ul>
+    <li>{{ _("Плательщик НДС: из цены заявки выделяется НДС 16%, НДС в цене купленного товара идёт в зачёт. Не плательщик — НДС нет, вся цена — выручка.") }}</li>
+    <li>{{ _("Упрощёнка — налог от всей выручки, расходы не уменьшают налог. Общий режим — налог от прибыли: выручка минус товар, доставка и комиссии банка.") }}</li>
+    <li>{{ _("Обеспечения и антидемпинговую сумму возвращают, поэтому это не расход. Расход — то, во что обходится их заморозка (или комиссия банка за гарантию), и деньги, вложенные в товар до оплаты.") }}</li>
+    <li>{{ _("«Цена без убытка» — самая низкая цена, при которой прибыль не меньше нуля. «Нужно денег на пике» — сколько своих денег понадобится сразу после победы.") }}</li>
+  </ul>
+  <p>{{ _("Открыли лот на Tenderim? На странице лота есть кнопка «Посчитать маржу» — данные подставятся сами.") }}</p>
+</section>
+<script src="/static/calculator.js?v={{ asset_v }}"></script>
+{% endblock %}

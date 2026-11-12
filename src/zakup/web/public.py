@@ -213,6 +213,7 @@ LLMS_TXT = """# Tenderim
 
 ## Сервис
 
+- [Калькулятор маржи]({site}/calculator): прибыль по госзакупке с налогами, обеспечениями и заморозкой денег.
 - [Тариф]({site}/pricing): что входит в подписку и сколько стоит.
 - [Публичная оферта]({site}/offer), [Политика конфиденциальности]({site}/privacy), [Контакты]({site}/contacts).
 """
@@ -326,6 +327,39 @@ def offer_page(request: Request, user: Viewer):
     return templates.TemplateResponse(request, "legal_offer.html", {"docs_date": legal.OFFER_DATE})
 
 
+@router.get("/calculator")
+def calculator_page(request: Request, user: Viewer, lot: int | None = None):
+    """Калькулятор маржи — открыт всем. ?lot=ID подставляет данные лота: плановую сумму,
+    проценты обеспечений, аванс, порог демпинга; по подписке — ещё обычную цену заявки и
+    себестоимость из поиска товаров этого клиента."""
+    prefill: dict[str, Any] | None = None
+    if lot:
+        with core.pool.connection() as conn:
+            facts = lot_insights.lot_facts(conn, lot)
+            if facts and facts["amount"]:
+                terms = {key: facts[key] for key in ("securities", "method", "amount", "prepayment", "subject")}
+                deposits = securities.for_lot(**terms) or {}
+                usual = cost = None
+                if request.state.paid:
+                    _, done = _research_view(request, conn, user, lot) if user else (None, None)
+                    items = ((done or {}).get("result") or {}).get("items")
+                    bid, _, _ = _lot_numbers(conn, lot)
+                    if items:
+                        bid = bids.compute(conn, lot, items)
+                    usual = bid["prices"]["usual"] if bid else None
+                    cost = bid["cost"] if bid else None
+                prefill = {"id": lot, "name": facts["name"], "announcement": facts["announcement"],
+                           "amount": float(facts["amount"]), "count": float(facts["count"] or 0),
+                           "method": METHOD_NAMES.get(facts["method"]),
+                           "bid_pct": deposits.get("bid_pct"), "contract_pct": deposits.get("contract_pct"),
+                           "advance_pct": float(facts["prepayment"] or 0),
+                           "dumping": securities.dumping(facts["method"], facts["subject"]),
+                           "source": deposits.get("source"), "usual": usual, "cost": cost}
+    return templates.TemplateResponse(request, "calculator.html", {
+        "prefill": prefill, "lot_missing": bool(lot) and prefill is None,
+        "dumping_pct": securities.DUMPING_PCT})
+
+
 @router.get("/privacy")
 def privacy_page(request: Request, user: Viewer):
     return templates.TemplateResponse(request, "legal_privacy.html", {"docs_date": legal.DOCS_DATE})
@@ -402,7 +436,7 @@ def sitemap_part(kind: str) -> Response:
         with core.pool.connection() as conn:
             catalog_paths = catalog.sitemap_paths(conn)
         urls = [(f"{SITE_URL}{path}", None) for path in (
-            "/", "/announcements", "/lots", "/orgs/customers", "/orgs/suppliers", "/results", "/analytics", "/pricing", "/offer", "/privacy", "/contacts",
+            "/", "/announcements", "/lots", "/orgs/customers", "/orgs/suppliers", "/results", "/analytics", "/calculator", "/pricing", "/offer", "/privacy", "/contacts",
             *catalog_paths)]
     else:
         prefix, _, index = kind.partition("-")

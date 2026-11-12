@@ -696,3 +696,25 @@ def test_lot_page_decide_card_customer_and_similar_tabs(client, conn):
     # Сколько заморозить: 1% заявки и 3% договора от 1 000 000 (документы не разобраны — по способу).
     assert "10 000.00 ₸" in page and "до 30 000.00 ₸" in page and "по Правилам госзакупок" in page
     assert "Порог демпинга" in page and "900 000.00 ₸" in page
+
+
+def test_calculator_open_to_all_and_prefilled_from_lot(client, conn):
+    page = client.get("/calculator")
+    assert page.status_code == 200 and "Калькулятор маржи" in page.text and "/static/calculator.js" in page.text
+    _announcement_with_lots(conn)
+    conn.execute("UPDATE announcements SET trade_method_id = 3 WHERE id = 500")  # ЗЦП: заявка 3%, договор 5%
+    conn.execute("UPDATE lots SET prepayment = 30 WHERE id = 5001")
+    conn.commit()
+    lot = client.get("/calculator?lot=5001").text
+    assert 'name="amount" type="number" min="0" step="any" inputmode="decimal" value="1000000.00"' in lot
+    assert 'name="bid_pct" type="number" min="0" max="100" step="any" value="3"' in lot
+    assert 'name="contract_pct" type="number" min="0" max="100" step="any" value="5"' in lot
+    assert 'name="advance_pct" type="number" min="0" max="100" step="any" value="30"' in lot
+    assert 'name="dump_pct" type="number" min="0" max="100" step="any" value="10"' in lot
+    assert 'href="/lots/5001"' in lot and "по подписке" in lot  # гостю — без цены заявки и себестоимости
+    assert "Лот не найден" in client.get("/calculator?lot=999999").text
+    # Ссылка на калькулятор — со страницы лота.
+    assert "/calculator?lot=5001" in client.get("/lots/5001").text
+    # Сотрудник (платное) — подсказка про подписку не показывается.
+    _login(client)
+    assert "подставляются по подписке" not in client.get("/calculator?lot=5001").text

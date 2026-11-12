@@ -163,6 +163,7 @@
     {% if deposits.dumping and deposits.dumping.floor and deposits.dumping.allowed %}{{ _("Цену ниже порога демпинга можно подать, но после победы вместе с обеспечением договора нужно внести антидемпинговую сумму: порог минус ваша цена (ст. 13 Закона).") }}
     {% elif deposits.dumping and deposits.dumping.works %}{{ _("Порог демпинга у работ зависит от их вида: СМР — 2% от сметы, текущий ремонт — 20%, проектирование — 10% (п. 85–89 Правил).") }}{% endif %}
     {{ _("Поставщики из реестра казахстанских товаропроизводителей обеспечение договора и аванса не вносят.") }}</p>{% endif %}
+  <p style="margin:10px 0 0"><a class="chip-link" href="/calculator?lot={{ lot.id }}">🧮 {{ _("Посчитать маржу: налоги, обеспечения, заморозка денег") }}</a></p>
   {% if li.repeats %}{% set r = li.repeats %}<p class="alert">🔁 {{ _("Этот лот заказчик уже объявлял:") }} {{ r.rows|length }} {{ _("раз(а)") }}{% if r.failed %}, {{ _("не состоялось:") }} {{ r.failed }}{% endif %}. <a href="#customer" data-tab-link="customer">{{ _("Подробнее") }}</a></p>{% endif %}
   {% if li.history and li.history.same_winner %}{% set w = li.history.same_winner %}<p class="alert">⚠ {{ _("Такой товар у этого заказчика почти всегда выигрывает один поставщик:") }} <a href="/org/{{ w.bin }}">{{ w.name }}</a> — {{ w.wins }} {{ _("из") }} {{ w.of }}.</p>{% endif %}
 </section>
@@ -233,6 +234,7 @@
     {% if bid.cost %}<li>{{ _("Себестоимость — по самой дешёвой цене из поиска товаров:") }} <b>{{ bid.cost | money }} ₸</b></li>
     {% else %}<li class="muted">{{ _("Маржа появится, когда поиск товаров найдёт товар с ценой.") }}</li>{% endif %}
   </ul>
+  <p><a class="chip-link" href="/calculator?lot={{ lot.id }}">🧮 {{ _("Пересчитать в калькуляторе маржи с налогами") }}</a></p>
   <div data-bid-advice data-src="/lots/{{ lot.id }}/bid-advice">{% set advice = bid_advice %}{% include "bid_advice_fragment.html" %}</div>
   <p class="muted note">{{ _("Цифры — статистика прошлых итогов, а не гарантия победы. Не опускайтесь ниже себестоимости с доставкой и налогами.") }}{% if freeze %} {{ _("«Заморозить» — обеспечение договора, аванса и антидемпинговая сумма (если цена ниже порога демпинга); всё возвращают после исполнения договора.") }}{% endif %}</p>
   {% elif request.state.paid %}

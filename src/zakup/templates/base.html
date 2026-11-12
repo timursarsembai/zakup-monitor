@@ -400,6 +400,7 @@
     {{ tile("/orgs/customers", _("Заказчики"), '<path d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-5h6v5M9 10h.01M15 10h.01M9 13h.01M15 13h.01"/>', path == "/orgs/customers") }}
     {{ tile("/orgs/suppliers", _("Поставщики"), '<rect x="2" y="7" width="13" height="10" rx="1.5"/><path d="M15 10h4l3 3v4h-7M6.5 19.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zM18 19.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z"/>', path == "/orgs/suppliers") }}
     {{ tile("/analytics", _("Аналитика"), '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>', path == "/analytics") }}
+    {{ tile("/calculator", _("Калькулятор маржи"), '<rect x="5" y="2" width="14" height="20" rx="2"/><path d="M8 6h8M8 11h.01M12 11h.01M16 11h.01M8 15h.01M12 15h.01M16 15h.01M8 19h.01M12 19h4"/>', path == "/calculator") }}
     {% if request.state.staff %}{{ tile("/dashboard", _("Дашборд"), '<rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>', path == "/dashboard") }}{% endif %}
     {% if request.state.staff %}{{ tile("/products", _("Каталог товаров"), '<path d="M3 7l9-4 9 4-9 4-9-4z"/><path d="M3 7v10l9 4 9-4V7"/><path d="M12 11v10"/>', path == "/products") }}{% endif %}
   </div>
