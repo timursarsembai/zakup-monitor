@@ -30,6 +30,19 @@
   .calc-target input { width: 70px !important; }
   .calc-about { max-width: 760px; margin-top: 26px; font-size: 15px; }
   .calc-about h2 { font-size: 18px; }
+  /* Телефон: результат далеко внизу — короткая строка с прибылью и маржой закреплена над меню. */
+  .calc-mini { display: none; }
+  @media (max-width: 860px) {
+    .calc-mini:not([hidden]) { display: flex; position: fixed; left: 12px; right: 12px; bottom: calc(10px + env(safe-area-inset-bottom)); z-index: 39;
+      justify-content: space-between; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 12px; border: 1px solid var(--line);
+      background: var(--bg); color: var(--fg); font: inherit; font-size: 15px; box-shadow: 0 4px 16px rgb(0 0 0 / 18%); cursor: pointer; text-align: left; }
+    .calc-mini b { font-variant-numeric: tabular-nums; } .calc-mini b.neg { color: var(--bad); } .calc-mini b.pos { color: var(--ok); }
+    .calc-about { padding-bottom: 70px; }
+  }
+  @media (max-width: 760px) {
+    .calc-mini:not([hidden]) { bottom: calc(68px + env(safe-area-inset-bottom)); }
+    .to-top { bottom: calc(130px + env(safe-area-inset-bottom)); }
+  }
 {% endblock %}
 {% block main %}
 <h1>{{ _("Калькулятор маржи для госзакупок") }}</h1>
@@ -158,5 +171,6 @@
   </ul>
   <p>{{ _("Открыли лот на Tenderim? На странице лота есть кнопка «Посчитать маржу» — данные подставятся сами.") }}</p>
 </section>
+<button type="button" class="calc-mini" data-calc-mini hidden><span>{{ _("Чистая прибыль") }}: <b data-mini="profit">—</b></span><span>{{ _("Маржа") }}: <b data-mini="margin">—</b> ↓</span></button>
 <script src="/static/calculator.js?v={{ asset_v }}"></script>
 {% endblock %}

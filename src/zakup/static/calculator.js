@@ -13,6 +13,8 @@
   const num = (name) => { const v = parseFloat(String(f[name].value).replace(",", ".")); return Number.isFinite(v) && v > 0 ? v : 0; };
   const fmt = new Intl.NumberFormat("ru-RU", {maximumFractionDigits: 0});
   const money = (v) => `${fmt.format(Math.round(v))} ₸`;
+  const minus = (v) => (Math.round(v) ? `−${money(v)}` : money(0));
+  const mini = document.querySelector("[data-calc-mini]");
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
   const set = (key, text) => { const el = out.querySelector(`[data-out="${key}"]`); if (el) el.textContent = text; };
 
@@ -73,6 +75,7 @@
     out.querySelector('[data-row="vat"]').hidden = !t.vat;
     f.vat.disabled = t.regime === "simple";
     f.cost_vat.disabled = !t.vat;
+    if (mini) mini.dataset.empty = price ? "" : "1";
     if (!price) {
       for (const el of out.querySelectorAll("[data-out]")) if (el.dataset.out !== "warnings") el.textContent = "—";
       out.querySelector('[data-out="warnings"]').innerHTML = "";
@@ -83,17 +86,23 @@
     set("profit", money(d.profit));
     profitEl.className = d.profit < 0 ? "neg" : "pos";
     set("margin", `${(d.margin * 100).toFixed(1).replace(".", ",")}%`);
+    if (mini) {
+      const mp = mini.querySelector('[data-mini="profit"]');
+      mp.textContent = money(d.profit);
+      mp.className = d.profit < 0 ? "neg" : "pos";
+      mini.querySelector('[data-mini="margin"]').textContent = `${(d.margin * 100).toFixed(1).replace(".", ",")}%`;
+    }
     const even = lowest(t, (x) => x.profit >= 0);
     set("breakeven", even === null ? "—" : money(even));
     set("peak", money(d.peak));
     set("price", money(d.price));
     set("vat_pay", money(d.vatPay));
     set("revenue", money(d.revenue));
-    set("cost", `−${money(d.cost)}`);
-    set("extra", `−${money(t.extra)}`);
-    set("fees", `−${money(d.fees)}`);
-    set("money", `−${money(d.moneyCost)}`);
-    set("tax", `−${money(d.tax)}`);
+    set("cost", minus(d.cost));
+    set("extra", minus(t.extra));
+    set("fees", minus(d.fees));
+    set("money", minus(d.moneyCost));
+    set("tax", minus(d.tax));
     set("profit2", money(d.profit));
     set("bid_sec", t.guarantee && d.bidSec ? T.guarantee : money(d.bidSec));
     set("contract_sec", t.guarantee && d.contractSec ? T.guarantee : money(d.contractSec));
@@ -133,4 +142,15 @@
   form.addEventListener("change", () => { render(); remember(); });
   out.querySelector("[data-target]").addEventListener("input", render);
   render();
+  // Строка-итог на телефоне видна, пока сам результат за экраном; нажатие — к результату.
+  if (mini) {
+    let resultVisible = false;
+    const toggle = () => { mini.hidden = resultVisible || mini.dataset.empty === "1"; };
+    if ("IntersectionObserver" in window) {
+      new IntersectionObserver(([entry]) => { resultVisible = entry.isIntersecting; toggle(); }).observe(out);
+    }
+    form.addEventListener("input", toggle);
+    mini.addEventListener("click", () => out.scrollIntoView({behavior: "smooth", block: "start"}));
+    toggle();
+  }
 })();
