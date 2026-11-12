@@ -44,6 +44,7 @@ def _parser() -> argparse.ArgumentParser:
     orgs.add_argument("--limit", type=int, default=600)
     sub.add_parser("client-bot", help="клиентский Telegram-бот и группа клиентов (постоянно)")
     sub.add_parser("autofix", help="дежурный: разбирает и исправляет сбои (на хосте, постоянно)")
+    sub.add_parser("seller-alerts", help="продавцам в Telegram: новые лоты на их товары (каталог, этап 5)")
     sub.add_parser("tidy", help="база регионов по IP (раз в месяц) и чистка старой статистики посещений")
     sub.add_parser("nightly", help="ночной ревьюер: отчёт владельцу за сутки (на хосте)")
     sub.add_parser("bot", help="Telegram-бот: привязка чатов (работает постоянно)")
@@ -102,6 +103,14 @@ def _autofix(args) -> int:
     from zakup import autofix
 
     autofix.run()
+    return 0
+
+
+def _seller_alerts(args) -> int:
+    from zakup import offers, telegram
+
+    with db.connect(config.database_url()) as conn:
+        print(f"seller alerts sent: {offers.alerts(conn, telegram.send_message)}")
     return 0
 
 
@@ -174,7 +183,7 @@ def _codes(args) -> int:
 LOCAL = {
     "codes": _codes,
     "backfill-from": _backfill_from,
-    "migrate": _migrate, "payments": _payments, "autofix": _autofix, "tidy": _tidy, "nightly": _nightly,
+    "migrate": _migrate, "payments": _payments, "autofix": _autofix, "tidy": _tidy, "seller-alerts": _seller_alerts, "nightly": _nightly,
     "client-bot": _client_bot, "bot": _bot, "research": _research, "add-user": _add_user,
     "specs": lambda args: _specs(args.limit, args.loop),
     "scores": lambda args: _scores(args.loop),

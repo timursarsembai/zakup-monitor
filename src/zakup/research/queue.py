@@ -9,7 +9,7 @@ from typing import Any
 import psycopg
 from psycopg.types.json import Jsonb
 
-from zakup import ai_config, contacts, credits, products, sources
+from zakup import ai_config, contacts, credits, offers, products, sources
 from zakup.goszakup import PORTAL_TZ
 from zakup.research import providers as prov
 from zakup.research.context import (
@@ -241,13 +241,17 @@ def run_job(conn: psycopg.Connection, job: dict[str, Any]) -> dict[str, Any]:
     exclude = [i["url"] for i in (base or {}).get("items", [])]
     known = products.candidates(conn, job["lot_id"], context.get("name") or "", exclude=exclude,
                                 max_price=context.get("price"))
+    # Свои каталоги наших продавцов — первыми (этап 5 каталога).
+    # «Найти ещё»: уже найденное (exclude) не предлагаем снова.
+    taken = {offers.own_product_id(url) for url in exclude}
+    own = [o for o in offers.for_lot(conn, job["lot_id"]) if o["id"] not in taken]
     prompt = build_prompt(context, job["region"], job["whole_kz"],
                           sources.for_prompt(conn), sources.known_categories(conn),
                           target=job.get("target") or 10,
                           exclude=exclude,
                           known_sellers=contacts.known_for_prompt(conn),
                           kaspi_text=_kaspi_candidates(conn, context, base),
-                          catalog_text=products.for_prompt(known))
+                          catalog_text="\n\n".join(t for t in (offers.for_prompt(own), products.for_prompt(known)) if t))
     key = api_key(conn, job["provider"])
     # Поиск идёт минутами: не держим транзакцию открытой.
     conn.commit()
@@ -260,7 +264,9 @@ def run_job(conn: psycopg.Connection, job: dict[str, Any]) -> dict[str, Any]:
     # В каталог — всё найденное, и то, что дороже этого лота (пригодится лотам подороже).
     _to_catalog(conn, job["lot_id"], found, {products.url_key(r["url"]) for r in known})
     found = without_loss(found, context.get("price"))
-    # Телефоны, которые ИИ не увидел (лежат в коде страницы), — достаём сами.
+    # Телефоны, которые ИИ не увидел (лежат в коде страницы), — достаём сами; у товаров наших
+    # продавцов — из их магазина.
+    offers.fill_own(conn, found)
     contacts.enrich(found, conn)
     # У каждой цены — дата, когда её видели на странице (у взятых из каталога — прежняя).
     found.pop("unavailable", None)

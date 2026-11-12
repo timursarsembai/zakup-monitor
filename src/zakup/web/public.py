@@ -29,12 +29,15 @@ from zakup import (
     legal,
     lot_insights,
     marks,
+    offers,
     og,
     orgs,
     outcomes,
+    products,
     research,
     results,
     securities,
+    sellers,
     skk,
     spec,
     subjects,
@@ -759,6 +762,8 @@ def lot_page(request: Request, user: Viewer, lot_id: int, background: Background
                                       prices=bid["prices"] if bid and request.state.paid else None) \
             if insight.get("deposit_terms") else None
         similar_marks = marks.of_user(conn, user, [row[0] for row in similar]) if user and similar else {}
+        # Свои каталоги продавцов под этот лот: всем — сколько, по подписке — какие и почём.
+        shop_offers = offers.for_lot(conn, lot_id)
     if user:
         _audit(request, user, "view_lot", f"/lots/{lot_id}")
     context.update(lot=lot, others=[other for other in context["lots"] if other["id"] != lot_id],
@@ -771,7 +776,8 @@ def lot_page(request: Request, user: Viewer, lot_id: int, background: Background
                    bid=bid, bid_advice=bid_advice, insight=insight, similar=similar,
                    similar_marks=similar_marks, method_names=METHOD_NAMES,
                    similar_limit=lot_insights.SIMILAR_LIMIT, deposits=deposits,
-                   is_admin=request.state.role == "admin")
+                   is_admin=request.state.role == "admin", shop_offers=shop_offers,
+                   product_path=products.path, seller_path=sellers.path)
     return templates.TemplateResponse(request, "lot.html", context)
 
 

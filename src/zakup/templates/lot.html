@@ -186,6 +186,28 @@
 {% if has_spec %}<div data-panel="spec" id="spec">{{ lot_spec(lot, open=true) }}</div>{% endif %}
 
 <div data-panel="research" hidden>
+{% if shop_offers %}
+{# Свои каталоги продавцов под лот (zakup.offers.for_lot): цена — оптовая ступень по количеству лота. #}
+<section class="research-box" id="offers">
+  <h2 style="margin-top:0">{{ _("Есть у продавцов") }} <span class="muted" style="font-size:15px;font-weight:400">{{ shop_offers|length }}{% if shop_offers|length >= 10 %}+{% endif %}</span></h2>
+  {% if request.state.paid %}
+  <div class="table-wrap"><table>
+    <tr><th>{{ _("Товар") }}</th><th>{{ _("Продавец") }}</th><th class="num">{{ _("Цена за единицу, ₸") }}</th><th class="num">{{ _("Маржа") }}</th></tr>
+    {% for o in shop_offers %}
+    <tr><td><a href="{{ product_path(o) }}">{{ o.name }}</a>{% if o.same_code %} <span class="badge" title="{{ _("Код ЕНС ТРУ совпадает с лотом") }}">{{ _("тот же код") }}</span>{% endif %}{% if not o.available %}<div class="muted" style="color: var(--bad)">{{ _("нет в наличии") }}</div>{% endif %}</td>
+      <td><a href="{{ seller_path({"id": o.seller_id, "name": o.seller_name}) }}">{{ o.seller_name }}</a>{% if o.seller_verified %} <span class="badge">✓</span>{% endif %}{% if o.city %}<div class="muted">{{ o.city }}</div>{% endif %}</td>
+      <td class="num"><b>{{ o.price | money }}</b>{% if o.price_unit %} <span class="muted">/ {{ o.price_unit }}</span>{% endif %}
+        {% if o.price != o.retail %}<div class="muted">{{ _("оптом; в розницу") }} {{ o.retail | money }}</div>{% endif %}
+        {% if o.prices_with_vat is not none %}<div class="muted">{{ _("с НДС") if o.prices_with_vat else _("без НДС") }}</div>{% endif %}</td>
+      <td class="num">{% if o.margin is not none %}<b style="color: {{ 'var(--ok)' if o.margin > 0 else 'var(--bad)' }}">{{ o.margin | round(1) }}%</b>{% else %}—{% endif %}</td></tr>
+    {% endfor %}
+  </table></div>
+  <p class="muted">{{ _("Цены ставят сами продавцы; маржа — от цены лота за единицу. Уточняйте у продавца наличие и доставку.") }}</p>
+  {% else %}
+  <p>{{ _("У продавцов из нашего каталога есть подходящие товары с ценами под количество лота.") }} <button type="button" class="link-button" data-paid data-feature="catalog_lots">{{ _("Какие и почём — по подписке") }} 🔒</button></p>
+  {% endif %}
+</section>
+{% endif %}
 <section class="research-box" id="research">
   <h2 style="margin-top:0">{{ _("Поиск товаров с ИИ") }}</h2>
   {% if lot_info %}

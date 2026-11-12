@@ -19,10 +19,12 @@ Many = Annotated[list[str] | None, Form()]
 def _shop_page(request: Request, conn, user: int, *, form: dict | None = None, error: str | None = None,
                saved: str = "", q: str = "", page: int = 1, status_code: int = 200):
     current = shop.get(conn, user)
+    telegram = conn.execute("SELECT telegram_chat_id IS NOT NULL FROM users WHERE id = %s", (user,)).fetchone()[0]
     items = shop.listing(conn, current["id"], q[:200], min(max(page, 1), MAX_PAGE)) if current else None
     return templates.TemplateResponse(request, "shop.html", {
         "shop": current, "form": form or current or {}, "items": items, "error": error, "saved": saved,
-        "product_path": products.path, "seller_path": sellers.path}, status_code=status_code)
+        "product_path": products.path, "seller_path": sellers.path, "telegram": telegram},
+        status_code=status_code)
 
 
 @router.get("/my/shop")
@@ -53,6 +55,16 @@ def shop_save(request: Request, user: User, name: Field = "", phone: Many = None
         row = shop.save(conn, user, data, registry)
     _audit(request, user, "shop_save", str(row["id"]), status=row["status"], verified=row["verified"])
     return RedirectResponse("/my/shop?saved=shop", status_code=303)
+
+
+@router.post("/my/shop/alerts", dependencies=[Depends(same_origin)])
+def shop_alerts(request: Request, user: User, on: Field = ""):
+    """Оповещения «новый лот на ваш товар» в Telegram (zakup.offers.alerts) — включить/выключить."""
+    with core.pool.connection() as conn:
+        if conn.execute("UPDATE sellers SET alerts = %s WHERE user_id = %s", (on == "1", user)).rowcount != 1:
+            raise HTTPException(404, "Сначала создайте магазин")
+    _audit(request, user, "shop_save", "alerts", alerts=on == "1")
+    return RedirectResponse("/my/shop?saved=alerts", status_code=303)
 
 
 def _own_shop(conn, user: int) -> dict:

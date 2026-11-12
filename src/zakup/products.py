@@ -21,7 +21,7 @@ import psycopg
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
-from zakup import photos
+from zakup import contacts, photos
 from zakup.goszakup import PORTAL_TZ
 
 FRESH_DAYS = 3
@@ -60,6 +60,8 @@ def remember(conn: psycopg.Connection, lot_id: int, items: list[dict[str, Any]],
     заблокируют друг друга. Транзакцию коммитит вызывающий."""
     offered = offered or set()
     division = _division(conn, lot_id)
+    # Свои товары продавцов (страница у нас, zakup.offers) — уже в каталоге, не копируем.
+    items = [i for i in items if not contacts.is_own_url(i.get("url") or "")]
     for item in sorted((i for i in items if i.get("url") and i.get("name")), key=lambda i: url_key(i["url"])):
         checked = item.get("checked", True) is not False or url_key(item["url"]) not in offered
         conn.execute(

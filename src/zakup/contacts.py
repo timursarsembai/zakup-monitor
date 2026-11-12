@@ -19,6 +19,8 @@ from urllib.parse import urlsplit
 import httpx
 from psycopg.types.json import Jsonb
 
+from zakup import SITE_URL
+
 logger = logging.getLogger(__name__)
 
 MAX_BYTES = 3 * 1024 * 1024
@@ -191,6 +193,11 @@ def _domain(url: str) -> str:
     return (urlsplit(url).hostname or "").lower().removeprefix("www.")
 
 
+def is_own_url(url: str) -> bool:
+    """Адрес у нас (и с www): товар нашего продавца (zakup.offers), не чужая страница."""
+    return bool(url) and _domain(url) == _domain(SITE_URL)
+
+
 # Сохранённые контакты свежие столько дней — потом собираем заново.
 FRESH_DAYS = 60
 
@@ -231,7 +238,8 @@ def enrich(result: dict, conn=None) -> int:
     for item in result.get("items") or []:
         url = item.get("url") or ""
         domain = _domain(url)
-        if not url or not domain:
+        # Товар нашего продавца (zakup.offers.fill_own) — свою страницу не открываем.
+        if not url or not domain or is_own_url(url):
             continue
         marketplace = domain in MARKETPLACES
         key = seller_key(item.get("seller")) if marketplace else ""

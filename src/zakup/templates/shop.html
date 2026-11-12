@@ -64,6 +64,16 @@
 
 {% if shop %}
 <section class="box">
+  <h2>{{ _("Новые лоты на мои товары") }}</h2>
+  <p class="muted">{{ _("Появится лот госзакупок на ваш товар (тот же код ЕНС ТРУ или те же слова названия) — пришлём ссылку в Telegram. Кто ищет товар под такой лот, увидит ваш товар на странице лота.") }}</p>
+  {% if not telegram %}<p>{{ _("Сначала подключите Telegram:") }} <a href="/settings#notify">{{ _("Настройки → Уведомления") }}</a></p>{% endif %}
+  <form method="post" action="/my/shop/alerts" class="row-actions"><input type="hidden" name="on" value="{{ '' if shop.alerts else '1' }}">
+    <span>{{ _("Оповещения:") }} <b>{{ _("включены") if shop.alerts else _("выключены") }}</b></span>
+    <button>{{ _("Выключить") if shop.alerts else _("Включить") }}</button></form>
+  {% if saved == "alerts" %}<p class="note">{{ _("Сохранено.") }}</p>{% endif %}
+</section>
+
+<section class="box">
   <div class="head-line"><h2>{{ _("Мои товары") }}</h2><a class="icon-button primary-link" href="/my/shop/products/new">+ {{ _("Добавить товар") }}</a></div>
   <form method="get" action="/my/shop" class="row-actions" style="margin:10px 0">
     <input type="search" name="q" value="{{ items.q }}" placeholder="{{ _("Поиск по названию") }}" aria-label="{{ _("Поиск по названию") }}">
