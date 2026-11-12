@@ -17,6 +17,10 @@ def test_lot_page_research_section_and_start(client, conn, monkeypatch):
                            headers=ORIGIN, follow_redirects=False)
     assert response.status_code == 303
     assert "В очереди" in client.get("/lots/90/research").text
+    # Пока поиск идёт — кнопка неактивна и с надписью «Ищем…», а не «Найти заново».
+    page = client.get("/lots/90").text
+    form = page.split('class="research-form"')[1].split("</form>")[0]
+    assert "disabled" in form and "Ищем…" in form
     conn.execute("""UPDATE lot_research SET status = 'done', finished_at = now(),
         result = '{"summary": "s", "region_searched": "Актобе", "items": [{"name": "Стол дуб",
         "seller": "Мебель", "city": "Актобе", "in_region": true, "price": 80000, "unit_price": 80000,

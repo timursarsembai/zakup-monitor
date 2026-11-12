@@ -106,7 +106,14 @@ const PAGE = document.querySelector("[data-lot-page]");
     } catch {}
     const now = research.querySelector("[data-research-status]")?.dataset.researchStatus;
     if (now === "queued" || now === "running") setTimeout(poll, 4000);
-    else document.querySelector(".research-form .primary")?.removeAttribute("disabled");
+    else {
+      // Поиск закончился — кнопка снова активна, с прежней надписью.
+      const button = document.querySelector(".research-form .primary");
+      if (button) {
+        if (button.dataset.label) { button.innerHTML = button.dataset.label; delete button.dataset.label; }
+        button.disabled = false;
+      }
+    }
   };
   setTimeout(poll, 4000);
 })();

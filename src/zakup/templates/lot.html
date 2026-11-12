@@ -193,7 +193,8 @@
     <input name="region" value="{{ region }}" aria-label="{{ _("Где искать в первую очередь") }}" placeholder="{{ _("Регион поставки") }}">
     <input type="hidden" name="whole_kz" value="1"><span class="muted">{{ _("и по всему Казахстану") }}</span>
     <label class="muted">{{ _("Найти") }} <select name="target" aria-label="{{ _("Сколько предложений искать") }}">{% for n in targets %}<option value="{{ n }}" {% if (job.target if job else 10) == n %}selected{% endif %}>{{ n }}</option>{% endfor %}</select> {{ _("предложений") }}</label>
-    <button class="primary" {% if job and job.status in ("queued", "running") %}disabled{% endif %}>{{ _("Найти заново") if job else _("Найти товары") }}{% if not request.state.staff %} <span class="cost">×1</span>{% endif %}</button>
+    {% set searching = job and job.status in ("queued", "running") %}
+    <button class="primary" {% if searching %}disabled data-label="{{ _("Найти заново") }}{% if not request.state.staff %} <span class=&quot;cost&quot;>×1</span>{% endif %}"{% endif %}>{% if searching %}{{ _("Ищем…") }}{% else %}{{ _("Найти заново") if job else _("Найти товары") }}{% if not request.state.staff %} <span class="cost">×1</span>{% endif %}{% endif %}</button>
   </form>
   <p class="muted">{{ _("Claude прочитает техспецификацию, найдёт в интернете подходящие товары — сначала в регионе поставки, потом по Казахстану — и посчитает маржу от цены в лоте. Сейчас ищет:") }} {{ provider_name }}{% if request.state.role == "admin" %} (<a href="/settings#ai">{{ _("настройки") }}</a>){% endif %}.</p>
   {% if manual_links %}<div class="manual"><span class="muted">{{ _("Искать самому:") }}</span>
