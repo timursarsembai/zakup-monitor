@@ -106,10 +106,13 @@ def _autofix(args) -> int:
 
 
 def _tidy(args) -> int:
-    from zakup import geo, visits
+    from zakup import geo, sellers, visits
 
     with db.connect(config.database_url()) as conn:
         print(f"geo: {geo.update(conn)}, purged visits/events: {visits.purge(conn)}")
+        # Товары каталога без продавца (прежние находки; новые связывает products.remember).
+        print(f"sellers linked: {sellers.link(conn)}")
+        conn.commit()
     return 0
 
 

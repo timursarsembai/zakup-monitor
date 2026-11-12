@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% from "_products_table.html" import products_table, products_styles with context %}
+{# Страница продавца (web/catalog.py, zakup.sellers.get): карточка и его каталог с фильтрами.
+   Телефоны — вошедшим (как на странице товара). «Это мой магазин» — этап 3. #}
+{% block title %}{{ seller.name }} — {{ _("каталог товаров") }}{% endblock %}
+{% block description %}{{ seller.name }}{% if seller.city %}, {{ seller.city }}{% endif %}: {{ _("товаров в каталоге") }} {{ seller.products }}{% if seller.divisions %} — {% for code, n in seller.divisions[:3] %}{{ division_name(code) or code }}{{ ", " if not loop.last }}{% endfor %}{% endif %}.{% endblock %}
+{% block style %}
+{{ products_styles() }}
+  .s-head { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; }
+  .s-head h1 { margin: 0; overflow-wrap: anywhere; }
+  .facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 14px; margin: 12px 0; }
+  .facts dt { color: var(--muted); } .facts dd { margin: 0; overflow-wrap: anywhere; }
+  .crumbs { margin: 4px 0 10px; font-size: 14px; }
+{% endblock %}
+{% block main %}
+<nav class="crumbs muted"><a href="/sellers">{{ _("Продавцы") }}</a></nav>
+<div class="s-head">
+  <h1>{{ seller.name }}</h1>
+  {% if seller.kind == "found" %}<span class="badge" title="{{ _("Магазин найден поиском с ИИ на его сайте; сам продавец у нас не регистрировался") }}">{{ _("найден в интернете") }}</span>{% elif seller.verified %}<span class="badge sub">✓ {{ _("проверен") }}</span>{% endif %}
+  {% if seller.status == "hidden" %}<span class="badge">{{ _("скрыт") }}</span>{% endif %}
+</div>
+{% if seller.description %}<p>{{ seller.description }}</p>{% endif %}
+<dl class="facts">
+  {% if seller.city %}<dt>{{ _("Город") }}</dt><dd>{{ seller.city }}</dd>{% endif %}
+  {% if seller.phone_list %}<dt>{{ _("Телефон") }}</dt><dd>{% if request.state.user_id %}{% for ph in seller.phone_list %}<a href="tel:{{ ph.number | replace(' ', '') }}">{{ ph.number }}</a>{{ ", " if not loop.last }}{% endfor %}{% else %}<a href="/login?next={{ request.url.path | urlencode }}">{{ _("Войдите, чтобы увидеть") }}</a>{% endif %}</dd>{% endif %}
+  {% if seller.website %}<dt>{{ _("Сайт") }}</dt><dd><a href="{{ seller.website }}" target="_blank" rel="noopener noreferrer nofollow">{{ seller.website | replace("https://", "") }}</a></dd>
+  {% elif seller.domain %}<dt>{{ _("Где продаёт") }}</dt><dd>{{ seller.domain }}</dd>{% endif %}
+  <dt>{{ _("Товаров") }}</dt><dd>{{ seller.products }}</dd>
+</dl>
+{% if seller.divisions|length > 1 %}<p>{% for code, n in seller.divisions %}<a class="chip-link" href="{{ products_url(category=code, page=1) }}">{{ division_name(code) or code }} ({{ n }})</a> {% endfor %}</p>{% endif %}
+{{ products_table() }}
+{% endblock %}

@@ -64,6 +64,10 @@ def remember(conn: psycopg.Connection, lot_id: int, items: list[dict[str, Any]],
                ON CONFLICT (url_key) DO UPDATE SET
                    name = excluded.name,
                    seller = coalesce(nullif(excluded.seller, ''), product_catalog.seller),
+                   -- другой продавец в тексте — привяжем заново (sellers.link)
+                   seller_id = CASE WHEN coalesce(nullif(excluded.seller, ''), product_catalog.seller)
+                                         IS DISTINCT FROM product_catalog.seller THEN NULL
+                                    ELSE product_catalog.seller_id END,
                    city = coalesce(nullif(excluded.city, ''), product_catalog.city),
                    phone = coalesce(excluded.phone, product_catalog.phone),
                    image = coalesce(excluded.image, product_catalog.image),
@@ -94,6 +98,9 @@ def remember(conn: psycopg.Connection, lot_id: int, items: list[dict[str, Any]],
              "city": item.get("city"), "phone": item.get("phone"), "image": item.get("image"),
              "price": item.get("price"), "price_unit": item.get("price_unit"),
              "specs": Jsonb(item.get("specs") or []), "division": division, "lot": lot_id, "checked": checked})
+    from zakup import sellers  # здесь: sellers сам использует products
+
+    sellers.link(conn, sorted({url_key(i["url"]) for i in items if i.get("url") and i.get("name")}))
     keys = sorted({url_key(url) for url in unavailable or [] if url} & offered)
     if keys:
         conn.execute("""UPDATE product_catalog SET available = false, checked_at = now(), updated_at = now()
@@ -173,8 +180,8 @@ def for_prompt(rows: list[dict[str, Any]]) -> str:
 
 SORTS = {"updated": "Сначала обновлённые", "price": "Цена — дешевле", "price_desc": "Цена — дороже",
          "new": "Сначала новые"}
-_ORDER = {"updated": "checked_at DESC, id DESC", "price": "price NULLS LAST, id DESC",
-          "price_desc": "price DESC NULLS LAST, id DESC", "new": "first_seen_at DESC, id DESC"}
+_ORDER = {"updated": "p.checked_at DESC, p.id DESC", "price": "p.price NULLS LAST, p.id DESC",
+          "price_desc": "p.price DESC NULLS LAST, p.id DESC", "new": "p.first_seen_at DESC, p.id DESC"}
 PAGE_SIZE = 50
 
 
@@ -194,31 +201,60 @@ def _divisions(conn: psycopg.Connection) -> list:
 
 
 def listing(conn: psycopg.Connection, q: str = "", division: str = "", sort: str = "updated",
-            page: int = 1) -> dict[str, Any]:
-    """Страница каталога: поиск по названию и продавцу, раздел, сортировка."""
+            page: int = 1, seller_id: int | None = None, price_min: float | None = None,
+            price_max: float | None = None, available: bool = False, hidden: bool = False,
+            divisions: list | None = None) -> dict[str, Any]:
+    """Страница каталога: поиск по названию и продавцу, раздел, цена от–до, «в наличии»,
+    сортировка; seller_id — каталог одного продавца (его страница), divisions — его разделы,
+    если уже посчитаны; hidden — и товары скрытых продавцов (сотруднику на модерации)."""
     sort = sort if sort in SORTS else "updated"
     clauses, params = ["true"], {}
     if q.strip():
-        clauses.append("(tsv @@ plainto_tsquery('russian', %(q)s) OR name ILIKE %(like)s)")
+        clauses.append("(p.tsv @@ plainto_tsquery('russian', %(q)s) OR p.name ILIKE %(like)s)")
         params.update(q=q, like="%" + q.strip().replace("%", "").replace("_", "") + "%")
     if division:
-        clauses.append("division = %(division)s")
+        clauses.append("p.division = %(division)s")
         params["division"] = division
+    if seller_id is not None:
+        clauses.append("p.seller_id = %(seller)s")
+        params["seller"] = seller_id
+    if price_min is not None:
+        clauses.append("p.price >= %(pmin)s")
+        params["pmin"] = price_min
+    if price_max is not None:
+        clauses.append("p.price <= %(pmax)s")
+        params["pmax"] = price_max
+    if available:
+        clauses.append("p.available")
+    # Скрытые продавцы (модерация) — без их товаров.
+    if not hidden:
+        clauses.append("(p.seller_id IS NULL OR s.status = 'active')")
     where = " AND ".join(clauses)
-    total = conn.execute(f"SELECT count(*) FROM product_catalog WHERE {where}", params).fetchone()[0]
-    cursor = conn.execute(
-        f"""SELECT id, url, name, seller, city, phone, image, price, price_unit, specs, division, lots,
-                   available, first_seen_at, checked_at, price_history,
-                   checked_at > now() - make_interval(days => {FRESH_DAYS}) AS fresh,
+    joins = "FROM product_catalog p LEFT JOIN sellers s ON s.id = p.seller_id"
+    total = conn.execute(f"SELECT count(*) {joins} WHERE {where}", params).fetchone()[0]
+    cursor = conn.cursor(row_factory=dict_row).execute(
+        f"""SELECT p.id, p.url, p.name, p.seller, p.city, p.phone, p.image, p.price, p.price_unit, p.specs,
+                   p.division, p.lots, p.available, p.first_seen_at, p.checked_at, p.price_history,
+                   p.checked_at > now() - make_interval(days => {FRESH_DAYS}) AS fresh,
                    -- лоты, которые есть в базе (удалённых не считаем — как на странице товара)
-                   (SELECT count(*) FROM lots l WHERE l.id = ANY(product_catalog.lots)) AS lots_found
-            FROM product_catalog WHERE {where} ORDER BY {_ORDER[sort]}
+                   (SELECT count(*) FROM lots l WHERE l.id = ANY(p.lots)) AS lots_found,
+                   s.id AS seller_id, s.name AS seller_name, s.kind AS seller_kind, s.verified AS seller_verified
+            {joins} WHERE {where} ORDER BY {_ORDER[sort]}
             LIMIT {PAGE_SIZE} OFFSET {(max(page, 1) - 1) * PAGE_SIZE}""", params)
-    names = [column.name for column in cursor.description]
-    rows = [dict(zip(names, row, strict=True)) for row in cursor.fetchall()]
-    divisions = _divisions(conn)
+    rows = cursor.fetchall()
+    if divisions is None:
+        divisions = _divisions(conn) if seller_id is None else conn.execute(
+            """SELECT division, count(*) FROM product_catalog WHERE seller_id = %s AND division IS NOT NULL
+               GROUP BY 1 ORDER BY 2 DESC""", (seller_id,)).fetchall()
     return {"rows": rows, "total": total, "page": max(page, 1), "pages": max(1, -(-total // PAGE_SIZE)),
-            "sort": sort, "q": q, "division": division, "divisions": divisions}
+            "sort": sort, "q": q, "division": division, "divisions": divisions,
+            "price_min": price_min, "price_max": price_max, "available": available,
+            "price_min_text": price_text(price_min), "price_max_text": price_text(price_max)}
+
+
+def price_text(value: float | None) -> str:
+    """Цена в поле фильтра и в ссылке: 1234567 → «1234567», 99.5 → «99.5» (без 1.23e+06)."""
+    return "" if value is None else f"{value:.2f}".rstrip("0").rstrip(".")
 
 
 def backfill(conn: psycopg.Connection) -> int:
@@ -266,11 +302,14 @@ def get(conn: psycopg.Connection, product_id: int) -> dict[str, Any] | None:
     cur = conn.cursor(row_factory=dict_row)
     item = cur.execute(
         f"""SELECT id, url, name, seller, city, phone, image, price, price_unit, specs, division, lots,
-                   available, first_seen_at, checked_at, price_history,
+                   available, first_seen_at, checked_at, price_history, seller_id,
                    checked_at > now() - make_interval(days => {FRESH_DAYS}) AS fresh
             FROM product_catalog WHERE id = %s""", (product_id,)).fetchone()
     if item is None:
         return None
+    item["seller_row"] = cur.execute(
+        "SELECT id, name, kind, verified, status FROM sellers WHERE id = %s", (item["seller_id"],)
+    ).fetchone() if item["seller_id"] else None
     # Лоты — новые первыми (в lots — по порядку находок); удалённых из базы нет и в счёте.
     item["found_count"] = cur.execute("SELECT count(*) AS n FROM lots WHERE id = ANY(%s)",
                                       (item["lots"],)).fetchone()["n"]

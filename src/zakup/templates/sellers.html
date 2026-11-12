@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{# Продавцы каталога (web/catalog.py, zakup.sellers.listing): найденные поиском с ИИ и свои
+   магазины пользователей (этап 3, docs/CATALOG_PLAN.md). #}
+{% block title %}{{ _("Продавцы") }}{% endblock %}
+{% block description %}{{ _("Продавцы товаров для госзакупок в Казахстане: каталоги, цены, города.") }}{% endblock %}
+{% block style %}
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 13px; white-space: nowrap; border: 1px solid var(--line); }
+  .badge.sub { background: color-mix(in srgb, var(--accent) 14%, transparent); border-color: transparent; }
+  .chip-link { display: inline-block; padding: 4px 10px; margin: 0 4px 6px 0; border: 1px solid var(--line); border-radius: 999px; font-size: 14px; white-space: nowrap; }
+  .p-tools { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: end; margin: 12px 0; }
+  .p-tools label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+  .p-tools input, .p-tools select { padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); font: inherit; min-width: 180px; max-width: 100%; }
+  .s-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+  .s-card { display: flex; flex-direction: column; gap: 6px; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; color: inherit; text-decoration: none; }
+  .s-card:hover { border-color: var(--accent); }
+  .s-card .name { font-weight: 650; overflow-wrap: anywhere; }
+  .pager { display: flex; gap: 12px; align-items: center; margin: 14px 0; }
+{% endblock %}
+{% block main %}
+<h1>{{ _("Продавцы") }}</h1>
+<p class="muted">{{ _("Магазины и поставщики из каталога товаров. Свой магазин скоро можно будет добавить в кабинете.") }} <a href="/products">{{ _("Каталог товаров") }} →</a></p>
+<form method="get" action="/sellers" class="p-tools">
+  <label>{{ _("Название") }}<input type="search" name="q" value="{{ s.q }}"></label>
+  <label>{{ _("Город") }}<select name="city"><option value="">{{ _("Все") }}</option>{% for c in s.cities %}<option {% if s.city == c %}selected{% endif %}>{{ c }}</option>{% endfor %}</select></label>
+  <label>{{ _("Сортировка") }}<select name="sort">{% for key, name in sorts.items() %}<option value="{{ key }}" {% if s.sort == key %}selected{% endif %}>{{ _(name) }}</option>{% endfor %}</select></label>
+  {% if s.division %}<input type="hidden" name="category" value="{{ s.division }}">{% endif %}
+  <button class="primary">{{ _("Показать") }}</button>
+</form>
+<p>{{ _("Продавцов:") }} <b>{{ s.total }}</b>{% if s.division %} · {{ division_name(s.division) or s.division }} <a href="{{ sellers_url(category='', page=1) }}">✕</a>{% endif %}</p>
+<div class="s-list">
+  {% for r in s.rows %}
+  <a class="s-card" href="{{ seller_path(r) }}">
+    <span class="name">{{ r.name }}</span>
+    <span>{% if r.kind == "found" %}<span class="badge">{{ _("найден в интернете") }}</span>{% elif r.verified %}<span class="badge sub">✓ {{ _("проверен") }}</span>{% endif %}</span>
+    <span class="muted">{{ r.city or "" }}{% if r.city %} · {% endif %}{{ _("товаров:") }} {{ r.products }}{% if r.domain and r.kind == "found" %} · {{ r.domain }}{% endif %}</span>
+    {% if r.top %}<span class="muted" style="font-size:13px">{% for code in r.top %}{{ division_name(code) or code }}{{ ", " if not loop.last }}{% endfor %}</span>{% endif %}
+  </a>
+  {% else %}
+  <p class="muted">{{ _("Ничего не нашлось.") }}</p>
+  {% endfor %}
+</div>
+{% if s.pages > 1 %}<div class="pager">{% if s.page > 1 %}<a href="{{ sellers_url(page=s.page - 1) }}">← {{ _("Назад") }}</a>{% endif %}<span class="muted">{{ _("стр.") }} {{ s.page }} {{ _("из") }} {{ s.pages }}</span>{% if s.page < s.pages %}<a href="{{ sellers_url(page=s.page + 1) }}">{{ _("Дальше") }} →</a>{% endif %}</div>{% endif %}
+{% endblock %}

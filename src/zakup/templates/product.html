@@ -6,6 +6,9 @@
 {% block description %}{{ item.name }}{% if item.price is not none %}: {{ item.price | money }} ₸{% if item.price_unit %} / {{ item.price_unit }}{% endif %}, {{ _("цена на") }} {{ (item.checked_at|local).strftime("%d.%m.%Y") }}{% endif %}{% if item.seller %}, {{ _("продавец") }} {{ item.seller }}{% endif %}{% if item.city %} ({{ item.city }}){% endif %}.{% endblock %}
 {% block structured %}<script type="application/ld+json">{{ structured | tojson }}</script>{% endblock %}
 {% block style %}
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 13px; white-space: nowrap; border: 1px solid var(--line); }
+  .badge.sub { background: color-mix(in srgb, var(--accent) 14%, transparent); border-color: transparent; }
+  .chip-link { display: inline-block; padding: 4px 10px; margin: 0 4px 6px 0; border: 1px solid var(--line); border-radius: 999px; font-size: 14px; white-space: nowrap; }
   .crumbs { margin: 4px 0 10px; font-size: 14px; }
   .prod { display: grid; grid-template-columns: minmax(0, 320px) minmax(0, 1fr); gap: 20px 28px; align-items: start; }
   @media (max-width: 720px) { .prod { grid-template-columns: minmax(0, 1fr); } }
@@ -36,7 +39,7 @@
     {% endif %}
     <div class="{{ 'gone' if not item.available else ('muted' if item.fresh else 'stale') }}">{% if not item.available %}{{ _("нет в наличии на") }}{% else %}{{ _("цена на") }}{% endif %} {{ (item.checked_at|local).strftime("%d.%m.%Y") }}{% if item.available and not item.fresh %} · {{ _("цене больше") }} {{ fresh_days }} {{ _("дн. — уточняйте у продавца") }}{% endif %}</div>
     <dl class="facts">
-      <dt>{{ _("Продавец") }}</dt><dd>{{ item.seller or "—" }}</dd>
+      <dt>{{ _("Продавец") }}</dt><dd>{% if item.seller_row %}<a href="{{ seller_path(item.seller_row) }}">{{ item.seller_row.name }}</a>{% if item.seller_row.kind == "found" %} <span class="badge">{{ _("найден в интернете") }}</span>{% elif item.seller_row.verified %} <span class="badge sub">✓ {{ _("проверен") }}</span>{% endif %}{% else %}{{ item.seller or "—" }}{% endif %}</dd>
       {% if item.city %}<dt>{{ _("Город") }}</dt><dd>{{ item.city }}</dd>{% endif %}
       {# Телефон взят со страницы продавца поиском с ИИ — гостям и поисковикам не показываем
          (личные номера ИП не должны попадать в индекс); вошедшим — да. #}

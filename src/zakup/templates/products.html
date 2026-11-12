@@ -1,69 +1,15 @@
 {% extends "base.html" %}
+{% from "_products_table.html" import products_table, products_styles with context %}
 {# Каталог товаров из поиска с ИИ (zakup.products) — открыт всем (web/catalog.py); лоты, где
    товар находили, — по подписке. Вид «таблица / плитка» — общий переключатель data-rview (app.js). #}
 {% block title %}{{ _("Каталог товаров") }}{% endblock %}
 {% block description %}{{ _("Товары для госзакупок с ценами продавцов Казахстана: характеристики, цена на дату, где купить.") }}{% endblock %}
 {% block style %}
-  .p-tools { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: end; margin: 12px 0; }
-  .p-tools label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
-  .p-tools input, .p-tools select { padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); font: inherit; min-width: 180px; max-width: 100%; }
-  .p-tools input[type=search] { min-width: 240px; }
-  .view-switch { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
-  .view-switch button { display: inline-flex; align-items: center; gap: 6px; border: 0; border-radius: 0; padding: 6px 10px; color: var(--muted); background: none; }
-  .view-switch button[aria-pressed=true] { background: var(--accent); color: var(--on-accent); }
-  .view-switch svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; }
-  table.prod-table td { vertical-align: top; font-size: 14px; }
-  table.prod-table td.p-img img { width: 64px; height: 64px; object-fit: contain; border-radius: 8px; background: #fff; }
-  table.prod-table td.p-name { min-width: 260px; }
-  table.prod-table td.p-name a.title { font-weight: 650; }
-  table.prod-table .specs { margin: 4px 0 0; padding: 0; list-style: none; font-size: 12px; color: var(--muted); }
-  table.prod-table td.p-price { white-space: nowrap; }
-  table.prod-table td.p-price b { font-size: 16px; }
-  .stale { color: #b26a00; } .gone { color: var(--bad); }
-  .pager { display: flex; gap: 12px; align-items: center; margin: 14px 0; }
-  [data-rview=cards] { overflow: visible; }
-  [data-rview=cards] table.prod-table, [data-rview=cards] table.prod-table tbody { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; min-width: 0 !important; }
-  [data-rview=cards] table.prod-table tbody { grid-column: 1 / -1; }
-  [data-rview=cards] table.prod-table tr:first-child:has(th) { display: none; }
-  [data-rview=cards] table.prod-table tr { display: flex; flex-wrap: wrap; gap: 8px 14px; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; align-content: start; }
-  [data-rview=cards] table.prod-table td { display: block; border: 0; padding: 0; min-width: 0 !important; }
-  [data-rview=cards] table.prod-table td[data-label]::before { content: attr(data-label); display: block; font-size: 12px; color: var(--muted); }
-  [data-rview=cards] table.prod-table td.p-img { flex: 1 1 100%; }
-  [data-rview=cards] table.prod-table td.p-img img { width: 100%; height: 160px; }
-  [data-rview=cards] table.prod-table td.p-name { flex: 1 1 100%; }
+{{ products_styles() }}
 {% endblock %}
 {% block main %}
 <h1>{{ _("Каталог товаров") }}</h1>
 <p class="muted">{{ _("Товары, которые нашёл поиск с ИИ под лоты госзакупок, — с ценой на дату проверки. Новый поиск сначала берёт подходящее отсюда: цену, проверенную не раньше чем") }} {{ fresh_days }} {{ _("дн. назад, — без открытия страницы, более старую — перепроверяет.") }}</p>
-<form method="get" action="/products" class="p-tools">
-  <label>{{ _("Название или продавец") }}<input type="search" name="q" value="{{ p.q }}" placeholder="{{ _("например, огнетушитель") }}"></label>
-  <label>{{ _("Категория") }}<select name="category"><option value="">{{ _("Все") }}</option>
-    {% for code, n in p.divisions %}<option value="{{ code }}" {% if p.division == code %}selected{% endif %}>{{ division_name(code) or code }} ({{ n }})</option>{% endfor %}</select></label>
-  <label>{{ _("Сортировка") }}<select name="sort">{% for key, name in sorts.items() %}<option value="{{ key }}" {% if p.sort == key %}selected{% endif %}>{{ _(name) }}</option>{% endfor %}</select></label>
-  <button class="primary">{{ _("Показать") }}</button>
-  <div class="view-switch" role="group" aria-label="{{ _("Вид отображения") }}">
-    <button type="button" data-rview="table"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18M3 12h18M3 19h18"/></svg><span>{{ _("Таблица") }}</span></button>
-    <button type="button" data-rview="cards"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5"/></svg><span>{{ _("Плитка") }}</span></button>
-  </div>
-</form>
-<p>{{ _("Товаров:") }} <b>{{ p.total }}</b></p>
-<div class="table-wrap" data-rview-box><table class="prod-table">
-  <tr><th></th><th>{{ _("Товар") }}</th><th>{{ _("Продавец") }}</th><th>{{ _("Цена, ₸") }}</th><th>{{ _("Категория") }}</th><th>{{ _("Найден в лотах") }}</th></tr>
-  {% for r in p.rows %}
-  <tr>
-    <td class="p-img">{% if r.image %}<img src="{{ r.image }}" alt="" loading="lazy" referrerpolicy="no-referrer">{% endif %}</td>
-    <td class="p-name"><a class="title" href="{{ product_path(r) }}">{{ r.name }}</a>
-      {% if r.specs %}<ul class="specs">{% for s in r.specs[:5] %}<li>{{ s.name }}: {{ s.value }}</li>{% endfor %}{% if r.specs|length > 5 %}<li>{{ _("и ещё") }} {{ r.specs|length - 5 }}</li>{% endif %}</ul>{% endif %}</td>
-    <td data-label="{{ _("Продавец") }}">{{ r.seller or "—" }}{% if r.city %}<div class="muted">{{ r.city }}</div>{% endif %}{% if r.phone and request.state.user_id %}<div class="muted">{{ r.phone }}</div>{% endif %}</td>
-    <td class="p-price" data-label="{{ _("Цена, ₸") }}">{% if r.price is not none %}<b>{{ r.price | money }}</b>{% if r.price_unit %} <span class="muted">/ {{ r.price_unit }}</span>{% endif %}{% else %}—{% endif %}
-      <div class="{{ 'gone' if not r.available else ('muted' if r.fresh else 'stale') }}">{% if not r.available %}{{ _("нет в наличии на") }}{% else %}{{ _("цена на") }}{% endif %} {{ (r.checked_at|local).strftime("%d.%m.%Y") }}{% if r.available and not r.fresh %} · {{ _("перепроверим") }}{% endif %}</div>
-      {% if r.price_history %}{% set prev = r.price_history[0] %}<div class="muted" title="{{ _("Прежняя цена") }}">{{ _("было") }} {{ prev.price | money }} ({{ prev.at[8:10] }}.{{ prev.at[5:7] }})</div>{% endif %}</td>
-    <td data-label="{{ _("Категория") }}">{{ division_name(r.division) if r.division else "—" }}</td>
-    <td data-label="{{ _("Найден в лотах") }}">{% if not r.lots_found %}—{% elif request.state.paid %}{% for lot in r.lots[-3:]|reverse %}<a href="/lots/{{ lot }}">{{ lot }}</a>{{ ", " if not loop.last }}{% endfor %}{% if r.lots|length > 3 %} <span class="muted">{{ _("и ещё") }} {{ r.lots|length - 3 }}</span>{% endif %}{% else %}{{ r.lots_found }} · <button type="button" class="link-button" data-paid data-feature="catalog_lots">{{ _("по подписке") }} 🔒</button>{% endif %}</td>
-  </tr>
-  {% else %}
-  <tr><td colspan="6" class="muted">{{ _("Пока пусто: каталог пополняется с каждым поиском товаров.") if not p.q and not p.division else _("Ничего не нашлось.") }}</td></tr>
-  {% endfor %}
-</table></div>
-{% if p.pages > 1 %}<div class="pager">{% if p.page > 1 %}<a href="{{ products_url(page=p.page - 1) }}">← {{ _("Назад") }}</a>{% endif %}<span class="muted">{{ _("стр.") }} {{ p.page }} {{ _("из") }} {{ p.pages }}</span>{% if p.page < p.pages %}<a href="{{ products_url(page=p.page + 1) }}">{{ _("Дальше") }} →</a>{% endif %}</div>{% endif %}
+<p class="muted"><a href="/sellers">{{ _("Все продавцы") }} →</a></p>
+{{ products_table() }}
 {% endblock %}
