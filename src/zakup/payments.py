@@ -114,7 +114,8 @@ def fulfill(conn: psycopg.Connection, ref: str, paid_amount: int, late: bool = F
         return False
     if kind == "tariff":
         conn.execute(
-            """UPDATE users SET paid_until = greatest(coalesce(paid_until, now()), now())
+            # Оплата во время пробного месяца продлевает с конца пробы: дни не пропадают.
+            """UPDATE users SET paid_until = greatest(paid_until, trial_until, now())
                    + make_interval(days => %s) WHERE id = %s""",
             (quantity, user_id),
         )

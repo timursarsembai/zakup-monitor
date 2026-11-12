@@ -91,6 +91,9 @@ def test_register_by_phone_then_company(client, conn, monkeypatch):
     assert done.headers["location"] == "/welcome/company"
     assert conn.execute("SELECT role, phone FROM users WHERE email = '+77011112233'").fetchone() == (
         "user", "+77011112233")
+    # Пробный месяц: платное открыто сразу после регистрации.
+    assert conn.execute("""SELECT trial_until > now() + interval '29 days', paid_until IS NULL
+                           FROM users WHERE email = '+77011112233'""").fetchone() == (True, True)
     # Тот же flow второй раз не работает.
     assert client.post("/register/code", data=data, headers=ORIGIN).status_code == 410
     assert "Ваша организация" in client.get("/welcome/company").text

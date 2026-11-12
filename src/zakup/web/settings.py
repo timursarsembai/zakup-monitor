@@ -145,7 +145,8 @@ def _users_tab(conn, user: int, is_admin: bool, is_staff: bool) -> dict:
                   (SELECT max(created_at) FROM sessions s WHERE s.user_id = u.id
                    AND s.impersonated_by IS NULL),
                   u.disabled, o.name, o.bin, u.paid_until,
-                  (SELECT coalesce(sum(g.delta), 0) FROM search_ledger g WHERE g.user_id = u.id)
+                  (SELECT coalesce(sum(g.delta), 0) FROM search_ledger g WHERE g.user_id = u.id),
+                  u.trial_until
            FROM users u LEFT JOIN client_orgs o ON o.user_id = u.id
            WHERE u.deleted_at IS NULL AND (%s OR u.role <> 'admin' OR u.id = %s)
            ORDER BY array_position(ARRAY['admin', 'moderator', 'user'], u.role), u.email""",
@@ -252,10 +253,12 @@ def grant_access(request: Request, admin: Admin, user_id: int, days: Annotated[i
     with core.pool.connection() as conn:
         login = _other_user(conn, request, admin, user_id)
         until = conn.execute(
+            # «Снять» убирает и пробный месяц.
             """UPDATE users SET paid_until = CASE WHEN %s = 0 THEN NULL
-                   ELSE greatest(coalesce(paid_until, now()), now()) + make_interval(days => %s) END
+                   ELSE greatest(coalesce(paid_until, now()), now()) + make_interval(days => %s) END,
+                   trial_until = CASE WHEN %s = 0 THEN NULL ELSE trial_until END
                WHERE id = %s RETURNING paid_until""",
-            (days, days, user_id),
+            (days, days, days, user_id),
         ).fetchone()[0]
     _audit(request, admin, "user_access", login, days=days)
     text = (f"{login}: доступ к платному до {until.astimezone(PORTAL_TZ):%d.%m.%Y}." if until

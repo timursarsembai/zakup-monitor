@@ -24,8 +24,8 @@
       <td class="muted">{{ (u[4]|local).strftime("%d.%m.%Y %H:%M") if u[4] else "—" }}</td>
       <td>{% if manageable %}<div class="row-actions">
         {% if is_admin and u[2] == "user" %}<form method="post" action="/settings/users/{{ u[0] }}/access" class="access-form">
-          <span class="muted">{% if u[8] and u[8] > now %}{{ _("оплачено до") }} {{ (u[8]|local).strftime("%d.%m.%Y") }}{% else %}{{ _("без тарифа") }}{% endif %}</span>
-          <button name="days" value="30">{{ _("+30 дней") }}</button>{% if u[8] and u[8] > now %}<button name="days" value="0">{{ _("Снять") }}</button>{% endif %}
+          <span class="muted">{% if u[8] and u[8] > now %}{{ _("оплачено до") }} {{ (u[8]|local).strftime("%d.%m.%Y") }}{% elif u[10] and u[10] > now %}{{ _("проба до") }} {{ (u[10]|local).strftime("%d.%m.%Y") }}{% else %}{{ _("без тарифа") }}{% endif %}</span>
+          <button name="days" value="30">{{ _("+30 дней") }}</button>{% if (u[8] and u[8] > now) or (u[10] and u[10] > now) %}<button name="days" value="0">{{ _("Снять") }}</button>{% endif %}
         </form>{% endif %}
         {% if is_admin and u[2] == "user" %}<form method="post" action="/settings/users/{{ u[0] }}/searches" class="access-form">
           <span class="muted">{{ _("поисков:") }} {{ u[9] }}</span><button name="count" value="20">{{ _("+20 поисков") }}</button>

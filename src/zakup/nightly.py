@@ -57,6 +57,8 @@ QUERIES = {
                                       "AND created_at < now() - interval '1 hour' AND created_at > now() - interval '2 days'",
     "новых пользователей за сутки": "SELECT count(*) FROM users WHERE created_at > now() - interval '1 day'",
     "с оплаченным тарифом": "SELECT count(*) FROM users WHERE paid_until > now() AND deleted_at IS NULL",
+    "на пробном месяце": """SELECT count(*) FROM users WHERE trial_until > now()
+        AND (paid_until IS NULL OR paid_until <= now()) AND deleted_at IS NULL""",
     "размер базы": "SELECT pg_size_pretty(pg_database_size(current_database()))",
 }
 

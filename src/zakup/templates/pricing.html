@@ -25,7 +25,8 @@
 {% if error == "pay" %}<p class="status bad">{{ _("Не удалось открыть оплату. Попробуйте через минуту или напишите нам.") }}</p>{% endif %}
 {% if error == "orders" %}<p class="status bad">{{ _("У вас уже несколько неоплаченных заказов — оплатите один из них ниже или попробуйте завтра.") }}</p>{% endif %}
 {% if need == "searches" %}<p class="status">{{ _("На балансе нет поисков — купите пакет или нужное количество.") }}</p>{% endif %}
-{% if paid_until %}<p class="status">✓ {{ _("Тариф оплачен до") }} <b>{{ (paid_until|local).strftime("%d.%m.%Y") }}</b></p>{% endif %}
+{% if paid_until %}<p class="status">✓ {{ _("Тариф оплачен до") }} <b>{{ (paid_until|local).strftime("%d.%m.%Y") }}</b></p>
+{% elif trial_until %}<p class="status">✓ {{ _("Пробный месяц до") }} <b>{{ (trial_until|local).strftime("%d.%m.%Y") }}</b> — {{ _("всё из тарифа бесплатно; поиск товаров с ИИ — по балансу поисков.") }}</p>{% endif %}
 <div class="plans">
   {% set t = tariff() %}
   <section class="plan">
@@ -34,9 +35,9 @@
     <ul>
       {% for item in (t.features_kk if lang() == "kk" else t.features_ru) %}<li>{{ item }}</li>{% endfor %}
     </ul>
-    <p class="muted">{{ _("Без пробного периода. Оплата — на 30 дней, продлевается следующей оплатой.") }}</p>
-    {% if request.state.user_id %}<form method="post" action="/pay/tariff"><button class="buy">{{ _("Продлить на 30 дней") if paid_until else _("Оплатить") }} · {{ "{:,}".format(t.price).replace(",", " ") }} ₸</button></form>
-    {% else %}<a class="buy" href="/register">{{ _("Зарегистрироваться и оплатить") }}</a>{% endif %}
+    <p class="muted">{{ _("Первые {days} дней после регистрации — бесплатно (кроме поиска товаров с ИИ). Дальше оплата — на 30 дней, продлевается следующей оплатой; оплата во время пробного месяца добавляет 30 дней к его концу.", days=trial_days) }}</p>
+    {% if request.state.user_id %}<form method="post" action="/pay/tariff"><button class="buy">{{ _("Продлить на 30 дней") if paid_until or trial_until else _("Оплатить") }} · {{ "{:,}".format(t.price).replace(",", " ") }} ₸</button></form>
+    {% else %}<a class="buy" href="/register">{{ _("Зарегистрироваться — {days} дней бесплатно", days=trial_days) }}</a>{% endif %}
   </section>
   <section class="plan">
     <h2>{{ _("Поиск товаров с ИИ") }}</h2>

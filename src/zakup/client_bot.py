@@ -14,7 +14,7 @@ from datetime import UTC, datetime, timedelta
 
 import psycopg
 
-from zakup import SITE_URL, bot, config, db, matcher, telegram
+from zakup import SITE_URL, auth, bot, config, db, matcher, telegram
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +75,8 @@ def _send(chat_id: int | str, text: str) -> None:
 def _user_by_tg(conn: psycopg.Connection, tg_id: int) -> tuple | None:
     """(id, логин, есть ли доступ) по Telegram-аккаунту, привязанному к клиентскому боту."""
     return conn.execute(
-        """SELECT id, email, role IN ('admin', 'moderator') OR coalesce(paid_until > now(), false)
+        """SELECT id, email, role IN ('admin', 'moderator')
+                  OR coalesce(greatest(paid_until, trial_until) > now(), false)
            FROM users WHERE telegram_chat_id = %s AND deleted_at IS NULL AND NOT disabled""",
         (f"{telegram.CLIENT_PREFIX}{tg_id}",),
     ).fetchone()
@@ -196,23 +197,23 @@ def maintenance(conn: psycopg.Connection, now: datetime | None = None) -> tuple[
         return 0, 0
     warned = 0
     soon = conn.execute(
-        """SELECT m.user_id, m.tg_id, u.paid_until FROM client_group_members m
+        f"""SELECT m.user_id, m.tg_id, {auth.ACCESS_UNTIL} FROM client_group_members m
            JOIN users u ON u.id = m.user_id
-           WHERE u.role = 'user' AND u.paid_until > %s AND u.paid_until <= %s
-             AND (m.warned_at IS NULL OR m.warned_at < u.paid_until - %s)""",
+           WHERE u.role = 'user' AND {auth.ACCESS_UNTIL} > %s AND {auth.ACCESS_UNTIL} <= %s
+             AND (m.warned_at IS NULL OR m.warned_at < {auth.ACCESS_UNTIL} - %s)""",
         (now, now + WARN_BEFORE, WARN_BEFORE),
     ).fetchall()
     conn.commit()  # рассылка — без открытой транзакции
     for user_id, tg_id, until in soon:
-        _send(tg_id, f"Тариф Tenderim заканчивается {until.strftime('%d.%m.%Y')}. После этого бот "
+        _send(tg_id, f"Доступ Tenderim заканчивается {until.strftime('%d.%m.%Y')}. После этого бот "
                      f"удалит вас из группы клиентов. Продлить: {SITE_URL}/pricing")
         conn.execute("UPDATE client_group_members SET warned_at = %s WHERE user_id = %s", (now, user_id))
         warned += 1
     conn.commit()
     removed = 0
     expired = conn.execute(
-        """SELECT m.user_id, m.tg_id FROM client_group_members m JOIN users u ON u.id = m.user_id
-           WHERE u.role = 'user' AND (u.paid_until IS NULL OR u.paid_until <= %s
+        f"""SELECT m.user_id, m.tg_id FROM client_group_members m JOIN users u ON u.id = m.user_id
+           WHERE u.role = 'user' AND ({auth.ACCESS_UNTIL} IS NULL OR {auth.ACCESS_UNTIL} <= %s
                                       OR u.deleted_at IS NOT NULL OR u.disabled)""",
         (now,),
     ).fetchall()
@@ -222,7 +223,7 @@ def maintenance(conn: psycopg.Connection, now: datetime | None = None) -> tuple[
             continue
         conn.execute("DELETE FROM client_group_members WHERE user_id = %s", (user_id,))
         conn.commit()
-        _send(tg_id, f"Тариф закончился, поэтому бот удалил вас из группы клиентов. Продлить: "
+        _send(tg_id, f"Доступ закончился, поэтому бот удалил вас из группы клиентов. Продлить: "
                      f"{SITE_URL}/pricing — затем снова подайте заявку в группу.")
         removed += 1
     return warned, removed

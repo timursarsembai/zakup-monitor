@@ -241,7 +241,11 @@ def _finish(request: Request, purpose: str, flow: str, code: str, password: str,
                 conn.execute("UPDATE users SET email = %s, phone = NULL WHERE id = %s",
                              (f"{phone}#deleted-{old[0]}", old[0]))
             user_id = auth.set_password(conn, phone, password)
-            conn.execute("UPDATE users SET phone = %s, role = 'user' WHERE id = %s", (phone, user_id))
+            # Пробный месяц — один раз на номер: повторная регистрация после удаления — только
+            # с разрешения администратора (may_reregister).
+            conn.execute("""UPDATE users SET phone = %s, role = 'user',
+                                trial_until = now() + make_interval(days => %s) WHERE id = %s""",
+                         (phone, auth.TRIAL_DAYS, user_id))
         else:
             user_id = auth.set_password(conn, phone, password)
         conn.execute("UPDATE users SET ui_lang = %s WHERE id = %s", (i18n.language(), user_id))

@@ -32,15 +32,18 @@ router = APIRouter()
 
 @router.get("/pricing")
 def pricing(request: Request, user: Viewer, need: str = "", error: str = ""):
-    paid_until, history = None, []
+    paid_until, trial_until, history = None, None, []
     if user:
         with core.pool.connection() as conn:
-            paid_until = conn.execute("SELECT paid_until FROM users WHERE id = %s AND paid_until > now()",
-                                      (user,)).fetchone()
+            paid_until, trial_until = conn.execute(
+                """SELECT CASE WHEN paid_until > now() THEN paid_until END,
+                          CASE WHEN trial_until > now() THEN trial_until END
+                   FROM users WHERE id = %s""", (user,)).fetchone() or (None, None)
             history = payments.history(conn, user)
     return templates.TemplateResponse(request, "pricing.html", {
         "packs": payments.SEARCH_PACKS, "search_price": payments.SEARCH_PRICE,
-        "paid_until": paid_until[0] if paid_until else None, "history": history,
+        "paid_until": paid_until, "trial_until": trial_until, "trial_days": auth.TRIAL_DAYS,
+        "history": history,
         "need": need, "error": error})
 
 

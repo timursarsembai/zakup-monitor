@@ -323,7 +323,7 @@ def region_page(request: Request, user: Viewer, region: str):
 
 @router.get("/offer")
 def offer_page(request: Request, user: Viewer):
-    return templates.TemplateResponse(request, "legal_offer.html", {"docs_date": legal.DOCS_DATE})
+    return templates.TemplateResponse(request, "legal_offer.html", {"docs_date": legal.OFFER_DATE})
 
 
 @router.get("/privacy")

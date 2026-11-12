@@ -197,3 +197,34 @@ def test_searches_cannot_be_bought_without_tariff(client, conn):
     client.post("/login", data={"email": "87011112233", "password": "client-password-1"}, headers=ORIGIN)
     response = client.post("/pay/searches", data={"count": "20"}, headers=ORIGIN)
     assert response.status_code == 402
+
+
+def test_trial_month_opens_paid_features_but_not_free_searches(client, conn):
+    auth.set_password(conn, "+77011112233", "client-password-1")
+    conn.execute("""UPDATE users SET role = 'user', phone = email,
+                    trial_until = now() + interval '10 days' WHERE email = '+77011112233'""")
+    uid = conn.execute("SELECT id FROM users WHERE email = '+77011112233'").fetchone()[0]
+    conn.commit()
+    client.post("/login", data={"email": "87011112233", "password": "client-password-1"}, headers=ORIGIN)
+    page = client.get("/pricing").text
+    assert "Пробный месяц до" in page and "Продлить на 30 дней" in page
+    from zakup import credits
+
+    assert credits.balance(conn, uid) == 0  # поисков проба не даёт
+    assert conn.execute(f"SELECT u.id FROM users u WHERE {auth.ENTITLED_SQL} AND u.role = 'user'").fetchall() == [(uid,)]
+    # Оплата во время пробы — 30 дней с конца пробы, возврат забирает только оплаченные.
+    conn.execute("INSERT INTO payments (ref, user_id, kind, quantity, amount) VALUES ('t1', %s, 'tariff', 30, 9900)",
+                 (uid,))
+    conn.commit()
+    assert payments.fulfill(conn, "t1", 9900)
+    left = conn.execute("SELECT paid_until - now() FROM users WHERE id = %s", (uid,)).fetchone()[0]
+    assert 39 <= left.days <= 40
+    payments.handle_event(conn, {"event_id": "r1", "event": "order.refunded", "order_ref": "t1"})
+    left = conn.execute("SELECT greatest(paid_until, trial_until) - now() FROM users WHERE id = %s",
+                        (uid,)).fetchone()[0]
+    assert 9 <= left.days <= 10
+    # Проба кончилась — платное снова закрыто.
+    conn.execute("UPDATE users SET trial_until = now() - interval '1 minute', paid_until = NULL WHERE id = %s",
+                 (uid,))
+    conn.commit()
+    assert client.post("/pay/searches", data={"count": "20"}, headers=ORIGIN).status_code == 402
