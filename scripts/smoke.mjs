@@ -8,6 +8,9 @@ const browser = await chromium.launch();
 const problems = [];
 for (const [width, mobile] of [[1280, false], [390, true]]) {
   const page = await browser.newPage({ viewport: { width, height: 800 }, isMobile: mobile, hasTouch: mobile });
+  // Яндекс Метрика: её запросы не затихают (страница не доходит до networkidle — 2026-11-13
+  // /analytics не дождались за 30 с), а заходы проверки портили бы статистику сайта.
+  await page.route(/^https:\/\/mc\.yandex\.(ru|com)\//, (route) => route.abort());
   page.on("pageerror", (error) => problems.push(`${width}px ${page.url()}: ${error.message}`));
   for (const path of pages) await page.goto(SITE + path, { waitUntil: "networkidle" });
   if (!mobile && await page.evaluate(() => document.documentElement.dataset.chips === "desktop")) {
