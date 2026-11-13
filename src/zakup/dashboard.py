@@ -49,7 +49,10 @@ def market(conn: psycopg.Connection, now: datetime | None = None) -> dict[str, A
     data.update(_largest(conn))
     data.update(_competition(conn))
     data.update(_demand(conn, now))
-    data["freshness"] = _rows(conn, "SELECT max(updated_at) FROM sync_state")[0]
+    # Как «Обновлено» в поиске: отметка сборщика или последнее объявление с лотами.
+    data["freshness"] = _rows(conn, "SELECT greatest((SELECT max(updated_at) FROM sync_state), "
+                                    "(SELECT max(lots_ready_at) FROM announcements "
+                                    "WHERE lots_ready_at < publish_date + interval '1 day'))")[0]
     _market_cache = (time.monotonic() + MARKET_TTL, data)
     return data
 

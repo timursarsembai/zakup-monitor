@@ -23,6 +23,11 @@ from zakup.goszakup import Client, GoszakupError
 logger = logging.getLogger(__name__)
 
 PROTOCOL_NAME = "протокол итогов"
+# После сетевого сбоя (таймаут, обрыв) протокол не качаем снова сразу: пауза — час × число
+# неудачных попыток, но не больше суток (миграция 0043). Совсем не бросаем: после долгого
+# сбоя портала протоколы всё равно дочитаются.
+PROTOCOL_DUE = ("(protocol_tried_at IS NULL OR protocol_tried_at"
+                " < now() - interval '1 hour' * least(protocol_attempts, 24))")
 CONTRACTS_QUERY = """{ Contract(limit: 100, filter: {trdBuyId: %(id)d}) {
   id contractNumberSys contractSum signDate supplierBiin
   RefContractStatus { nameRu } Supplier { nameRu }
@@ -65,7 +70,8 @@ def protocol_text(pdf: bytes) -> str:
     start = text.find("Протокол об итогах")
     text = text[start:] if start >= 0 else text
     lines = [re.sub(r" {2,}", " ", line).strip() for line in text.splitlines()]
-    return "\n".join(line for line in lines if line)
+    # Нулевой байт из PDF база в текст не примет (DataError) — убираем.
+    return "\n".join(line for line in lines if line).replace("\x00", "")
 
 
 def _decimal(value: str) -> str | None:
@@ -207,7 +213,9 @@ def parse_announcement(conn: psycopg.Connection, announcement_id: int, detail: d
     if not url:
         return
     done = conn.execute(
-        "SELECT protocol_url = %s FROM announcements WHERE id = %s", (url, announcement_id)
+        # Уже разобран — или пауза после сетевого сбоя ещё идёт.
+        f"SELECT protocol_url = %s OR NOT {PROTOCOL_DUE} FROM announcements WHERE id = %s",
+        (url, announcement_id)
     ).fetchone()
     if done and done[0]:
         return
@@ -218,13 +226,15 @@ def parse_announcement(conn: psycopg.Connection, announcement_id: int, detail: d
         # Сетевой сбой — попробуем в следующий раз; битый файл — не будем.
         logger.warning("protocol of %s not parsed: %s", announcement_id, error)
         if isinstance(error, httpx.HTTPError):
+            conn.execute("""UPDATE announcements SET protocol_attempts = protocol_attempts + 1,
+                                protocol_tried_at = now() WHERE id = %s""", (announcement_id,))
             return
     if not saved:
         logger.info("protocol of %s: no lots recognised", announcement_id)
     # protocol_lots = 0 — формат не распознан: после доработки разбора такие
     # протоколы можно перечитать, сбросив protocol_url.
     conn.execute(
-        "UPDATE announcements SET protocol_url = %s, protocol_lots = %s WHERE id = %s",
+        "UPDATE announcements SET protocol_url = %s, protocol_lots = %s, protocol_attempts = 0 WHERE id = %s",
         (url, saved, announcement_id),
     )
 
@@ -232,7 +242,7 @@ def parse_announcement(conn: psycopg.Connection, announcement_id: int, detail: d
 def parse_pending(conn: psycopg.Connection, limit: int) -> int:
     """Протоколы итогов завершённых объявлений, начиная с новых: для поиска по итогам."""
     rows = conn.execute(
-        """SELECT a.id, a.detail FROM announcements a,
+        f"""SELECT a.id, a.detail FROM announcements a,
                LATERAL (
                    -- Files бывает null: тогда пустой список, а не ошибка.
                    SELECT f->>'filePath' AS url FROM jsonb_array_elements(
@@ -241,6 +251,7 @@ def parse_pending(conn: psycopg.Connection, limit: int) -> int:
                    WHERE lower(trim(f->>'nameRu')) = %s LIMIT 1) p
            WHERE a.status_id = 350 AND a.detail IS NOT NULL AND a.system = 1
              AND a.protocol_url IS DISTINCT FROM p.url
+             AND {PROTOCOL_DUE}
            ORDER BY a.end_date DESC LIMIT %s""",
         (PROTOCOL_NAME, limit),
     ).fetchall()

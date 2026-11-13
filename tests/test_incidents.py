@@ -122,3 +122,12 @@ def test_portal_refusal_is_outage_not_code_error(conn, sent):
     assert sent == [] and conn.execute("SELECT count(*) FROM incidents").fetchone()[0] == 0
     incidents.failed("синхронизация", _raise(GoszakupError("/v3/trd-buy: HTTP 400", 400)), conn)
     assert conn.execute("SELECT count(*) FROM incidents").fetchone()[0] == 1
+
+
+def test_outage_logged_in_one_line_code_errors_raised():
+    from zakup.__main__ import _outage_or_raise
+
+    # Портал недоступен — не ошибка в коде: без трассировки, просто код выхода 1.
+    assert _outage_or_raise("синхронизация", PortalUnavailable("/v3/trd-buy: no response")) == 1
+    with pytest.raises(KeyError):
+        _outage_or_raise("синхронизация", KeyError("x"))

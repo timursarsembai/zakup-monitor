@@ -74,6 +74,28 @@ def test_prefetch_stores_both_languages(conn, monkeypatch):
     assert spec.prefetch(conn, 10) == 0
 
 
+def test_prefetch_survives_one_bad_lot(conn, monkeypatch):
+    _lot(conn)
+    conn.execute("DELETE FROM lot_specs")
+    conn.execute("UPDATE lots SET spec_url = 'https://ows.goszakup.gov.kz/download/1'")
+    conn.commit()
+    monkeypatch.setattr(spec, "download", lambda url: b"pdf")
+
+    def broken(pdf):
+        raise RuntimeError("неожиданное")
+    monkeypatch.setattr(spec, "extract_isolated", broken)
+    # Ошибка одного лота не роняет службу; попытка записана — лот не берут бесконечно.
+    assert spec.prefetch(conn, 10) == 1
+    # Понятная ошибка вместо вечного «разбирается».
+    assert conn.execute("SELECT text, attempts, error FROM lot_specs").fetchone() == (None, 1, spec.FAILED)
+    # Нулевой байт из PDF не ломает запись.
+    conn.execute("UPDATE lot_specs SET fetched_at = now() - interval '2 hours'")
+    conn.commit()
+    monkeypatch.setattr(spec, "extract_isolated", lambda pdf: ("Стол\x00 дубовый", None))
+    assert spec.prefetch(conn, 10) == 1
+    assert conn.execute("SELECT text FROM lot_specs").fetchone()[0] == "Стол дубовый"
+
+
 def test_clean_keeps_only_phone_like_values():
     result = research.clean({"items": [
         {"name": "A", "url": "https://a.kz", "phone": "+7 (727) 123-45-67, 8 701 000 0000"},

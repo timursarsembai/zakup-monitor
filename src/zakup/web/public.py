@@ -648,7 +648,13 @@ def lots_search(request: Request, user: Viewer, page: int = 1, per_page: int = P
             """SELECT (SELECT count(*) FROM announcements WHERE end_date > now()),
                       (SELECT count(*) FROM announcements
                        WHERE end_date > now() AND details_fetched_at IS NULL),
-                      (SELECT max(updated_at) FROM sync_state)"""
+                      -- «Обновлено»: отметка сборщика двигается только при новых номерах на
+                      -- портале, свежие объявления повторного прохода и резерва — по лотам.
+                      -- Только свежие (лоты пришли в первые сутки после публикации): догрузка
+                      -- старых объявлений не должна прятать остановку сбора.
+                      greatest((SELECT max(updated_at) FROM sync_state),
+                               (SELECT max(lots_ready_at) FROM announcements
+                                WHERE lots_ready_at < publish_date + interval '1 day'))"""
         ).fetchone()
         groups = _user_groups(conn, user)
         editing = _editing(conn, user, form)

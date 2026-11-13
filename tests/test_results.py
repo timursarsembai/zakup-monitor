@@ -101,6 +101,43 @@ def test_refresh_saves_results_and_marks_get_outcome(conn, monkeypatch):
     assert marks.announce_results(conn, pause=0) == 0
 
 
+def test_protocol_network_errors_limited(conn, monkeypatch):
+    import httpx
+
+    _announcement(conn)
+    conn.execute("UPDATE announcements SET status_id = 350, system = 1 WHERE id = 7")
+    conn.commit()
+    calls = []
+
+    def timeout(url):
+        calls.append(url)
+        raise httpx.ReadTimeout("медленно")
+    monkeypatch.setattr(results.spec, "download", timeout)
+    assert results.parse_pending(conn, 10) == 1
+    # Сразу после неудачи — пауза: не качаем снова на следующем круге.
+    assert results.parse_pending(conn, 10) == 0 and len(calls) == 1
+    # Пауза растёт с числом неудач (5 попыток — 5 часов), ни круг, ни refresh не качают раньше…
+    conn.execute("UPDATE announcements SET protocol_attempts = 5, protocol_tried_at = now() - interval '4 hours' "
+                 "WHERE id = 7")
+    conn.commit()
+    assert results.parse_pending(conn, 10) == 0
+    results.parse_announcement(conn, 7, conn.execute("SELECT detail FROM announcements WHERE id = 7").fetchone()[0])
+    assert len(calls) == 1
+    # …но не больше суток и совсем не бросаем: после долгого сбоя портала протокол дочитается.
+    conn.execute("UPDATE announcements SET protocol_attempts = 100, protocol_tried_at = now() - interval '25 hours' "
+                 "WHERE id = 7")
+    conn.commit()
+    assert results.parse_pending(conn, 10) == 1 and len(calls) == 2
+    # Протокол разобрался — счётчик сброшен.
+    conn.execute("UPDATE announcements SET protocol_attempts = 1, protocol_tried_at = now() - interval '2 hours' "
+                 "WHERE id = 7")
+    conn.commit()
+    monkeypatch.setattr(results.spec, "download", lambda url: b"pdf")
+    monkeypatch.setattr(results, "protocol_text", lambda pdf: PROTOCOL)
+    assert results.parse_pending(conn, 10) == 1
+    assert conn.execute("SELECT protocol_attempts, protocol_lots FROM announcements WHERE id = 7").fetchone() == (0, 2)
+
+
 def test_parse_pending_skips_announcements_without_files(conn):
     db.upsert_announcement(conn, {"id": 8, "name_ru": "Без файлов", "end_date": "2020-01-01 10:00:00",
                                   "ref_buy_status_id": 350})

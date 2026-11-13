@@ -271,8 +271,16 @@ def _specs(limit: int, loop: bool) -> int:
 
     batch = min(limit, SPECS_BATCH)
     while True:
-        with db.connect(config.database_url()) as conn:
-            done = spec.prefetch(conn, batch)
+        try:
+            with db.connect(config.database_url()) as conn:
+                done = spec.prefetch(conn, batch)
+        except psycopg.OperationalError as error:
+            # Короткий обрыв связи с базой — не повод падать: через минуту снова.
+            logging.getLogger(__name__).warning("specs: %r", error)
+            if not loop:
+                return 1
+            time.sleep(60)
+            continue
         print(f"specs: {done}", flush=True)
         if not loop:
             return 0
@@ -285,8 +293,16 @@ def _securities(loop: bool) -> int:
     from zakup import securities
 
     while True:
-        with db.connect(config.database_url()) as conn:
-            done = securities.prefetch(conn, securities.BATCH)
+        try:
+            with db.connect(config.database_url()) as conn:
+                done = securities.prefetch(conn, securities.BATCH)
+        except psycopg.OperationalError as error:
+            # Короткий обрыв связи с базой — не повод падать: через минуту снова.
+            logging.getLogger(__name__).warning("securities: %r", error)
+            if not loop:
+                return 1
+            time.sleep(60)
+            continue
         print(f"securities: {done}", flush=True)
         if not loop:
             return 0
@@ -358,8 +374,17 @@ def _backfill(conn, client: Client, max_pages: int) -> int:
     except Exception as error:
         conn.rollback()
         incidents.failed("догрузка истории", error)
-        raise
+        return _outage_or_raise("догрузка истории", error)
     return 0
+
+
+def _outage_or_raise(stage: str, error: Exception) -> int:
+    """Портал недоступен (уже записано incidents.failed) — одна строка в лог вместо трассировки:
+    ошибки в коде нет (ночной отчёт 2026-11-13: 49 трассировок за сутки). Остальное — дальше."""
+    if incidents.is_outage(error):
+        logging.getLogger(__name__).warning("%s: портал недоступен: %s", stage, error)
+        return 1
+    raise error
 
 
 def _sync(conn, client: Client, max_pages: int) -> int:
@@ -376,7 +401,7 @@ def _sync(conn, client: Client, max_pages: int) -> int:
         # Недоступность портала — одно сообщение за перерыв; остальное — на автоисправление.
         conn.rollback()
         incidents.failed("синхронизация", error)
-        raise
+        return _outage_or_raise("синхронизация", error)
     incidents.portal_ok(conn)
     return 0
 
@@ -412,7 +437,7 @@ def _rescan(conn, client: Client, days: int, max_pages: int) -> int:
         # Недоступность портала — одно сообщение за перерыв; остальное — на автоисправление.
         conn.rollback()
         incidents.failed("повторный проход", error)
-        raise
+        return _outage_or_raise("повторный проход", error)
     return 0
 
 
@@ -441,7 +466,7 @@ def _details(conn, client: Client, limit: int, part: str = "all") -> int:
         # Недоступность портала — одно сообщение за перерыв; остальное — на автоисправление.
         conn.rollback()
         incidents.failed("подробности объявлений", error)
-        raise
+        return _outage_or_raise("подробности объявлений", error)
     return 0
 
 

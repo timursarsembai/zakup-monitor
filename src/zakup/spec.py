@@ -203,6 +203,8 @@ def fetch(conn: psycopg.Connection, lot_id: int, url: str) -> tuple[str | None, 
     except (SpecError, httpx.HTTPError) as exc:
         text, text_kk = None, None
         error = str(exc) if isinstance(exc, SpecError) else "портал недоступен"
+    # Нулевой байт из PDF база в текст не примет (DataError) — убираем.
+    text, text_kk = (t.replace("\x00", "") if t else t for t in (text, text_kk))
     conn.execute(
         """INSERT INTO lot_specs (lot_id, file_url, text, text_kk, error, attempts)
            VALUES (%s, %s, %s, %s, %s, 1)
@@ -228,6 +230,7 @@ def get(conn: psycopg.Connection, lot_id: int, url: str) -> tuple[str | None, st
 
 # Сетевые ошибки повторяем, но не бесконечно: битый PDF не исправится.
 MAX_ATTEMPTS = 4
+FAILED = "файл не удалось разобрать — откройте файл"
 
 
 def prefetch(conn: psycopg.Connection, limit: int) -> int:
@@ -249,5 +252,25 @@ def prefetch(conn: psycopg.Connection, limit: int) -> int:
     ).fetchall()
     conn.commit()  # файлы качаем без открытой транзакции
     for lot_id, url in rows:
-        fetch(conn, lot_id, url)
+        try:
+            fetch(conn, lot_id, url)
+        except psycopg.OperationalError:
+            raise  # связь с базой потеряна — переподключится цикл службы
+        except Exception:
+            # Неожиданная ошибка одного файла не должна ронять службу (ночной отчёт 2026-11-13:
+            # 6 падений в сутки). Лоту — понятная ошибка вместо вечного «разбирается»; не
+            # записалась даже попытка — сразу последняя, чтобы не брать лот на каждом круге.
+            conn.rollback()
+            logger.exception("spec %s", lot_id)
+            try:
+                conn.execute(
+                    """INSERT INTO lot_specs (lot_id, file_url, error, attempts) VALUES (%s, %s, %s, %s)
+                       ON CONFLICT (lot_id) DO UPDATE SET error = excluded.error, fetched_at = now()
+                       WHERE lot_specs.text IS NULL""",
+                    (lot_id, url, FAILED, MAX_ATTEMPTS))
+                conn.commit()
+            except psycopg.OperationalError:
+                raise
+            except psycopg.Error:
+                conn.rollback()
     return len(rows)
