@@ -179,6 +179,23 @@ def user_by_session(conn: psycopg.Connection, token: str | None) -> tuple | None
     ).fetchone()
 
 
+# Срок входа скользящий: заходит человек — отсчёт SESSION_TTL начинается заново (не чаще раза
+# в RENEW_AFTER), и активному не приходится входить снова. Вход администратора под пользователем
+# (impersonated_by) не продлевается — у него свой короткий срок.
+RENEW_AFTER = timedelta(days=1)
+
+
+def renew_session(conn: psycopg.Connection, token: str | None) -> bool:
+    """Продлить сессию на SESSION_TTL от сейчас; True — продлили (тогда и cookie обновить)."""
+    if not token:
+        return False
+    return conn.execute(
+        """UPDATE sessions SET expires_at = now() + %s
+           WHERE token_hash = %s AND impersonated_by IS NULL
+             AND expires_at > now() AND expires_at < now() + %s""",
+        (SESSION_TTL, _token_hash(token), SESSION_TTL - RENEW_AFTER)).rowcount == 1
+
+
 def logout(conn: psycopg.Connection, token: str | None) -> None:
     if token:
         conn.execute("DELETE FROM sessions WHERE token_hash = %s", (_token_hash(token),))

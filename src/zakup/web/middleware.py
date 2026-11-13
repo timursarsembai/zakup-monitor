@@ -65,9 +65,16 @@ async def page_views(request: Request, call_next):
     return response
 
 
+# Кто может показывать сайт во фрейме: плеер Вебвизора Яндекс Метрики (yandex.ru/support/metrica).
+METRIKA_FRAMES = ("https://metrika.yandex.ru https://metrika.yandex.by https://metrika.yandex.kz "
+                  "https://metrica.yandex.com https://metrica.yandex.com.tr https://webvisor.com https://*.webvisor.com")
+
+
 async def security_headers(request: Request, call_next):
     response = await call_next(request)
-    # Сайт не встраивается в чужие страницы (кнопки удаления и т.п. — в один клик).
+    # Сайт не встраивается в чужие страницы (кнопки удаления и т.п. — в один клик) — кроме
+    # просмотра записей Вебвизора в Яндекс Метрике (frame-ancestors ниже; X-Frame-Options при
+    # нём браузеры не смотрят, а старым — запрет целиком).
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "same-origin")
     # Только HTTPS (сайт целиком за HTTPS): первый же заход по http не перехватить.
@@ -76,8 +83,9 @@ async def security_headers(request: Request, call_next):
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     # Скрипты на страницах пока встроенные — их CSP не ограничивает; закрываем остальное:
     # встраивание к чужим, плагины, подмену базового адреса.
+    frames = METRIKA_FRAMES if core.metrika_on(request) else "'none'"
     response.headers.setdefault("Content-Security-Policy",
-                                "frame-ancestors 'none'; object-src 'none'; base-uri 'self'")
+                                f"frame-ancestors {frames}; object-src 'none'; base-uri 'self'")
     response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()")
     if request.url.path.startswith("/settings"):
         # Здесь показываются выданные пароли: не кэшировать.
@@ -96,9 +104,20 @@ def _to_pricing(request: Request, _: PaymentRequired):
     return JSONResponse({"paywall": True, "detail": "Платная функция"}, status_code=402)
 
 
+async def session_cookie(request: Request, call_next):
+    """Вход продлён (core.optional_user) — и cookie на новый срок, если ответ сам её не меняет
+    (вход, выход)."""
+    response = await call_next(request)
+    token = request.cookies.get(core.SESSION_COOKIE)
+    touched = any(value.startswith(core.SESSION_COOKIE + "=") for value in response.headers.getlist("set-cookie"))
+    if getattr(request.state, "session_renewed", False) and token and not touched:
+        core._with_session(response, token)
+    return response
+
+
 def install(app) -> None:
     """Порядок как раньше: добавленный позже оборачивает раньше добавленные."""
-    for handler in (language, page_views, security_headers):
+    for handler in (session_cookie, language, page_views, security_headers):
         app.middleware("http")(handler)
     app.exception_handler(LoginRequired)(_to_login)
     app.exception_handler(PaymentRequired)(_to_pricing)

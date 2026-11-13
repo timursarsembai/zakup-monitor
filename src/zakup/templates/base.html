@@ -307,8 +307,23 @@
         "session_expired": _("Сессия истекла —"), "searching": _("Ищем…"),
         "show_password": _("Показать пароль"), "hide_password": _("Скрыть пароль")}} | tojson }}</script>
 <script>const CONFIG = JSON.parse(document.getElementById("app-config").textContent);</script>
+{% if metrika_on(request) %}
+<!-- Yandex.Metrika counter -->
+<script type="text/javascript">
+    (function(m,e,t,r,i,k,a){
+        m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
+        m[i].l=1*new Date();
+        for (var j = 0; j < document.scripts.length; j++) {if (document.scripts[j].src === r) { return; }}
+        k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)
+    })(window, document,'script','https://mc.yandex.ru/metrika/tag.js?id={{ metrika_id }}', 'ym');
+
+    ym({{ metrika_id }}, 'init', {ssr:true, webvisor:true, clickmap:true, ecommerce:"dataLayer", referrer: document.referrer, url: location.href, accurateTrackBounce:true, trackLinks:true});
+</script>
+<!-- /Yandex.Metrika counter -->
+{% endif %}
 </head>
 <body>
+{% if metrika_on(request) %}<noscript><div><img src="https://mc.yandex.ru/watch/{{ metrika_id }}" style="position:absolute; left:-9999px;" alt="" /></div></noscript>{% endif %}
 {% if request.state.impersonator %}
 <form class="impersonating" method="post" action="/impersonate/stop">
   👁 {{ _("Вы вошли как") }} <b>{{ request.state.email }}</b> ({{ _("администратор") }} {{ request.state.impersonator }}).
@@ -340,15 +355,21 @@
     <a class="icon-button" href="/login?next={{ request.url.path | urlencode }}">{{ _("Вход") }}</a>{% endif %}
     {# Телефон: всё ниже — в шторке «Ещё». Компьютер: шапка — левая панель (стили ниже). #}
     <div class="tools {{ 'signed' if request.state.user_id }}" id="tools" data-tools>
-      <span class="side-head">{{ _("Разделы") }}</span>
+      {# Компьютер: группы левой панели — товары, справочники, инструменты (телефон — шторка «Ещё» ниже, те же группы). #}
+      <span class="side-head">{{ _("Товары") }}</span>
+      <a href="/products" class="icon-button tool-row sec {{ 'on' if path.startswith('/products') }}" title="{{ _("Каталог товаров") }}" aria-label="{{ _("Каталог товаров") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7l9-4 9 4-9 4-9-4z"/><path d="M3 7v10l9 4 9-4V7"/><path d="M12 11v10"/></svg><span class="tool-label">{{ _("Каталог товаров") }}</span></a>
+      <a href="/sellers" class="icon-button tool-row sec {{ 'on' if path == '/sellers' or path.startswith('/sellers/') }}" title="{{ _("Продавцы") }}" aria-label="{{ _("Продавцы") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9l1.5-5h15L21 9M3 9h18v2a3 3 0 0 1-6 0 3 3 0 0 1-6 0 3 3 0 0 1-6 0zM5 13v8h14v-8M10 21v-5h4v5"/></svg><span class="tool-label">{{ _("Продавцы") }}</span></a>
+      {% if request.state.user_id %}<a href="/my/shop" class="icon-button tool-row sec {{ 'on' if path.startswith('/my/shop') }}" title="{{ _("Мой магазин") }}" aria-label="{{ _("Мой магазин") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 7h12l1 14H5z"/><path d="M9 7a3 3 0 0 1 6 0"/></svg><span class="tool-label">{{ _("Мой магазин") }}</span></a>{% endif %}
+      {% if request.state.staff %}<a href="/staff/sellers" class="icon-button tool-row sec {{ 'on' if path == '/staff/sellers' }}" title="{{ _("Продавцы: модерация") }}" aria-label="{{ _("Продавцы: модерация") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/><path d="m9 12 2 2 4-4"/></svg><span class="tool-label">{{ _("Продавцы: модерация") }}</span></a>{% endif %}
+      <span class="side-head">{{ _("Справочники") }}</span>
       <a href="/orgs/customers" class="icon-button tool-row sec {{ 'on' if path.startswith('/orgs') or path.startswith('/org/') }}" title="{{ _("Организации") }}" aria-label="{{ _("Организации") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-5h6v5M9 10h.01M15 10h.01M9 13h.01M15 13h.01"/></svg><span class="tool-label">{{ _("Организации") }}</span></a>
       <a href="/orgs/customers" class="tool-row sec sub {{ 'on' if path == '/orgs/customers' }}"><span class="tool-label">{{ _("Заказчики") }}</span></a>
       <a href="/orgs/suppliers" class="tool-row sec sub {{ 'on' if path == '/orgs/suppliers' }}"><span class="tool-label">{{ _("Поставщики") }}</span></a>
       <a href="/categories" class="icon-button tool-row sec {{ 'on' if path == '/categories' or path.startswith('/category/') }}" title="{{ _("Категории") }}" aria-label="{{ _("Категории") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg><span class="tool-label">{{ _("Категории") }}</span></a>
       <a href="/regions" class="icon-button tool-row sec {{ 'on' if path == '/regions' or path.startswith('/region/') }}" title="{{ _("Регионы") }}" aria-label="{{ _("Регионы") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg><span class="tool-label">{{ _("Регионы") }}</span></a>
+      <span class="side-head">{{ _("Инструменты") }}</span>
       <a href="/analytics" class="icon-button tool-row sec {{ 'on' if path == '/analytics' }}" title="{{ _("Аналитика рынка") }}" aria-label="{{ _("Аналитика рынка") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><span class="tool-label">{{ _("Аналитика рынка") }}</span></a>
       <a href="/calculator" class="icon-button tool-row sec {{ 'on' if path == '/calculator' }}" title="{{ _("Калькулятор маржи") }}" aria-label="{{ _("Калькулятор маржи") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M8 6h8M8 11h.01M12 11h.01M16 11h.01M8 15h.01M12 15h.01M16 15h.01M8 19h.01M12 19h4"/></svg><span class="tool-label">{{ _("Калькулятор маржи") }}</span></a>
-      <a href="/products" class="icon-button tool-row sec {{ 'on' if path.startswith('/products') }}" title="{{ _("Каталог товаров") }}" aria-label="{{ _("Каталог товаров") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7l9-4 9 4-9 4-9-4z"/><path d="M3 7v10l9 4 9-4V7"/><path d="M12 11v10"/></svg><span class="tool-label">{{ _("Каталог товаров") }}</span></a>
       {% if request.state.staff %}<a href="/dashboard" class="icon-button tool-row sec {{ 'on' if path == '/dashboard' }}" title="{{ _("Дашборд") }}" aria-label="{{ _("Дашборд") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg><span class="tool-label">{{ _("Дашборд") }}</span></a>{% endif %}
       <span class="side-gap"></span>
       <a href="/pricing" class="icon-button tool-row acc {{ 'on' if path == '/pricing' }}" title="{{ _("Тариф") }}" aria-label="{{ _("Тариф") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/></svg><span class="tool-label">{{ _("Тариф") }}</span></a>
@@ -391,8 +412,8 @@
 </div>
 <div class="more-sheet" id="more-sheet" data-more-sheet hidden role="dialog" aria-modal="true" aria-label="{{ _("Ещё разделы") }}">
   <div class="more-grip" aria-hidden="true"></div>
-  {# Группы: разделы сайта, аккаунт, вид. #}
-  <div class="more-head">{{ _("Разделы") }}</div>
+  {# Группы — как в левой панели на компьютере: закупки, товары, справочники, инструменты; затем аккаунт и вид. #}
+  <div class="more-head">{{ _("Закупки") }}</div>
   <div class="more-grid g0">
     {% if not request.state.user_id %}
     {{ tile("/my", _("nav:Мои лоты"), '<path d="M6 3h12v18l-6-4-6 4z"/>', path == "/my", true, "guest-only") }}
@@ -400,20 +421,30 @@
     {{ tile("/matches", _("nav:Лента"), '<path d="M3 12h4l3 8 4-16 3 8h4"/>', path == "/matches", true, "guest-only") }}
     {% endif %}
     {{ tile("/subscriptions", _("nav:Подписки"), '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/>', path == "/subscriptions", true) }}
-    {{ tile("/categories", _("Категории"), '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>', path == "/categories" or path.startswith("/category/")) }}
-    {{ tile("/regions", _("Регионы"), '<path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/>', path == "/regions" or path.startswith("/region/")) }}
+  </div>
+  <div class="more-head">{{ _("Товары") }}</div>
+  <div class="more-grid g0">
+    {{ tile("/products", _("Каталог товаров"), '<path d="M3 7l9-4 9 4-9 4-9-4z"/><path d="M3 7v10l9 4 9-4V7"/><path d="M12 11v10"/>', path.startswith("/products")) }}
+    {{ tile("/sellers", _("Продавцы"), '<path d="M3 9l1.5-5h15L21 9M3 9h18v2a3 3 0 0 1-6 0 3 3 0 0 1-6 0 3 3 0 0 1-6 0zM5 13v8h14v-8M10 21v-5h4v5"/>', path == "/sellers" or path.startswith("/sellers/")) }}
+    {% if request.state.user_id %}{{ tile("/my/shop", _("Мой магазин"), '<path d="M6 7h12l1 14H5z"/><path d="M9 7a3 3 0 0 1 6 0"/>', path.startswith("/my/shop")) }}{% endif %}
+    {% if request.state.staff %}{{ tile("/staff/sellers", _("Продавцы: модерация"), '<path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/><path d="m9 12 2 2 4-4"/>', path == "/staff/sellers") }}{% endif %}
+  </div>
+  <div class="more-head">{{ _("Справочники") }}</div>
+  <div class="more-grid g1">
     {{ tile("/orgs/customers", _("Заказчики"), '<path d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-5h6v5M9 10h.01M15 10h.01M9 13h.01M15 13h.01"/>', path == "/orgs/customers") }}
     {{ tile("/orgs/suppliers", _("Поставщики"), '<rect x="2" y="7" width="13" height="10" rx="1.5"/><path d="M15 10h4l3 3v4h-7M6.5 19.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zM18 19.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z"/>', path == "/orgs/suppliers") }}
+    {{ tile("/categories", _("Категории"), '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>', path == "/categories" or path.startswith("/category/")) }}
+    {{ tile("/regions", _("Регионы"), '<path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/>', path == "/regions" or path.startswith("/region/")) }}
+  </div>
+  <div class="more-head">{{ _("Инструменты") }}</div>
+  <div class="more-grid g1">
     {{ tile("/analytics", _("Аналитика"), '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>', path == "/analytics") }}
     {{ tile("/calculator", _("Калькулятор маржи"), '<rect x="5" y="2" width="14" height="20" rx="2"/><path d="M8 6h8M8 11h.01M12 11h.01M16 11h.01M8 15h.01M12 15h.01M16 15h.01M8 19h.01M12 19h4"/>', path == "/calculator") }}
     {% if request.state.staff %}{{ tile("/dashboard", _("Дашборд"), '<rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>', path == "/dashboard") }}{% endif %}
-    {{ tile("/products", _("Каталог товаров"), '<path d="M3 7l9-4 9 4-9 4-9-4z"/><path d="M3 7v10l9 4 9-4V7"/><path d="M12 11v10"/>', path.startswith("/products")) }}
-    {% if request.state.staff %}{{ tile("/staff/sellers", _("Продавцы: модерация"), '<path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/><path d="m9 12 2 2 4-4"/>', path == "/staff/sellers") }}{% endif %}
   </div>
   <div class="more-head">{{ _("Аккаунт") }}</div>
   <div class="more-grid g1">
     {% if request.state.user_id and not request.state.staff %}{{ tile("/balance", _("Поиски:") ~ " " ~ request.state.searches, '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>', path == "/balance") }}{% endif %}
-    {% if request.state.user_id %}{{ tile("/my/shop", _("Мой магазин"), '<path d="M3 9l1.5-5h15L21 9M3 9h18v2a3 3 0 0 1-6 0 3 3 0 0 1-6 0 3 3 0 0 1-6 0zM5 13v8h14v-8M10 21v-5h4v5"/>', path.startswith("/my/shop")) }}{% endif %}
     {{ tile("/pricing", _("Тариф"), '<path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/>', path == "/pricing") }}
     {{ tile("/settings", _("Настройки"), '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1 7 17M17 7l2.1-2.1"/>', path == "/settings") }}
     {% if request.state.user_id %}

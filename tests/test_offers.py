@@ -46,6 +46,7 @@ def test_lot_shows_seller_offers_with_tier_price(client, conn):
     _as_admin(client)
     page = client.get("/lots/5001").text
     assert "Бумага А4 офисная" in page and "2 100" in page and "тот же код" in page
+    assert 'href="tel:+77011112233"' in page  # контакты продавца — подписчику
     # Магазин скрыт — товаров нет.
     shop.set_status(conn, seller["id"], "hidden")
     conn.commit()

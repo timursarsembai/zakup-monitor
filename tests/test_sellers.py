@@ -60,6 +60,16 @@ def test_seller_pages(client, conn):
     listing = client.get("/sellers").text
     assert f'href="{path}"' in listing and "найден в интернете" in listing and "Другой продавец" in listing
     assert "Дом Диванов" not in client.get("/sellers?city=Астана").text
+    # Фильтры: категория, тип, проверенные; подпись условия — в строке сверху.
+    by_cat = client.get("/sellers?category=27").text
+    assert "Дом Диванов" in by_cat and "Другой продавец" not in by_cat and 'data-chipbar' in by_cat
+    assert "Дом Диванов" not in client.get("/sellers?kind=own").text
+    assert "Дом Диванов" in client.get("/sellers?kind=found").text
+    conn.execute("UPDATE sellers SET verified = true, bin = '123456789012' WHERE id = %s", (sid,))
+    conn.commit()
+    verified = client.get("/sellers?verified=1").text
+    assert "Дом Диванов" in verified and "Другой продавец" not in verified
+    assert "Дом Диванов" in client.get("/sellers?q=123456789012").text
 
     page = client.get(path)
     assert page.status_code == 200

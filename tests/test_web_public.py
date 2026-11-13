@@ -484,20 +484,20 @@ def test_lot_page_shows_competitors_and_suppliers(client, conn):
     conn.commit()
     orgs.refresh_directory(conn)
     page = client.get("/lots/8010").text
-    assert "Конкуренты и поставщики" in page and "В регионе поставки: Павлодарская область" in page
+    assert "Конкуренты" in page and "В регионе поставки: Павлодарская область" in page
     here, rest = page.split("В регионе поставки:", 1)[1].split("По всему Казахстану", 1)
     assert 'href="/org/050540002222"' in here and 'href="/org/651114400549"' in here
     assert 'href="/org/060640003333"' in rest and "г. Алматы" in rest
     # без тарифа — без процентов
     assert "Снижение цены" not in page and "Побед в регионе" in page
     # Точный уровень — только диваны.
-    exact = client.get("/lots/8010?sup=code").text.split("Конкуренты и поставщики", 1)[1]
+    exact = client.get("/lots/8010?sup=code").text.split("Конкуренты", 1)[1]
     assert "060640003333" not in exact.split("</section>", 1)[0]
     assert 'data-feature="supplier_prices"' in exact and "Его цены за ед." not in exact
     _login(client)
     assert ">10.0%<" in client.get("/lots/8010").text
     # По подписке — цены участников в таких же лотах (диван 802; стул 803 — другой код).
-    exact = client.get("/lots/8010?sup=code").text.split("Конкуренты и поставщики", 1)[1]
+    exact = client.get("/lots/8010?sup=code").text.split("Конкуренты", 1)[1]
     assert "Его цены за ед." in exact and "data-sup-history" in exact and 'href="/lots/8020#results"' in exact
     # Плитка: те же цены списком внутри карточки участника.
     assert exact.count('href="/lots/8020#results"') % 2 == 0 and exact.count('class="s-hist-cards"') == exact.count('class="sup-hist"')

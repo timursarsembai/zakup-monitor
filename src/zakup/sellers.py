@@ -10,6 +10,7 @@
 """
 
 import re
+import time
 from typing import Any
 
 import psycopg
@@ -104,6 +105,20 @@ def _phones(conn: psycopg.Connection, seller: dict[str, Any]) -> list[dict]:
     return [p for p in (row[0] if row else []) if p.get("number")][:contacts.MAX_PHONES]
 
 
+def phone_list(phones: list[dict]) -> list[dict[str, Any]]:
+    """Телефоны для показа: номер (+7 (701) 111-22-33), tel — для ссылки (только у
+    распознанного казахстанского номера, иначе None — номер просто текстом), whatsapp."""
+    out = []
+    for ph in phones or []:
+        if not ph.get("number"):
+            continue
+        normal = contacts.normalize(ph["number"])
+        out.append({"number": normal or ph["number"], "label": ph.get("label") or "",
+                    "tel": "+" + re.sub(r"\D", "", normal) if normal else None,
+                    "whatsapp": bool(ph.get("whatsapp"))})
+    return out
+
+
 def get(conn: psycopg.Connection, seller_id: int) -> dict[str, Any] | None:
     cur = conn.cursor(row_factory=dict_row)
     seller = cur.execute(
@@ -115,23 +130,54 @@ def get(conn: psycopg.Connection, seller_id: int) -> dict[str, Any] | None:
     if seller is None:
         return None
     seller["city"] = seller["city"] or seller["city_guess"]
-    seller["phone_list"] = [dict(p, number=contacts.normalize(p["number"]) or p["number"])
-                            for p in _phones(conn, seller)]
+    seller["phone_list"] = phone_list(_phones(conn, seller))
     seller["divisions"] = conn.execute(
         """SELECT division, count(*) FROM product_catalog WHERE seller_id = %s AND division IS NOT NULL
            AND on_sale AND NOT blocked GROUP BY 1 ORDER BY 2 DESC""", (seller_id,)).fetchall()
     return seller
 
 
+KINDS = {"own": "Свои магазины", "found": "Найдены в интернете"}
+CHOICES_TTL = 600  # города и категории для фильтра меняются редко, а страница — на каждый щелчок фильтра
+_choices_cache: tuple[float, tuple[list, list]] | None = None
+
+
+def _choices(conn: psycopg.Connection) -> tuple[list[str], list[str]]:
+    """Города (свой продавца или самый частый у его товаров) и разделы товаров — для фильтра."""
+    global _choices_cache
+    if _choices_cache and _choices_cache[0] > time.monotonic():
+        return _choices_cache[1]
+    cities = [r[0] for r in conn.execute(
+        """SELECT city, count(*) FROM (
+               SELECT coalesce(s.city, mode() WITHIN GROUP (ORDER BY p.city)) AS city
+               FROM sellers s LEFT JOIN product_catalog p ON p.seller_id = s.id AND p.on_sale AND NOT p.blocked
+               WHERE s.status = 'active' GROUP BY s.id HAVING count(p.id) > 0 OR s.kind = 'own') x
+           WHERE city IS NOT NULL GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 30""")]
+    divisions = [r[0] for r in conn.execute(
+        """SELECT p.division FROM sellers s
+           JOIN product_catalog p ON p.seller_id = s.id AND p.on_sale AND NOT p.blocked
+           WHERE s.status = 'active' AND p.division IS NOT NULL GROUP BY 1 ORDER BY count(DISTINCT s.id) DESC, 1""")]
+    _choices_cache = (time.monotonic() + CHOICES_TTL, (cities, divisions))
+    return cities, divisions
+
+
 def listing(conn: psycopg.Connection, q: str = "", city: str = "", division: str = "",
-            sort: str = "products", page: int = 1) -> dict[str, Any]:
-    """Список продавцов: поиск по названию, город, категория товаров; только с товарами
-    (или свои магазины) и не скрытые."""
+            sort: str = "products", page: int = 1, verified: bool = False, kind: str = "") -> dict[str, Any]:
+    """Список продавцов: поиск по названию (или БИН, сайту), город, категория товаров, только
+    проверенные, свой магазин или найден в интернете; только с товарами (или свои магазины)
+    и не скрытые."""
     sort = sort if sort in SORTS else "products"
+    kind = kind if kind in KINDS else ""
     where, having, params = ["s.status = 'active'"], ["(count(p.id) > 0 OR s.kind = 'own')"], {}
     if q.strip():
-        where.append("(s.name ILIKE %(like)s OR s.domain ILIKE %(like)s)")
+        where.append("(s.name ILIKE %(like)s OR s.domain ILIKE %(like)s OR s.bin = %(q)s)")
         params["like"] = "%" + q.strip().replace("%", "").replace("_", "") + "%"
+        params["q"] = q.strip()
+    if verified:
+        where.append("s.verified")
+    if kind:
+        where.append("s.kind = %(kind)s")
+        params["kind"] = kind
     if city:
         having.append("coalesce(s.city, mode() WITHIN GROUP (ORDER BY p.city)) = %(city)s")
         params["city"] = city
@@ -153,15 +199,10 @@ def listing(conn: psycopg.Connection, q: str = "", city: str = "", division: str
         for code in row["divisions"] or []:
             counts[code] = counts.get(code, 0) + 1
         row["top"] = sorted(counts, key=lambda c: -counts[c])[:3]
-    # Города — те же, что у фильтра: город продавца (свой или самый частый у его товаров).
-    cities = [r[0] for r in conn.execute(
-        """SELECT city, count(*) FROM (
-               SELECT coalesce(s.city, mode() WITHIN GROUP (ORDER BY p.city)) AS city
-               FROM sellers s LEFT JOIN product_catalog p ON p.seller_id = s.id AND p.on_sale AND NOT p.blocked
-               WHERE s.status = 'active' GROUP BY s.id HAVING count(p.id) > 0 OR s.kind = 'own') x
-           WHERE city IS NOT NULL GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 30""")]
+    cities, divisions = _choices(conn)
     return {"rows": rows, "total": total, "page": max(page, 1), "pages": max(1, -(-total // PAGE_SIZE)),
-            "sort": sort, "q": q, "city": city, "division": division, "cities": cities}
+            "sort": sort, "q": q, "city": city, "division": division, "cities": cities, "divisions": divisions,
+            "verified": verified, "kind": kind}
 
 
 # Продавцы для sitemap — как в списке /sellers: на виду и с товарами (или свой магазин).

@@ -20,7 +20,7 @@ from urllib.parse import urlsplit
 import psycopg
 from psycopg.rows import dict_row
 
-from zakup import SITE_URL, contacts, products
+from zakup import SITE_URL, contacts, products, sellers
 from zakup.filters import OPEN_STATUSES
 
 logger = logging.getLogger(__name__)
@@ -45,7 +45,7 @@ def for_lot(conn: psycopg.Connection, lot_id: int, limit: int = LIMIT) -> list[d
     rows = conn.cursor(row_factory=dict_row).execute(
         f"""SELECT p.id, p.name, p.price AS retail, p.price_unit, p.city, p.image, p.enstru, p.available,
                    p.checked_at, s.id AS seller_id, s.name AS seller_name, s.verified AS seller_verified,
-                   s.prices_with_vat, s.regions,
+                   s.prices_with_vat, s.regions, s.phones,
                    coalesce({_TIER}, p.price) AS price,
                    p.enstru IS NOT NULL AND EXISTS (SELECT 1 FROM unnest(%(enstru)s::text[]) c
                                                     WHERE c LIKE p.enstru || '%%') AS same_code
@@ -64,6 +64,8 @@ def for_lot(conn: psycopg.Connection, lot_id: int, limit: int = LIMIT) -> list[d
         row["margin"] = (float(lot_price) - float(row["price"])) / float(lot_price) * 100 \
             if lot_price and row["price"] is not None and float(lot_price) > 0 else None
         row["count"] = count
+        # Телефоны магазина — как на его странице (подписчикам; блок на странице лота).
+        row["phone_list"] = sellers.phone_list(row.pop("phones"))
     return rows
 
 

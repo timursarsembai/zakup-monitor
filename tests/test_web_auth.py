@@ -156,3 +156,35 @@ def test_reregistration_does_not_give_second_trial(client, conn, monkeypatch):
     register()
     assert conn.execute("""SELECT trial_until < now() FROM users
                            WHERE email = '+77011112233'""").fetchone() == (True,)
+
+
+def test_session_slides_on_visit(client, conn):
+    """Заходит — срок входа снова 30 дней (и cookie), не чаще раза в сутки."""
+    _login(client)
+    conn.execute("UPDATE sessions SET expires_at = now() + interval '10 days'")
+    conn.commit()
+    response = client.get("/products")
+    assert "zakup_session=" in response.headers.get("set-cookie", "")
+    left = conn.execute("SELECT expires_at - now() FROM sessions").fetchone()[0]
+    assert left.days >= 29
+    # Только что продлили — второй раз за сутки ни базу, ни cookie не трогаем.
+    assert "zakup_session=" not in client.get("/products").headers.get("set-cookie", "")
+    # Вход администратора под пользователем не продлевается.
+    conn.execute("UPDATE sessions SET expires_at = now() + interval '1 hour', impersonated_by = user_id")
+    conn.commit()
+    client.get("/products")
+    assert conn.execute("SELECT expires_at - now() FROM sessions").fetchone()[0].days == 0
+
+
+def test_yandex_metrika_for_visitors_not_staff(client):
+    """Счётчик Метрики — посетителям; сотрудникам и на /settings — нет (Вебвизор пишет экран)."""
+    page = client.get("/products")
+    assert "mc.yandex.ru/metrika/tag.js?id=114227652" in page.text
+    assert "https://metrika.yandex.ru" in page.headers["content-security-policy"]
+    # Регистрация (телефон, код из SMS) — без записи экрана и без встраивания во фрейм.
+    register = client.get("/register")
+    assert "mc.yandex.ru" not in register.text
+    assert "frame-ancestors 'none'" in register.headers["content-security-policy"]
+    _login(client)  # owner@mail.kz — администратор
+    assert "mc.yandex.ru" not in client.get("/products").text
+    assert "mc.yandex.ru" not in client.get("/settings").text

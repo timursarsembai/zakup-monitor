@@ -99,19 +99,21 @@ def _redirect(request: Request, canonical: str) -> RedirectResponse | None:
 
 @router.get("/sellers")
 def sellers_page(request: Request, user: Viewer, q: str = "", city: str = "", category: str = "",
-                 sort: str = "products", page: int = 1):
-    """Продавцы: найденные поиском с ИИ и (этап 3) свои магазины пользователей."""
+                 sort: str = "products", page: int = 1, verified: str = "", kind: str = ""):
+    """Продавцы: найденные поиском и свои магазины пользователей; фильтр — как в каталоге."""
     page = min(max(page, 1), MAX_PAGE)
     with core.pool.connection() as conn:
-        data = sellers.listing(conn, q[:200], city[:80], category[:2] if category.isdigit() else "", sort, page)
+        data = sellers.listing(conn, q[:200], city[:80], category[:2] if category.isdigit() else "", sort, page,
+                               verified=verified == "1", kind=kind)
 
     def url(**changes) -> str:
         values = {"q": data["q"], "city": data["city"], "category": data["division"], "sort": data["sort"],
-                  "page": data["page"], **changes}
+                  "verified": "1" if data["verified"] else "", "kind": data["kind"], "page": data["page"], **changes}
         query = urlencode({k: v for k, v in values.items() if v and not (k == "page" and v == 1)})
         return "/sellers" + ("?" + query if query else "")
     return templates.TemplateResponse(request, "sellers.html", {
-        "s": data, "sorts": sellers.SORTS, "seller_path": sellers.path, "sellers_url": url})
+        "s": data, "sorts": sellers.SORTS, "kinds": sellers.KINDS, "seller_path": sellers.path,
+        "sellers_url": url})
 
 
 def _seller_page(request: Request, conn, seller: dict, user: int | None, *, q: str = "", category: str = "",

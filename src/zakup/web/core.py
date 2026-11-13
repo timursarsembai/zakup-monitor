@@ -151,6 +151,23 @@ templates.env.globals["trial_days"] = auth.TRIAL_DAYS
 # Не понравится — False: вернётся прежний фильтр целиком справа от результатов.
 DESKTOP_CHIPS = True
 templates.env.globals["desktop_chips"] = DESKTOP_CHIPS
+# Яндекс Метрика (счётчик в base.html). Не для сотрудников и не на /settings, /staff: Вебвизор
+# записывает экран, а там — выданные пароли и данные клиентов.
+METRIKA_ID = 114227652
+# Где счётчика нет: личные данные на экране — вход, регистрация (телефон, код из SMS), пароли,
+# кабинет и магазин, баланс, подписки; сотрудники и вход под пользователем — тоже без него.
+METRIKA_SKIP = ("/settings", "/staff", "/login", "/register", "/forgot", "/reset", "/my", "/balance",
+                "/subscriptions", "/logout")
+
+
+def metrika_on(request: Request) -> bool:
+    state = request.state
+    return bool(METRIKA_ID and not getattr(state, "staff", False) and not getattr(state, "impersonator_id", None)
+                and not request.url.path.startswith(METRIKA_SKIP))
+
+
+templates.env.globals["metrika_id"] = METRIKA_ID
+templates.env.globals["metrika_on"] = metrika_on
 
 
 def _structured_demand(*, name, description, url, end, amount, count, unit, customer) -> dict:
@@ -327,8 +344,13 @@ class LoginRequired(Exception):
 
 def optional_user(request: Request) -> int | None:
     """Кто смотрит: пользователь или гость (None). Открытые страницы доступны всем."""
+    token = request.cookies.get(SESSION_COOKIE)
     with pool.connection() as conn:
-        user = auth.user_by_session(conn, request.cookies.get(SESSION_COOKIE))
+        user = auth.user_by_session(conn, token)
+        # Скользящий срок входа: cookie обновит middleware.session_cookie.
+        renewed = bool(user) and auth.renew_session(conn, token)
+    # Повторный вызов в том же запросе уже не продлит — отметку не сбрасываем.
+    request.state.session_renewed = getattr(request.state, "session_renewed", False) or renewed
     request.state.email = user[1] if user else ""
     request.state.role = user[2] if user else ""
     request.state.user_id = user[0] if user else None
