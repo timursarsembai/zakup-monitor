@@ -62,7 +62,8 @@ wait_healthy() {
 }
 # Том фото товаров (zakup.photos): сайт пишет от nobody. Новый том берёт владельца из образа,
 # но том, созданный иначе (восстановлен из копии, вручную), остался бы root — загрузка падала бы.
-docker compose run --rm --no-deps -T --user 0 --cap-add CHOWN --entrypoint chown web 65534:65534 /data/media
+# Через archive (тот же том): у копий сайта постоянный адрес в сети, разовый run его не получит.
+docker compose run --rm --no-deps -T --user 0 --cap-add CHOWN --entrypoint chown archive 65534:65534 /data/media
 docker compose up -d --no-deps web-2
 wait_healthy zakup-web-2 web-2
 docker compose up -d --no-deps web
