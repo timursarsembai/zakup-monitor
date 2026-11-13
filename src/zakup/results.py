@@ -155,8 +155,17 @@ def parse_protocol(text: str) -> dict[str, dict[str, Any]]:
     return results
 
 
+class NotAFile(Exception):
+    """Портал вместо файла отдал веб-страницу (ночной отчёт 2026-11-14) — это временно,
+    как сетевой сбой: файл не битый, повторим позже."""
+
+
 def _save_protocol(conn: psycopg.Connection, detail: dict, url: str) -> int:
-    parsed = parse_protocol(protocol_text(spec.download(url)))
+    data = spec.download(url)
+    head = data[:64].lstrip(b"\xef\xbb\xbf \t\r\n")
+    if not head.startswith(b"%PDF") and head.startswith(b"<"):  # протокол — всегда PDF
+        raise NotAFile("портал отдал веб-страницу вместо файла")
+    parsed = parse_protocol(protocol_text(data))
     lot_ids = {
         lot.get("lotNumber"): int(lot["id"]) for lot in detail.get("Lots") or [] if lot.get("id")
     }
@@ -222,10 +231,10 @@ def parse_announcement(conn: psycopg.Connection, announcement_id: int, detail: d
     saved = 0
     try:
         saved = _save_protocol(conn, detail, url)
-    except (spec.SpecError, httpx.HTTPError) as error:
-        # Сетевой сбой — попробуем в следующий раз; битый файл — не будем.
+    except (spec.SpecError, httpx.HTTPError, NotAFile) as error:
+        # Сетевой сбой или страница вместо файла — попробуем в следующий раз; битый файл — не будем.
         logger.warning("protocol of %s not parsed: %s", announcement_id, error)
-        if isinstance(error, httpx.HTTPError):
+        if isinstance(error, (httpx.HTTPError, NotAFile)):
             conn.execute("""UPDATE announcements SET protocol_attempts = protocol_attempts + 1,
                                 protocol_tried_at = now() WHERE id = %s""", (announcement_id,))
             return

@@ -161,7 +161,7 @@ def test_old_and_lotless_skipped(conn):
     old = _row(41000002, 600, published=NOW - timedelta(days=2))
     platform = Platform([_row(41000003, 700), old], cards={41000003: _card(41000003, 700)}, lots={41000003: []})
     res = reserve.Reserve(platform)
-    assert res.run(conn, NOW) == {"listed": 1, "saved": 0, "plans": 0, "links": 0, "specs": 0, "failed": 0}
+    assert res.run(conn, NOW) == {"listed": 1, "saved": 0, "backlog": 0, "plans": 0, "links": 0, "specs": 0, "failed": 0}
     assert conn.execute("SELECT count(*) FROM announcements").fetchone()[0] == 0
     # Лотов на платформе нет — не спрашиваем снова до RETRY.
     platform.calls.clear()
@@ -294,3 +294,54 @@ def test_files_odd_entries_and_single_lot_spec():
     assert spec.spec_file(detail["Lots"][0]) == SPEC_URL and detail["Files"] == []
     # Пустой ответ (бывает и при сбое) — без отметки, добор спросит снова.
     assert "platformFiles" not in reserve.to_detail(_card(41074043, 17946359), _lots(43878609), NOW, groups=[])
+
+
+def test_backlog_fills_lots_of_ows_announcements_without_them(conn):
+    """Список лотов OWS застыл (12–13.11.2026): объявления есть, лотов нет — добираем с
+    платформы по номеру, даже когда верх списка платформы уже весь у нас."""
+    published = (NOW - timedelta(hours=5)).isoformat()
+    for aid in (17950444, 601):
+        db.upsert_announcement(conn, {"id": aid, "number_anno": f"{aid}-1", "name_ru": "Товары",
+                                      "publish_date": published, "end_date": "2099-01-01 09:00:00"})
+    conn.commit()
+    platform = Platform([_row(41083105, 17950444, system=1, published=NOW - timedelta(hours=5))],
+                        cards={41083105: _card(41083105, 17950444)}, lots={41083105: _lots(43900001)})
+    res = reserve.Reserve(platform)
+    res._fresh = lambda conn, now: []
+    stats = res.run(conn, NOW)
+    assert stats["backlog"] == 1 and stats["failed"] == 0
+    row = conn.execute("SELECT lots_ready, platform_id, name_ru FROM announcements WHERE id = 17950444").fetchone()
+    assert row == (True, 41083105, "Товары")  # строку OWS не переписали, лоты — с платформы
+    assert conn.execute("SELECT trd_buy_id FROM lots WHERE id = 43900001").fetchone() == (17950444,)
+    # 601 на платформе нет — отметка в базе, сутки не ищем (и после перезапуска); с лотами — не берём.
+    assert conn.execute("SELECT platform_checked_at IS NOT NULL FROM announcements WHERE id = 601").fetchone()[0]
+    platform.calls.clear()
+    assert reserve.Reserve(platform).run(conn, NOW + timedelta(minutes=2))["backlog"] == 0
+    assert not any(params.get("announcement_number") for _, params in platform.calls)
+
+
+def test_backlog_keeps_ows_detail_and_adds_platform_lots(conn):
+    """Подробности OWS уже есть (документы, тип торгов), лотов в них нет — дописываем только лоты."""
+    published = (NOW - timedelta(hours=5)).isoformat()
+    db.upsert_announcement(conn, {"id": 17950444, "number_anno": "17950444-1", "name_ru": "Товары",
+                                  "publish_date": published, "end_date": "2099-01-01 09:00:00"})
+    details.save(conn, {"id": 17950444, "nameKz": "x", "refTypeTradeId": 1, "lastUpdateDate": "2026-11-13 10:00:00",
+                        "Files": [{"originalName": "Документация.pdf", "filePath": "https://ows.goszakup.gov.kz/f/1"}],
+                        "Lots": []})
+    conn.commit()
+    platform = Platform([_row(41083105, 17950444, system=1, published=NOW - timedelta(hours=5))],
+                        cards={41083105: _card(41083105, 17950444)}, lots={41083105: _lots(43900001)})
+    res = reserve.Reserve(platform)
+    res._fresh = lambda conn, now: []
+    assert res.run(conn, NOW)["backlog"] == 1
+    detail, ready, trade = conn.execute(
+        "SELECT detail, lots_ready, type_trade_id FROM announcements WHERE id = 17950444").fetchone()
+    assert ready and detail["Files"][0]["originalName"] == "Документация.pdf" and trade == 1
+    assert detail["Lots"][0]["id"] == 43900001 and detail["source"] == "platform"
+    assert detail["finYear"] == [2026]  # у OWS без лотов годов нет — из пунктов плана платформы
+    # OWS всё ещё без лотов, но с новым документом (протокол): документ берём, лоты платформы остаются.
+    details.save(conn, {"id": 17950444, "nameKz": "x", "refTypeTradeId": 1,
+                        "Files": [{"originalName": "Протокол.pdf", "filePath": "https://ows.goszakup.gov.kz/f/2"}],
+                        "Lots": []})
+    detail, ready = conn.execute("SELECT detail, lots_ready FROM announcements WHERE id = 17950444").fetchone()
+    assert ready and detail["Lots"][0]["id"] == 43900001 and detail["Files"][0]["originalName"] == "Протокол.pdf"

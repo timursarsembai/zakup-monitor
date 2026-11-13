@@ -146,11 +146,14 @@ def _keep_plans(conn: psycopg.Connection, item: dict[str, Any]) -> bool:
 def save(conn: psycopg.Connection, item: dict[str, Any]) -> None:
     if not item.get("source") and not any(not lot.get("isDeleted") for lot in item.get("Lots") or []):
         # Лоты уже взяты с платформы (zakup.reserve), а OWS их ещё не отдаёт (запаздывает на
-        # 10–20 минут) — не затираем; refresh спросит OWS снова на следующем круге.
-        if conn.execute("SELECT 1 FROM announcements WHERE id = %s AND lots_ready AND detail ? 'source'",
-                        (int(item["id"]),)).fetchone():
-            conn.execute("UPDATE announcements SET details_fetched_at = now() WHERE id = %s", (int(item["id"]),))
-            return
+        # 10–20 минут, а то и сутками — 12–13.11.2026): лоты оставляем прежние, остальное
+        # (документы, статус, протокол) — от OWS. Пометка source остаётся: refresh спросит
+        # OWS снова на следующем круге.
+        stored = conn.execute("SELECT detail FROM announcements WHERE id = %s AND lots_ready AND detail ? 'source'",
+                              (int(item["id"]),)).fetchone()
+        if stored:
+            keep = {k: stored[0][k] for k in ("Lots", "source", "platformFiles") if k in stored[0]}
+            item = {**item, **keep}
     plans_missing = _keep_plans(conn, item)
     fields, lots = parse(item)
     conn.execute(

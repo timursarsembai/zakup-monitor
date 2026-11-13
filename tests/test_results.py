@@ -170,3 +170,13 @@ def test_single_source_protocol():
     parsed = results.parse_protocol(SINGLE)["100-ОИ2"]
     assert parsed["outcome"] == "winner" and parsed["winner_bin"] == "780316401707"
     assert parsed["offers"][0]["total"] == "12000" and parsed["winner_name"] == "ИП Масалимова"
+
+
+def test_protocol_web_page_instead_of_file_retried_later(conn, monkeypatch):
+    _announcement(conn)
+    conn.execute("UPDATE announcements SET status_id = 350, system = 1 WHERE id = 7")
+    conn.commit()
+    monkeypatch.setattr(results.spec, "download", lambda url: b"\xef\xbb\xbf<!-- busy --><html>...</html>")
+    assert results.parse_pending(conn, 10) == 1
+    row = conn.execute("SELECT protocol_url, protocol_attempts FROM announcements WHERE id = 7").fetchone()
+    assert row == (None, 1)  # не «битый файл навсегда», а повтор после паузы

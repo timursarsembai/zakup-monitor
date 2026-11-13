@@ -14,6 +14,11 @@
    как у OWS (по ним разбор спецификаций берёт файл). Объявлениям с платформы, сохранённым без
    документов, добираем их отдельно (_files), не больше FILES_PER_RUN за проход.
 
+4. Добор лотов (_backlog): объявления из OWS, у которых лотов так и нет (список лотов OWS
+   застывает — так было 12–13.11.2026 больше суток), — ищем на платформе по номеру и берём
+   карточку с лотами, как в п. 1. Список платформы для этого не листаем: пропуски бывают в
+   середине дня, а п. 1 останавливается на верхних страницах, где всё уже есть.
+
 Чего на платформе нет: протоколов, заявок — их по-прежнему даёт только OWS.
 Статусы уже известных объявлений обновляет REST OWS (здесь не следим).
 """
@@ -42,6 +47,10 @@ PLANS_PER_RUN = 50
 LINKS_PER_RUN = 30  # добор номеров платформы открытым объявлениям (ссылка на портал)
 LINKS_SECONDS = 90  # …и не дольше стольких секунд сверх основного прохода
 FILES_PER_RUN = 30  # добор документов объявлениям с платформы, сохранённым без них
+BACKLOG_PER_RUN = 60  # добор лотов объявлениям OWS без лотов
+BACKLOG_SECONDS = 120  # …и не дольше стольких секунд за проход
+BACKLOG_AFTER = timedelta(minutes=20)  # моложе — дело п. 1 (свежие) и OWS
+BACKLOG_AGE = timedelta(days=7)  # старше — не ищем (в OWS лоты давно должны быть)
 PLANS_AGE = timedelta(days=3)  # пункты плана ищем у опубликованных не раньше
 # Неудачная попытка (на платформе нет лотов, ошибка) — не повторяем столько.
 RETRY = timedelta(minutes=30)
@@ -222,6 +231,17 @@ def save(conn: psycopg.Connection, card: dict[str, Any], lots: list[dict[str, An
         return False  # подробности OWS уже пришли — они полнее
     if row is None:  # строку REST OWS (если уже есть) не переписываем — она главная
         db.upsert_announcement(conn, _rest(detail))
+    _upsert_lots(conn, detail)
+    details.save(conn, detail)
+    portal.remember(conn, [card])
+    # Подробности OWS (файлы, протоколы) — на ближайшем круге: details.refresh берёт
+    # непрочитанные первыми. details_update_date пуст — его пункты плана не затрут пустыми.
+    conn.execute("UPDATE announcements SET details_fetched_at = NULL, details_update_date = NULL WHERE id = %s",
+                 (detail["id"],))
+    return True
+
+
+def _upsert_lots(conn: psycopg.Connection, detail: dict[str, Any]) -> None:
     for lot in detail["Lots"]:
         db.upsert_lot(conn, {"id": lot["id"], "trd_buy_id": detail["id"], "trd_buy_number_anno": detail["numberAnno"],
                              "lot_number": lot["lotNumber"], "name_ru": lot["nameRu"], "name_kz": lot["nameKz"],
@@ -229,12 +249,37 @@ def save(conn: psycopg.Connection, card: dict[str, Any], lots: list[dict[str, An
                              "ref_lot_status_id": lot["refLotStatusId"], "ref_trade_methods_id": lot["refTradeMethodsId"],
                              "customer_bin": lot["customerBin"], "customer_name_ru": lot["customerNameRu"],
                              "source": "platform"}, overwrite=False)
+
+
+def fill_lots(conn: psycopg.Connection, card: dict[str, Any], lots: list[dict[str, Any]],
+              groups: list[dict[str, Any]] | None = None) -> bool:
+    """Добор лотов (п. 4): лоты платформы — в подробности OWS, где лотов нет. Остальное в них
+    (документы, тип торгов, даты) — от OWS, не трогаем. Подробностей OWS нет — как save.
+    False — лотов нет ни там, ни там или лоты уже есть."""
+    platform = to_detail(card, lots, groups=groups)
+    if not any(not lot["isDeleted"] for lot in platform["Lots"]):
+        return False
+    row = conn.execute("SELECT detail, lots_ready FROM announcements WHERE id = %s FOR UPDATE",
+                       (platform["id"],)).fetchone()
+    if row is None or not row[0]:
+        return save(conn, card, lots, groups)
+    detail, ready = row
+    if ready:
+        return False  # лоты уже есть (OWS успел) — его подробности полнее
+    # source — лоты платформы не затирать пустыми из OWS, пока его список лотов стоит
+    # (details.save); platformFiles — техспецификации лотов взяты (документы не отдались —
+    # не ставим: доберёт _files, документы объявления от OWS он не тронет).
+    detail.update(Lots=platform["Lots"], source="platform")
+    if groups is not None:
+        detail["platformFiles"] = True
+    if not detail.get("finYear"):
+        detail["finYear"] = platform["finYear"]  # у OWS без лотов годов нет — из пунктов плана
+    _upsert_lots(conn, platform)  # номер объявления и лоты — из карточки платформы
     details.save(conn, detail)
     portal.remember(conn, [card])
-    # Подробности OWS (файлы, протоколы) — на ближайшем круге: details.refresh берёт
-    # непрочитанные первыми. details_update_date пуст — его пункты плана не затрут пустыми.
+    # Как в save: OWS перечитаем на ближайшем круге, а его пустые пункты плана не затрут наши.
     conn.execute("UPDATE announcements SET details_fetched_at = NULL, details_update_date = NULL WHERE id = %s",
-                 (detail["id"],))
+                 (platform["id"],))
     return True
 
 
@@ -267,7 +312,10 @@ def fill_files(conn: psycopg.Connection, announcement_id: int, groups: list[dict
     if not row or not row[0] or row[0].get("source") != "platform" or row[0].get("platformFiles"):
         return 0  # пока ждали — пришли подробности OWS (там свои файлы) или уже дописали
     detail, fetched_at, update_date = row
+    own = detail.get("Files") if detail.get("platformId") is None else None  # документы OWS (добор лотов)
     add_files(detail, groups)
+    if own:
+        detail["Files"] = own
     if not detail.get("platformFiles"):
         return 0  # документов нет — нечего дописывать
     details.save(conn, detail)
@@ -331,9 +379,10 @@ class Reserve:
 
     def run(self, conn: psycopg.Connection, now: datetime | None = None,
             limit: int = PER_RUN, plans_limit: int = PLANS_PER_RUN,
-            links_limit: int = LINKS_PER_RUN, files_limit: int = FILES_PER_RUN) -> dict[str, int]:
+            links_limit: int = LINKS_PER_RUN, files_limit: int = FILES_PER_RUN,
+            backlog_limit: int = BACKLOG_PER_RUN) -> dict[str, int]:
         now = now or datetime.now(UTC)
-        stats = {"listed": 0, "saved": 0, "plans": 0, "links": 0, "specs": 0, "failed": 0}
+        stats = {"listed": 0, "saved": 0, "backlog": 0, "plans": 0, "links": 0, "specs": 0, "failed": 0}
         todo = self._fresh(conn, now)
         stats["listed"] = len(todo)
         deadline = time.monotonic() + PASS_SECONDS
@@ -357,13 +406,59 @@ class Reserve:
             else:
                 self.tried[aid] = now
                 stats["failed"] += result is None  # None — данные не сохранились (ошибка)
+        stats["backlog"] = self._backlog(conn, now, backlog_limit, stats, time.monotonic() + BACKLOG_SECONDS)
         stats["plans"] = self._plans(conn, now, plans_limit, stats)
-        stats["links"] = self._links(conn, now, links_limit, stats, deadline + LINKS_SECONDS)
+        # Ссылкам и документам — своё время, даже если свежие и добор лотов заняли всё своё.
+        extra = max(deadline, time.monotonic()) + LINKS_SECONDS
+        stats["links"] = self._links(conn, now, links_limit, stats, extra)
         # Добор документов — в то же время, что и ссылки: проход не должен затягиваться.
-        stats["specs"] = self._files(conn, now, files_limit, stats, deadline + LINKS_SECONDS)
+        stats["specs"] = self._files(conn, now, files_limit, stats, extra)
         # Память попыток — только за RETRY.
         self.tried = {k: v for k, v in self.tried.items() if v > now - RETRY}
         return stats
+
+    def _backlog(self, conn: psycopg.Connection, now: datetime, limit: int, stats: dict[str, int],
+                 deadline: float) -> int:
+        """Открытые объявления OWS без лотов (п. 4 описания модуля): новые первыми. Номера
+        платформы нет — ищем по номеру объявления. Не нашли или лотов нет — не раньше RETRY."""
+        tried = [k for k, v in self.tried.items() if k > 0 and v > now - RETRY]
+        # Не нашли на платформе или лотов нет и там — отметка в базе (как у _links), снова
+        # не раньше суток (и после перезапуска службы).
+        rows = conn.execute(
+            """SELECT id, number_anno, platform_id FROM announcements
+               WHERE NOT lots_ready AND system = 1 AND end_date > %s
+                 AND publish_date BETWEEN %s AND %s AND NOT id = ANY(%s)
+                 AND (platform_id IS NOT NULL OR number_anno IS NOT NULL)
+                 AND (platform_checked_at IS NULL OR platform_checked_at < %s)
+               ORDER BY publish_date DESC LIMIT %s""",
+            (now, now - BACKLOG_AGE, now - BACKLOG_AFTER, tried, now - portal.RECHECK, limit)).fetchall()
+        conn.commit()
+        saved = 0
+        for aid, number, pid in rows:
+            if time.monotonic() > deadline:
+                break
+            self.tried[aid] = now
+            try:
+                if pid is None:
+                    found = portal.find(self.client, aid, number)
+                    if found is None:
+                        self._save(conn, aid, partial(portal.missed, conn, aid))
+                        continue
+                    self._remember(conn, [found])
+                    pid = int(found["id"])
+                card = self.client.get(f"/announcements/{pid}/")
+                lots = self._lots(pid)
+            except (PlatformError, KeyError, TypeError, ValueError) as error:
+                logger.warning("reserve backlog %s: %r", aid, error)
+                stats["failed"] += 1
+                continue
+            groups = self._groups(pid)
+            result = self._save(conn, aid, partial(fill_lots, conn, card, lots, groups))
+            if result is False:
+                self._save(conn, aid, partial(portal.missed, conn, aid))
+            saved += bool(result)
+            stats["failed"] += result is None
+        return saved
 
     def _save(self, conn: psycopg.Connection, key: int, action) -> Any:
         """Одно объявление — одна транзакция. Встречную блокировку с worker (DeadlockDetected)
