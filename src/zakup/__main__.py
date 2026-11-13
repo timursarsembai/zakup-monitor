@@ -403,6 +403,11 @@ def _sync(conn, client: Client, max_pages: int) -> int:
         incidents.failed("синхронизация", error)
         return _outage_or_raise("синхронизация", error)
     incidents.portal_ok(conn)
+    try:
+        incidents.check_lots(conn)
+    except psycopg.Error as error:  # проверка — польза сверху, проход сборщика уже удался
+        conn.rollback()
+        logging.getLogger(__name__).warning("lots check failed: %r", error)
     return 0
 
 

@@ -123,7 +123,7 @@ def _outage(conn) -> None:
     if state is None:
         state = {"since": now.isoformat(), "notified": False}
     elif not state["notified"] and now - datetime.fromisoformat(state["since"]) >= OUTAGE_NOTICE:
-        since = datetime.fromisoformat(state["since"]).astimezone(timezone(timedelta(hours=5)))
+        since = datetime.fromisoformat(state["since"]).astimezone(ALMATY)
         notify.send(f"zakup: портал goszakup не отвечает или отказывает в доступе с {since:%H:%M}. "
                     "Это на их стороне; "
                     "сборщики повторяют сами, напишу, когда портал вернётся.")
@@ -135,6 +135,45 @@ def _outage(conn) -> None:
         "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
         (json.dumps(state),),
     )
+
+
+ALMATY = timezone(timedelta(hours=5))
+# Портал отвечает, новые объявления идут, а новых лотов в OWS нет (12–13.11.2026 список лотов
+# застыл больше суток — заметили только по ночному отчёту). Признак — отметки сборщика
+# (sync_state.updated_at меняется, только когда пришли новые записи): объявления приходят,
+# а последний новый лот — давно. Резерв лоты добирает, но сбой OWS от этого не исчезает.
+# Ночью объявлений тоже нет — ложной тревоги не будет.
+LOTS_WAIT = timedelta(hours=3)
+
+
+def _hours(delta: timedelta) -> str:
+    return f"{delta.total_seconds() / 3600:.0f} ч"
+
+
+def check_lots(conn: psycopg.Connection) -> None:
+    """После прохода сборщика: не застыл ли список лотов OWS. Одно сообщение за сбой и одно —
+    когда новые лоты пошли снова (состояние — app_settings 'lots_stall')."""
+    announcements, lots = conn.execute(
+        """SELECT (SELECT updated_at FROM sync_state WHERE entity = 'announcements'),
+                  (SELECT updated_at FROM sync_state WHERE entity = 'lots')""").fetchone()
+    if announcements is None or lots is None:
+        return
+    stalled = announcements - lots >= LOTS_WAIT
+    row = conn.execute("SELECT value FROM app_settings WHERE key = 'lots_stall'").fetchone()
+    if stalled and row is None:
+        # Сначала состояние, потом сообщение: сбой записи не должен слать его каждые 2 минуты.
+        conn.execute("INSERT INTO app_settings (key, value) VALUES ('lots_stall', %s) "
+                     "ON CONFLICT (key) DO NOTHING", (json.dumps({"since": lots.isoformat()}),))
+        conn.commit()
+        notify.send(f"zakup: новые объявления приходят, а новых лотов портал не отдаёт с "
+                    f"{lots.astimezone(ALMATY):%d.%m %H:%M} (уже {_hours(announcements - lots)}). Это на их "
+                    "стороне; резерв добирает лоты с zakup.gov.kz, что там есть. Напишу, когда лоты пойдут.")
+    elif row is not None and not stalled:
+        since = datetime.fromisoformat(json.loads(row[0])["since"])
+        conn.execute("DELETE FROM app_settings WHERE key = 'lots_stall'")
+        conn.commit()
+        notify.send(f"zakup: портал снова отдаёт новые лоты (перерыв около {_hours(lots - since)}), "
+                    "сборщики догружают пропущенное.")
 
 
 def portal_ok(conn: psycopg.Connection) -> None:

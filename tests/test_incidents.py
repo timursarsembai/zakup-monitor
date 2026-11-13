@@ -131,3 +131,24 @@ def test_outage_logged_in_one_line_code_errors_raised():
     assert _outage_or_raise("синхронизация", PortalUnavailable("/v3/trd-buy: no response")) == 1
     with pytest.raises(KeyError):
         _outage_or_raise("синхронизация", KeyError("x"))
+
+
+def test_stalled_lots_reported_once_and_recovery(conn, sent):
+    def stamps(announcements_ago, lots_ago):
+        for entity, ago in (("announcements", announcements_ago), ("lots", lots_ago)):
+            conn.execute("""INSERT INTO sync_state (entity, last_id, updated_at) VALUES (%s, 1, now() - %s)
+                            ON CONFLICT (entity) DO UPDATE SET updated_at = excluded.updated_at""",
+                         (entity, ago))
+        conn.commit()
+
+    stamps(timedelta(minutes=5), timedelta(hours=1))  # обычная задержка — молчим
+    incidents.check_lots(conn)
+    assert sent == []
+    stamps(timedelta(minutes=5), timedelta(hours=26))  # объявления идут, лотов нет сутки
+    incidents.check_lots(conn)
+    incidents.check_lots(conn)  # второй раз не повторяем
+    assert len(sent) == 1 and "новых лотов портал не отдаёт" in sent[0] and "26 ч" in sent[0]
+    stamps(timedelta(minutes=5), timedelta(minutes=2))  # новые лоты пришли
+    incidents.check_lots(conn)
+    assert len(sent) == 2 and "снова отдаёт новые лоты" in sent[1]
+    assert conn.execute("SELECT 1 FROM app_settings WHERE key = 'lots_stall'").fetchone() is None
