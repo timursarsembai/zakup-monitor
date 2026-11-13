@@ -12,7 +12,8 @@ for (const [width, mobile] of [[1280, false], [390, true]]) {
   // /analytics не дождались за 30 с), а заходы проверки портили бы статистику сайта.
   await page.route(/^https:\/\/mc\.yandex\.(ru|com)\//, (route) => route.abort());
   page.on("pageerror", (error) => problems.push(`${width}px ${page.url()}: ${error.message}`));
-  for (const path of pages) await page.goto(SITE + path, { waitUntil: "networkidle" });
+  // Аналитику после перезапуска сайт считает заново (25–50 с под нагрузкой) — ждём дольше 30 с.
+  for (const path of pages) await page.goto(SITE + path, { waitUntil: "networkidle", timeout: 90_000 });
   if (!mobile && await page.evaluate(() => document.documentElement.dataset.chips === "desktop")) {
     await page.goto(SITE + "/lots", { waitUntil: "networkidle" });
     await page.click('[data-chip-open="region"]');
