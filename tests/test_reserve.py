@@ -318,6 +318,12 @@ def test_backlog_fills_lots_of_ows_announcements_without_them(conn):
     platform.calls.clear()
     assert reserve.Reserve(platform).run(conn, NOW + timedelta(minutes=2))["backlog"] == 0
     assert not any(params.get("announcement_number") for _, params in platform.calls)
+    # Через час ищем снова: платформа могла ожить.
+    conn.execute("UPDATE announcements SET platform_checked_at = now() - interval '61 minutes' WHERE id = 601")
+    conn.commit()
+    platform.calls.clear()
+    reserve.Reserve(platform).run(conn, NOW + timedelta(minutes=2))
+    assert any(params.get("announcement_number") == "601-1" for _, params in platform.calls)
 
 
 def test_backlog_keeps_ows_detail_and_adds_platform_lots(conn):

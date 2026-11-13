@@ -47,10 +47,13 @@ PLANS_PER_RUN = 50
 LINKS_PER_RUN = 30  # добор номеров платформы открытым объявлениям (ссылка на портал)
 LINKS_SECONDS = 90  # …и не дольше стольких секунд сверх основного прохода
 FILES_PER_RUN = 30  # добор документов объявлениям с платформы, сохранённым без них
-BACKLOG_PER_RUN = 60  # добор лотов объявлениям OWS без лотов
-BACKLOG_SECONDS = 120  # …и не дольше стольких секунд за проход
+BACKLOG_PER_RUN = 100  # добор лотов объявлениям OWS без лотов
+BACKLOG_SECONDS = 120  # …и не дольше стольких секунд сверх времени свежих (не занятое ими — тоже его)
 BACKLOG_AFTER = timedelta(minutes=20)  # моложе — дело п. 1 (свежие) и OWS
 BACKLOG_AGE = timedelta(days=7)  # старше — не ищем (в OWS лоты давно должны быть)
+# Не нашли на платформе — снова через час, не через сутки (как у ссылок): 13.11.2026 платформа
+# тоже застыла, а когда оживёт, лоты нужны сразу.
+BACKLOG_RECHECK = timedelta(hours=1)
 PLANS_AGE = timedelta(days=3)  # пункты плана ищем у опубликованных не раньше
 # Неудачная попытка (на платформе нет лотов, ошибка) — не повторяем столько.
 RETRY = timedelta(minutes=30)
@@ -406,7 +409,9 @@ class Reserve:
             else:
                 self.tried[aid] = now
                 stats["failed"] += result is None  # None — данные не сохранились (ошибка)
-        stats["backlog"] = self._backlog(conn, now, backlog_limit, stats, time.monotonic() + BACKLOG_SECONDS)
+        # Свежие важнее; время, которое они не заняли (ночью почти всё), — добору.
+        stats["backlog"] = self._backlog(conn, now, backlog_limit, stats,
+                                         max(deadline, time.monotonic()) + BACKLOG_SECONDS)
         stats["plans"] = self._plans(conn, now, plans_limit, stats)
         # Ссылкам и документам — своё время, даже если свежие и добор лотов заняли всё своё.
         extra = max(deadline, time.monotonic()) + LINKS_SECONDS
@@ -423,7 +428,7 @@ class Reserve:
         платформы нет — ищем по номеру объявления. Не нашли или лотов нет — не раньше RETRY."""
         tried = [k for k, v in self.tried.items() if k > 0 and v > now - RETRY]
         # Не нашли на платформе или лотов нет и там — отметка в базе (как у _links), снова
-        # не раньше суток (и после перезапуска службы).
+        # не раньше BACKLOG_RECHECK (и после перезапуска службы).
         rows = conn.execute(
             """SELECT id, number_anno, platform_id FROM announcements
                WHERE NOT lots_ready AND system = 1 AND end_date > %s
@@ -431,7 +436,7 @@ class Reserve:
                  AND (platform_id IS NOT NULL OR number_anno IS NOT NULL)
                  AND (platform_checked_at IS NULL OR platform_checked_at < %s)
                ORDER BY publish_date DESC LIMIT %s""",
-            (now, now - BACKLOG_AGE, now - BACKLOG_AFTER, tried, now - portal.RECHECK, limit)).fetchall()
+            (now, now - BACKLOG_AGE, now - BACKLOG_AFTER, tried, now - BACKLOG_RECHECK, limit)).fetchall()
         conn.commit()
         saved = 0
         for aid, number, pid in rows:
@@ -452,8 +457,9 @@ class Reserve:
                 logger.warning("reserve backlog %s: %r", aid, error)
                 stats["failed"] += 1
                 continue
-            groups = self._groups(pid)
-            result = self._save(conn, aid, partial(fill_lots, conn, card, lots, groups))
+            # Документы (техспецификации лотов) здесь не берём — их запрос самый медленный;
+            # без пометки platformFiles их доберёт _files.
+            result = self._save(conn, aid, partial(fill_lots, conn, card, lots, None))
             if result is False:
                 self._save(conn, aid, partial(portal.missed, conn, aid))
             saved += bool(result)
