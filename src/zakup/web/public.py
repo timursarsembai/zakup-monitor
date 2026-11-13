@@ -557,12 +557,19 @@ def results_export(request: Request, user: Paid):
 def analytics(request: Request, user: Viewer, background: BackgroundTasks):
     market, stale = dashboard.market_cached()
     if market is None:
-        # Холодный кэш (после перезапуска): считает один запрос, остальные ждут его.
-        with _market_lock:
+        # Холодный кэш (после перезапуска): считает один запрос, остальные ждут его —
+        # но не бесконечно: не держим потоки сайта, если расчёт затянулся или упал.
+        if not _market_lock.acquire(timeout=MARKET_WAIT_SECONDS):
+            return _market_busy()
+        try:
             market, _ = dashboard.market_cached()
             if market is None:
-                with core.pool.connection() as conn:
-                    market = dashboard.market(conn)
+                market = _compute_market()
+        except psycopg.Error:
+            core.logger.exception("analytics: market computation failed")
+            return _market_busy()
+        finally:
+            _market_lock.release()
     elif stale and not _market_lock.locked():
         # Показываем прежние цифры сразу, а пересчёт — после ответа, один за раз.
         background.add_task(_recount_market)
@@ -808,14 +815,32 @@ def lot_page(request: Request, user: Viewer, lot_id: int, background: Background
 
 
 _market_lock = threading.Lock()
+# Пул сайта ограничивает запрос 15 с, а итоги и спрос на холодной базе (после перезапуска)
+# считаются до 30 с на запрос. Аналитика — на своём соединении с пределом побольше:
+# не занимает пул страниц и не держит долгую транзакцию (autocommit).
+MARKET_TIMEOUT_MS = 90_000
+MARKET_WAIT_SECONDS = 60
+
+
+def _market_busy() -> Response:
+    text = i18n.gettext("Аналитика пересчитывается — обновите страницу через минуту.")
+    return Response(f"<!doctype html><meta charset=utf-8><title>Tenderim</title><p>{text}</p>",
+                    status_code=503, media_type="text/html", headers={"Retry-After": "60"})
+
+
+def _compute_market() -> dict[str, Any]:
+    with psycopg.connect(core.pool.conninfo, autocommit=True, connect_timeout=5,
+                         options=f"-c statement_timeout={MARKET_TIMEOUT_MS}") as conn:
+        return dashboard.market(conn)
 
 
 def _recount_market() -> None:
     if not _market_lock.acquire(blocking=False):
         return
     try:
-        with core.pool.connection() as conn:
-            dashboard.market(conn)
+        _compute_market()
+    except psycopg.Error:
+        core.logger.exception("analytics: background market computation failed")
     finally:
         _market_lock.release()
 

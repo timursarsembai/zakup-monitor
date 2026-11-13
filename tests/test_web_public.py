@@ -767,3 +767,37 @@ def test_lot_card_unit_price_without_plans(client, conn):
                                             "Plans": [{"price": 1000}, {"price": 5000}]}]})
     conn.commit()
     assert "≈" not in client.get("/lots/6001").text.split("lot-sum")[1][:300]
+
+
+def test_market_counted_on_own_connection_with_longer_timeout(client, monkeypatch):
+    """Аналитика — не на пуле сайта (там 15 с), а на своём соединении: и на холодной
+    странице, и в фоновом пересчёте."""
+    from zakup import dashboard
+    from zakup.web import core, public
+
+    seen = []
+    real = dashboard._competition
+
+    def spy(c, now):
+        seen.append((c.execute("SHOW statement_timeout").fetchone()[0], c.autocommit))
+        return real(c, now)
+
+    def no_pool():
+        raise AssertionError("analytics must not use the web pool")
+
+    monkeypatch.setattr(dashboard, "_competition", spy)
+    assert client.get("/analytics").status_code == 200
+    dashboard._market_cache = dashboard._slow_cache = None
+    monkeypatch.setattr(core.pool, "connection", no_pool)
+    public._recount_market()
+    assert seen == [("90s", True), ("90s", True)]
+
+
+def test_market_cold_page_does_not_wait_forever(client, monkeypatch):
+    from zakup.web import public
+
+    monkeypatch.setattr(public, "MARKET_WAIT_SECONDS", 0.01)
+    with public._market_lock:
+        page = client.get("/analytics")
+    assert page.status_code == 503 and page.headers["retry-after"] == "60"
+    assert "обновите страницу через минуту" in page.text
