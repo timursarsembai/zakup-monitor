@@ -195,6 +195,7 @@ def test_pagination_and_per_page(client, conn):
 
 def test_market_analytics_page(client, conn):
     _announcement_with_lots(conn)
+    client.get("/analytics")  # первый расчёт — в фоне
     page = client.get("/analytics")  # без входа: аналитика открыта
     assert page.status_code == 200
     for text in ("Обзор рынка", "Новые закупки", "По дням недели", "Регионы", "Способы закупки",
@@ -670,6 +671,7 @@ def test_results_page_filters_summary_and_paid_export(client, conn):
 
 
 def test_analytics_shows_results_by_category(client, conn):
+    client.get("/analytics")  # первый расчёт — в фоне
     page = client.get("/analytics")
     assert page.status_code == 200 and "Снижение цены и конкуренция по категориям" in page.text
 
@@ -786,18 +788,63 @@ def test_market_counted_on_own_connection_with_longer_timeout(client, monkeypatc
         raise AssertionError("analytics must not use the web pool")
 
     monkeypatch.setattr(dashboard, "_competition", spy)
-    assert client.get("/analytics").status_code == 200
+    client.get("/analytics")  # пересчёт после ответа — фоновой задачей
+    assert seen == [("90s", True)]
     dashboard._market_cache = dashboard._slow_cache = None
     monkeypatch.setattr(core.pool, "connection", no_pool)
     public._recount_market()
     assert seen == [("90s", True), ("90s", True)]
 
 
-def test_market_cold_page_does_not_wait_forever(client, monkeypatch):
+def test_market_cold_page_never_waits(client, monkeypatch):
+    """Первый расчёт (снимка нет): посетитель сразу получает «готовится», расчёт — в фоне.
+    После перезапуска (кэш процесса пуст) — сразу последний снимок из базы."""
+    from datetime import date
+    from decimal import Decimal
+
+    from zakup import dashboard
     from zakup.web import public
 
-    monkeypatch.setattr(public, "MARKET_WAIT_SECONDS", 0.01)
-    with public._market_lock:
-        page = client.get("/analytics")
-    assert page.status_code == 503 and page.headers["retry-after"] == "60"
-    assert "обновите страницу через минуту" in page.text
+    first = client.get("/analytics")
+    assert first.status_code == 503 and first.headers["retry-after"] == "30"
+    assert "обновится сама" in first.text and "http-equiv=refresh" in first.text
+    assert dashboard.market_cached()[0] is not None  # фоновая задача посчитала
+    computed_at = dashboard.market_cached()[0]["computed_at"]
+
+    dashboard._market_cache = dashboard._slow_cache = None  # «перезапуск»
+    recounts = []
+    monkeypatch.setattr(public, "_recount_market", lambda: recounts.append(1))  # в фоне, не в ответе
+    page = client.get("/analytics")
+    assert page.status_code == 200 and "Обзор рынка" in page.text
+    assert recounts == [1] and dashboard.market_cached()[1]  # снимок устарел — пересчёт в фоне
+    assert dashboard.market_cached()[0]["computed_at"] == computed_at
+
+    # Снимок другой версии кода не годится: «готовится», а не сломанная страница.
+    dashboard._market_cache = None
+    monkeypatch.setattr(dashboard, "SNAPSHOT_VERSION", "other")
+    assert client.get("/analytics").status_code == 503
+    # Снимок той же версии, но шаблон его не понял — тоже «готовится», а не 500.
+    monkeypatch.setattr(dashboard, "_market_cache", (0.0, {"computed_at": computed_at}))
+    assert client.get("/analytics").status_code == 503
+
+    data = {"a": [(date(2026, 1, 2), Decimal("1.50"), 3, None, "x")], "b": {"c": 1.5}}
+    assert dashboard._decode(dashboard._encode(data)) == {"a": [[date(2026, 1, 2), Decimal("1.50"), 3, None, "x"]],
+                                                          "b": {"c": 1.5}}
+
+
+def test_market_failed_recount_waits_before_retry(client, monkeypatch):
+    import psycopg
+
+    from zakup.web import public
+
+    calls = []
+
+    def fail():
+        calls.append(1)
+        raise psycopg.OperationalError("cold")
+
+    monkeypatch.setattr(public, "_compute_market", fail)
+    monkeypatch.setattr(public, "_market_retry_at", 0.0)
+    client.get("/analytics")
+    client.get("/analytics")
+    assert calls == [1]

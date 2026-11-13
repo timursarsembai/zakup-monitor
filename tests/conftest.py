@@ -51,8 +51,10 @@ def conn(_schema):
 def _fresh_market():
     """Кэши «Анализа рынка» живут в модуле: каждый тест считает по своим данным."""
     from zakup import dashboard
+    from zakup.web import public
 
     dashboard._market_cache = dashboard._slow_cache = None
+    public._market_retry_at = 0.0
 
 
 @pytest.fixture(autouse=True)

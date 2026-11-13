@@ -6,8 +6,13 @@
 десятки секунд, когда таблицы не в памяти).
 """
 
+import hashlib
+import json
+import logging
 import time
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
+from importlib.resources import files
 from typing import Any
 
 import psycopg
@@ -53,6 +58,73 @@ def market(conn: psycopg.Connection, now: datetime | None = None) -> dict[str, A
                                     "(SELECT max(lots_ready_at) FROM announcements "
                                     "WHERE lots_ready_at < publish_date + interval '1 day'))")[0]
     _market_cache = (time.monotonic() + MARKET_TTL, data)
+    return data
+
+
+# Последний расчёт хранится и в базе: после перезапуска сайт сразу показывает его
+# (и пересчитывает в фоне), а не заставляет посетителя ждать десятки секунд.
+SNAPSHOT_KEY = "market_snapshot"
+# Снимок прошлой версии (другие цифры или их порядок) шаблон мог бы не понять:
+# годится только снимок того же кода расчёта и того же шаблона.
+SNAPSHOT_VERSION = hashlib.sha1(b"".join(
+    files("zakup").joinpath(name).read_bytes() for name in ("dashboard.py", "templates/dashboard.html")
+)).hexdigest()[:12]
+
+
+def _encode(value: Any) -> Any:
+    if isinstance(value, datetime):
+        return {"$dt": value.isoformat()}
+    if isinstance(value, date):
+        return {"$d": value.isoformat()}
+    if isinstance(value, Decimal):
+        return {"$n": str(value)}
+    if isinstance(value, (list, tuple)):
+        return [_encode(v) for v in value]
+    if isinstance(value, dict):
+        return {str(k): _encode(v) for k, v in value.items()}
+    return value
+
+
+def _decode(value: Any) -> Any:
+    if isinstance(value, list):
+        return [_decode(v) for v in value]
+    if isinstance(value, dict):
+        if value.keys() == {"$dt"}:
+            return datetime.fromisoformat(value["$dt"])
+        if value.keys() == {"$d"}:
+            return date.fromisoformat(value["$d"])
+        if value.keys() == {"$n"}:
+            return Decimal(value["$n"])
+        return {k: _decode(v) for k, v in value.items()}
+    return value
+
+
+def save_snapshot(conn: psycopg.Connection, data: dict[str, Any]) -> None:
+    try:
+        with conn.transaction():
+            conn.execute("""INSERT INTO app_settings (key, value) VALUES (%s, %s)
+                            ON CONFLICT (key) DO UPDATE SET value = excluded.value""",
+                         (SNAPSHOT_KEY, json.dumps({"version": SNAPSHOT_VERSION, "data": _encode(data)})))
+    except (psycopg.Error, TypeError, ValueError):
+        # Снимок — запасной вариант: без него страница всё равно работает.
+        logging.getLogger(__name__).exception("analytics: snapshot not saved")
+
+
+def load_snapshot(conn: psycopg.Connection) -> dict[str, Any] | None:
+    """Последний сохранённый расчёт в кэш процесса как устаревший (чтобы пересчитать
+    в фоне); None — снимка нет, он от другой версии или не читается."""
+    global _market_cache
+    row = conn.execute("SELECT value FROM app_settings WHERE key = %s", (SNAPSHOT_KEY,)).fetchone()
+    try:
+        stored = json.loads(row[0]) if row else None
+        data = _decode(stored["data"]) if stored.get("version") == SNAPSHOT_VERSION else None
+    except (ValueError, TypeError, KeyError, AttributeError):
+        data = None
+    if not isinstance(data, dict) or "computed_at" not in data:
+        return None
+    if _market_cache is not None:  # пока читали, фоновый пересчёт успел — его цифры свежее
+        return _market_cache[1]
+    _market_cache = (0.0, data)  # уже устаревший: пересчитать в фоне
     return data
 
 
