@@ -2,7 +2,10 @@
 
 from datetime import UTC, datetime, timedelta
 
-from zakup import db, details, reserve
+import pytest
+
+from zakup import db, details, reserve, spec
+from zakup.skk import PlatformError
 
 NOW = datetime.now(UTC).replace(microsecond=0)
 ORG = "100240023650"
@@ -47,9 +50,27 @@ def _lots(lot_ext, place=None):
                              "delivery_address": {"code": place, "full_name_ru": "Алматинская обл."} if place else None}]}]
 
 
+FAIL = object()  # general-files не отдаётся
+SPEC_URL = "https://v3bl.goszakup.gov.kz/files/download_file/319178621/229284353/"
+
+
+def _groups(lot_ext):
+    """Ответ general-files: техспецификация лота и общий проект договора."""
+    return [{"id": 1, "group": {"name": "Проект договора об электронных закупках", "egz_code": "101"},
+             "files": [{"id": 193026109, "lot": None,
+                        "file": {"file_url": "https://v3bl.goszakup.gov.kz/files/download_file/1/2/",
+                                 "filename": "contract_project_1.pdf", "external_id": "1"}}]},
+            {"id": 2, "group": {"name": "Техническая спецификация", "egz_code": "125"},
+             "files": [{"id": 193026110, "lot": {"external_id": lot_ext, "lot_number": "88569522-ЗЦП1"},
+                        "file": {"file_url": SPEC_URL, "filename": f"techspec_1_{lot_ext}.pdf"}},
+                       {"id": 193026111, "lot": None, "file": {"file_url": "javascript:alert(1)"}}]},
+            {"id": 3, "group": {"name": "Обеспечение заявки"}, "files": None}]
+
+
 class Platform:
-    def __init__(self, rows, cards=None, lots=None):
+    def __init__(self, rows, cards=None, lots=None, files=None):
         self.rows, self.cards, self.lots, self.calls = rows, cards or {}, lots or {}, []
+        self.files = files or {}
 
     def get(self, path, params=None):
         self.calls.append((path, dict(params or {})))
@@ -61,6 +82,10 @@ class Platform:
             rows = [r for r in self.rows if r["system_id"] == params["system_id"]]
             return {"results": rows[params["offset"]:params["offset"] + params["limit"]], "next": None}
         pid = int(path.split("/")[2])
+        if path.endswith("/general-files/"):
+            if self.files.get(pid) is FAIL:
+                raise PlatformError("HTTP 502")
+            return self.files.get(pid, [])
         return self.lots[pid] if path.endswith("/lots/") else self.cards[pid]
 
 
@@ -97,10 +122,10 @@ def test_fresh_announcement_saved_before_ows_and_ows_completes_it(conn):
     lot = conn.execute("SELECT trd_buy_id, price, unit_name, kato, customer_bin FROM lots WHERE id = 43878609").fetchone()
     assert lot[0] == 17946359 and float(lot[1]) == 3000 and lot[2] == "Штука" and lot[3] == ["194020100"]
     assert lot[4] == ORG
-    # Второй проход: уже с лотами — ни карточек, ни лотов.
+    # Второй проход: уже с лотами — ни карточек, ни лотов (документов не нашлось — их спросим снова).
     platform.calls.clear()
     assert reserve.Reserve(platform).run(conn, NOW)["saved"] == 0
-    assert all(path == "/announcements/" for path, _ in platform.calls)
+    assert all(path == "/announcements/" or path.endswith("/general-files/") for path, _ in platform.calls)
 
     # OWS запаздывает: объявление уже есть, лотов ещё нет — лоты платформы не затираем.
     class Early:
@@ -136,7 +161,7 @@ def test_old_and_lotless_skipped(conn):
     old = _row(41000002, 600, published=NOW - timedelta(days=2))
     platform = Platform([_row(41000003, 700), old], cards={41000003: _card(41000003, 700)}, lots={41000003: []})
     res = reserve.Reserve(platform)
-    assert res.run(conn, NOW) == {"listed": 1, "saved": 0, "plans": 0, "links": 0, "failed": 0}
+    assert res.run(conn, NOW) == {"listed": 1, "saved": 0, "plans": 0, "links": 0, "specs": 0, "failed": 0}
     assert conn.execute("SELECT count(*) FROM announcements").fetchone()[0] == 0
     # Лотов на платформе нет — не спрашиваем снова до RETRY.
     platform.calls.clear()
@@ -188,3 +213,84 @@ def test_links_backfill_open_announcements(conn):
     platform.calls.clear()
     res.run(conn, NOW + timedelta(minutes=2))
     assert platform.calls == []
+
+
+def test_files_mapped_like_ows():
+    common, by_lot = reserve.files(_groups(43878609))
+    assert [f["nameRu"] for f in common] == ["Проект договора об электронных закупках"]
+    assert by_lot[43878609][0]["filePath"] == SPEC_URL and by_lot[43878609][0]["id"] == "p193026110"
+    detail = reserve.to_detail(_card(41074043, 17946359), _lots(43878609), NOW, groups=_groups(43878609))
+    assert spec.spec_file(detail["Lots"][0]) == SPEC_URL and detail["platformFiles"]
+    # Не получили документы — без отметки: доберёт _files.
+    assert "platformFiles" not in reserve.to_detail(_card(41074043, 17946359), _lots(43878609), NOW)
+
+
+def test_spec_download_only_https_to_portal_hosts():
+    for url in ("http://v3bl.goszakup.gov.kz/x", "https://evil.example/x", "https://v3bl.goszakup.gov.kz.evil/x"):
+        with pytest.raises(spec.SpecError):
+            spec.download(url)
+
+
+def test_fresh_announcement_gets_spec_url(conn):
+    platform = Platform([_row(41074043, 17946359)], cards={41074043: _card(41074043, 17946359)},
+                        lots={41074043: _lots(43878609)}, files={41074043: _groups(43878609)})
+    res = reserve.Reserve(platform)
+    assert res.run(conn, NOW)["saved"] == 1
+    assert conn.execute("SELECT spec_url FROM lots WHERE id = 43878609").fetchone()[0] == SPEC_URL
+    # Документы уже есть — добор их не спрашивает.
+    platform.calls.clear()
+    res.run(conn, NOW + timedelta(minutes=2))
+    assert not any(path.endswith("/general-files/") for path, _ in platform.calls)
+
+
+def test_files_backfill_saved_without_documents(conn):
+    platform = Platform([_row(41074043, 17946359)], cards={41074043: _card(41074043, 17946359)},
+                        lots={41074043: _lots(43878609)}, files={41074043: FAIL})
+    res = reserve.Reserve(platform)
+    stats = res.run(conn, NOW)
+    # Документы не отдались — объявление всё равно сохранили; добор сразу не повторяет.
+    assert stats["saved"] == 1 and stats["specs"] == 0 and stats["failed"] == 0
+    assert sum(path.endswith("/general-files/") for path, _ in platform.calls) == 1
+    assert conn.execute("SELECT spec_url FROM lots WHERE id = 43878609").fetchone()[0] is None
+    # До RETRY не повторяем.
+    platform.calls.clear()
+    res.run(conn, NOW + timedelta(minutes=2))
+    assert not any(path.endswith("/general-files/") for path, _ in platform.calls)
+    # Потом отдались: техспецификация на месте, очередь OWS не сдвинули.
+    platform.files[41074043] = _groups(43878609)
+    conn.execute("UPDATE announcements SET details_fetched_at = '2026-11-12 08:00+05', details_update_date = NULL "
+                 "WHERE id = 17946359")
+    conn.commit()
+    assert res.run(conn, NOW + reserve.RETRY + timedelta(minutes=1))["specs"] == 1
+    detail, same, update_date = conn.execute(
+        "SELECT detail, details_fetched_at = '2026-11-12 08:00+05', details_update_date FROM announcements "
+        "WHERE id = 17946359").fetchone()
+    # Пустая дата обновления осталась пустой: OWS не затрёт пункты плана платформы.
+    assert same and update_date is None and detail["platformFiles"] and detail["Files"][0]["originalName"] == "contract_project_1.pdf"
+    assert conn.execute("SELECT spec_url FROM lots WHERE id = 43878609").fetchone()[0] == SPEC_URL
+
+
+def test_fill_files_keeps_ows_detail(conn):
+    db.upsert_announcement(conn, {"id": 17946359, "number_anno": "17946359-1", "name_ru": "Подушки",
+                                  "end_date": "2099-01-01 09:00:00"})
+    details.save(conn, {"id": 17946359, "nameKz": "x", "Files": [{"originalName": "ТС.pdf"}],
+                        "Lots": [{"id": 43878609, "trdBuyId": 17946359, "nameRu": "Подушка", "Plans": []}]})
+    assert reserve.fill_files(conn, 17946359, _groups(43878609)) == 0
+    detail = conn.execute("SELECT detail FROM announcements WHERE id = 17946359").fetchone()[0]
+    assert detail["Files"] == [{"originalName": "ТС.pdf"}]
+
+
+def test_files_odd_entries_and_single_lot_spec():
+    groups = [{"group": {"name": "Техническая спецификация"},
+               "files": [{"lot": None, "file": {"file_url": SPEC_URL}},
+                         {"lot": {"external_id": "abc"}, "file": {"file_url": SPEC_URL + "2/"}},
+                         "мусор", {"file": None}]},
+              {"group": None, "files": [{"file": {"file_url": SPEC_URL}}]}]
+    common, by_lot = reserve.files(groups)
+    # Странные строки не роняют разбор; без номеров файлов — номер по ссылке, не «pNone».
+    assert not by_lot and {f["id"] for f in common} == {f"p{SPEC_URL}", f"p{SPEC_URL}2/"}
+    # Один лот, спецификация без привязки — она его.
+    detail = reserve.to_detail(_card(41074043, 17946359), _lots(43878609), NOW, groups=groups)
+    assert spec.spec_file(detail["Lots"][0]) == SPEC_URL and detail["Files"] == []
+    # Пустой ответ (бывает и при сбое) — без отметки, добор спросит снова.
+    assert "platformFiles" not in reserve.to_detail(_card(41074043, 17946359), _lots(43878609), NOW, groups=[])

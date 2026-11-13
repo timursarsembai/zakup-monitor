@@ -17,7 +17,8 @@ logger = logging.getLogger(__name__)
 
 MAX_BYTES = 15 * 1024 * 1024
 MAX_UNPACKED = 80 * 1024 * 1024
-ALLOWED_HOST = "ows.goszakup.gov.kz"
+# OWS и файловое хранилище платформы zakup.gov.kz (документы, взятые резервом).
+ALLOWED_HOSTS = ("ows.goszakup.gov.kz", "v3bl.goszakup.gov.kz")
 _SECTION = re.compile(r"эксплуатационные\s+характеристики[^:]*:", re.IGNORECASE)
 _RUSSIAN_MARKERS = ("Количество", "Единица измерения", "Наименование лота")
 
@@ -37,7 +38,7 @@ def spec_file(lot_detail: dict) -> str | None:
 def download(url: str) -> bytes:
     parts = urlsplit(url)
     # Ссылка приходит из данных API: ходим только на сам портал.
-    if parts.scheme != "https" or parts.hostname != ALLOWED_HOST:
+    if parts.scheme != "https" or parts.hostname not in ALLOWED_HOSTS:
         raise SpecError("ссылка не на портал госзакупок")
     chunks, size = [], 0
     with httpx.stream("GET", url, timeout=30, follow_redirects=False) as response:

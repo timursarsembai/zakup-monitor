@@ -10,7 +10,11 @@
 2. Пункты плана (цена за единицу, единица, ЕНС ТРУ, аванс) лотов, у которых в OWS их нет
    (plans_missing): дописываем в подробности OWS, остальное в них не трогаем.
 
-Чего на платформе нет: документов, протоколов, заявок — их по-прежнему даёт только OWS.
+3. Документы (general-files): техспецификации лотов и общие документы — в Files подробностей,
+   как у OWS (по ним разбор спецификаций берёт файл). Объявлениям с платформы, сохранённым без
+   документов, добираем их отдельно (_files), не больше FILES_PER_RUN за проход.
+
+Чего на платформе нет: протоколов, заявок — их по-прежнему даёт только OWS.
 Статусы уже известных объявлений обновляет REST OWS (здесь не следим).
 """
 
@@ -22,7 +26,7 @@ from typing import Any
 
 import psycopg
 
-from zakup import db, details, portal
+from zakup import db, details, portal, spec
 from zakup.goszakup import parse_date
 from zakup.skk import Client, PlatformError, _bin, _iso, results
 
@@ -37,6 +41,7 @@ PER_RUN = 150  # объявлений за проход (по 2 запроса)
 PLANS_PER_RUN = 50
 LINKS_PER_RUN = 30  # добор номеров платформы открытым объявлениям (ссылка на портал)
 LINKS_SECONDS = 90  # …и не дольше стольких секунд сверх основного прохода
+FILES_PER_RUN = 30  # добор документов объявлениям с платформы, сохранённым без них
 PLANS_AGE = timedelta(days=3)  # пункты плана ищем у опубликованных не раньше
 # Неудачная попытка (на платформе нет лотов, ошибка) — не повторяем столько.
 RETRY = timedelta(minutes=30)
@@ -84,8 +89,57 @@ def plans(lot: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
-def to_detail(card: dict[str, Any], lots: list[dict[str, Any]], now: datetime | None = None) -> dict[str, Any]:
-    """Карточка и лоты платформы в виде подробностей OWS (details.FIELDS)."""
+def files(groups: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[int, list[dict[str, Any]]]]:
+    """Документы платформы (general-files) в виде Files OWS: (общие, по номеру лота OWS).
+    Название — название группы («Техническая спецификация»…): по нему spec.spec_file находит файл.
+    Странные строки пропускаем: из-за документов объявление не должно остаться несохранённым."""
+    common: list[dict[str, Any]] = []
+    by_lot: dict[int, list[dict[str, Any]]] = {}
+    for group in groups:
+        meta = group.get("group")
+        name = meta.get("name") if isinstance(meta, dict) else None
+        entries = group.get("files")
+        if not isinstance(name, str) or not name or not isinstance(entries, list):
+            continue
+        for entry in entries:
+            file = entry.get("file") if isinstance(entry, dict) else None
+            url = file.get("file_url") if isinstance(file, dict) else None
+            if not isinstance(url, str) or not url.startswith("https://"):
+                continue
+            # Номер со знаком «p»: не совпадёт с номером файла OWS (страница убирает повторы по нему).
+            out = {"id": f"p{entry.get('id') or file.get('external_id') or url}", "nameRu": name, "nameKz": None,
+                   "originalName": file.get("filename"), "filePath": url}
+            lot = entry.get("lot")
+            lot = str(lot.get("external_id") or "") if isinstance(lot, dict) else ""
+            if lot.isdigit():
+                by_lot.setdefault(int(lot), []).append(out)
+            else:
+                common.append(out)
+    return common, by_lot
+
+
+def add_files(detail: dict[str, Any], groups: list[dict[str, Any]]) -> None:
+    """Документы платформы — в подробности (общие объявлению, остальные — своим лотам).
+    Отметка platformFiles (добирать не нужно) — только если документы нашлись: пустой ответ
+    бывает и при сбое, такие спросим ещё раз (_files)."""
+    common, by_lot = files(groups)
+    active = [lot for lot in detail.get("Lots") or [] if not lot.get("isDeleted")]
+    if len(active) == 1 and not by_lot.get(active[0].get("id")):
+        # Один лот, а спецификация без привязки к лоту — это его спецификация.
+        own = [f for f in common if "специфик" in f["nameRu"].lower()]
+        by_lot[active[0].get("id")] = own
+        common = [f for f in common if f not in own]
+    detail["Files"] = common
+    for lot in detail.get("Lots") or []:
+        lot["Files"] = by_lot.get(lot.get("id"), [])
+    if common or any(by_lot.values()):
+        detail["platformFiles"] = True
+
+
+def to_detail(card: dict[str, Any], lots: list[dict[str, Any]], now: datetime | None = None,
+              groups: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """Карточка и лоты платформы в виде подробностей OWS (details.FIELDS); groups — документы
+    (general-files), None — не получены (доберём потом)."""
     aid = int(card["external_id"])
     organizer = card.get("customer") or card.get("organizer") or {}
     org_bin, org_name = _bin(organizer), organizer.get("name_ru") or organizer.get("name")
@@ -120,7 +174,7 @@ def to_detail(card: dict[str, Any], lots: list[dict[str, Any]], now: datetime | 
         })
     kato = _kato(card.get("organizer_address_ru"))
     subject = (card.get("purchase_subject") or {}).get("egz_code")
-    return {
+    detail = {
         "id": aid, "source": "platform", "platformId": card["id"], "numberAnno": card.get("announcement_number"),
         "nameRu": card.get("name_ru") or card.get("name"), "nameKz": card.get("name_kk") or card.get("name"),
         "totalSum": card.get("total_price"), "countLots": card.get("lot_count"),
@@ -139,6 +193,9 @@ def to_detail(card: dict[str, Any], lots: list[dict[str, Any]], now: datetime | 
         "Organizer": {"bin": org_bin, "nameRu": org_name},
         "Files": [], "Lots": out_lots,
     }
+    if groups is not None:
+        add_files(detail, groups)
+    return detail
 
 
 def _rest(detail: dict[str, Any]) -> dict[str, Any]:
@@ -152,10 +209,11 @@ def _rest(detail: dict[str, Any]) -> dict[str, Any]:
             "source": "platform"}
 
 
-def save(conn: psycopg.Connection, card: dict[str, Any], lots: list[dict[str, Any]]) -> bool:
+def save(conn: psycopg.Connection, card: dict[str, Any], lots: list[dict[str, Any]],
+         groups: list[dict[str, Any]] | None = None) -> bool:
     """Сохраняет объявление с платформы, если подробностей OWS с лотами у нас ещё нет.
     False — нечего сохранять (лотов нет) или OWS успел раньше."""
-    detail = to_detail(card, lots)
+    detail = to_detail(card, lots, groups=groups)
     if not any(not lot["isDeleted"] for lot in detail["Lots"]):
         return False
     row = conn.execute("SELECT lots_ready FROM announcements WHERE id = %s FOR UPDATE",
@@ -201,18 +259,46 @@ def fill_plans(conn: psycopg.Connection, announcement_id: int, lots: list[dict[s
     return filled
 
 
+def fill_files(conn: psycopg.Connection, announcement_id: int, groups: list[dict[str, Any]]) -> int:
+    """Дописывает документы платформы в подробности, взятые с платформы (OWS их ещё не прислал).
+    Возвращает, скольким лотам нашлась техспецификация."""
+    row = conn.execute("SELECT detail, details_fetched_at, details_update_date FROM announcements "
+                       "WHERE id = %s FOR UPDATE", (announcement_id,)).fetchone()
+    if not row or not row[0] or row[0].get("source") != "platform" or row[0].get("platformFiles"):
+        return 0  # пока ждали — пришли подробности OWS (там свои файлы) или уже дописали
+    detail, fetched_at, update_date = row
+    add_files(detail, groups)
+    if not detail.get("platformFiles"):
+        return 0  # документов нет — нечего дописывать
+    details.save(conn, detail)
+    # Это не чтение OWS: его очередь (файлы, протоколы, статусы) не сдвигаем, а пустая дата
+    # обновления (save) не даёт OWS затереть пункты плана платформы пустыми — её тоже возвращаем.
+    conn.execute("UPDATE announcements SET details_fetched_at = %s, details_update_date = %s WHERE id = %s",
+                 (fetched_at, update_date, announcement_id))
+    return sum(1 for lot in detail.get("Lots") or [] if spec.spec_file(lot))
+
+
 class Reserve:
     """Состояние между проходами: недавние неудачные попытки (чтобы не долбить одно и то же)."""
 
     def __init__(self, client: Client):
         self.client = client
         self.tried: dict[int, datetime] = {}
+        self.files_tried: dict[int, datetime] = {}  # _files: неудачные попытки, отдельно от tried
 
     def _skip(self, key: int, now: datetime) -> bool:
         return (when := self.tried.get(key)) is not None and when > now - RETRY
 
     def _lots(self, platform_id: int) -> list[dict[str, Any]]:
         return results(self.client.get(f"/announcements/{platform_id}/lots/"))
+
+    def _groups(self, platform_id: int) -> list[dict[str, Any]] | None:
+        """Документы объявления; не отдались — None (сохраним без них, доберёт _files)."""
+        try:
+            return results(self.client.get(f"/announcements/{platform_id}/general-files/"))
+        except PlatformError as error:
+            logger.warning("reserve files %s: %s", platform_id, error)
+            return None
 
     def _fresh(self, conn: psycopg.Connection, now: datetime) -> list[dict[str, Any]]:
         """Строки списка платформы, которых у нас нет или нет их лотов, — новые первыми."""
@@ -245,9 +331,9 @@ class Reserve:
 
     def run(self, conn: psycopg.Connection, now: datetime | None = None,
             limit: int = PER_RUN, plans_limit: int = PLANS_PER_RUN,
-            links_limit: int = LINKS_PER_RUN) -> dict[str, int]:
+            links_limit: int = LINKS_PER_RUN, files_limit: int = FILES_PER_RUN) -> dict[str, int]:
         now = now or datetime.now(UTC)
-        stats = {"listed": 0, "saved": 0, "plans": 0, "links": 0, "failed": 0}
+        stats = {"listed": 0, "saved": 0, "plans": 0, "links": 0, "specs": 0, "failed": 0}
         todo = self._fresh(conn, now)
         stats["listed"] = len(todo)
         deadline = time.monotonic() + PASS_SECONDS
@@ -262,7 +348,10 @@ class Reserve:
                 logger.warning("reserve %s: %s", aid, error)
                 self.tried[aid], stats["failed"] = now, stats["failed"] + 1
                 continue
-            result = self._save(conn, aid, partial(save, conn, card, lots))
+            groups = self._groups(item["id"])
+            if not groups:
+                self.files_tried[aid] = now  # добор (_files) — не раньше чем через RETRY
+            result = self._save(conn, aid, partial(save, conn, card, lots, groups))
             if result:
                 stats["saved"] += 1
             else:
@@ -270,6 +359,8 @@ class Reserve:
                 stats["failed"] += result is None  # None — данные не сохранились (ошибка)
         stats["plans"] = self._plans(conn, now, plans_limit, stats)
         stats["links"] = self._links(conn, now, links_limit, stats, deadline + LINKS_SECONDS)
+        # Добор документов — в то же время, что и ссылки: проход не должен затягиваться.
+        stats["specs"] = self._files(conn, now, files_limit, stats, deadline + LINKS_SECONDS)
         # Память попыток — только за RETRY.
         self.tried = {k: v for k, v in self.tried.items() if v > now - RETRY}
         return stats
@@ -365,6 +456,33 @@ class Reserve:
                 continue
             linked += self._remember(conn, [found])
         return linked
+
+    def _files(self, conn: psycopg.Connection, now: datetime, limit: int, stats: dict[str, int],
+               deadline: float) -> int:
+        """Открытые объявления с платформы, сохранённые без документов (до этой доработки или
+        при сбое general-files): дописываем документы, техспецификации лотов — в их Files."""
+        tried = [k for k, v in self.files_tried.items() if v > now - RETRY]
+        rows = conn.execute(
+            """SELECT id, platform_id FROM announcements
+               WHERE detail->>'source' = 'platform' AND NOT detail ? 'platformFiles'
+                 AND platform_id IS NOT NULL AND end_date > %s AND NOT id = ANY(%s)
+               ORDER BY end_date LIMIT %s""",
+            (now, tried, limit)).fetchall()
+        conn.commit()
+        found = 0
+        for aid, platform_id in rows:
+            if time.monotonic() > deadline:
+                break
+            self.files_tried[aid] = now
+            if (groups := self._groups(platform_id)) is None:
+                stats["failed"] += 1
+                continue
+            result = self._save(conn, aid, partial(fill_files, conn, aid, groups))
+            found += result or 0
+            stats["failed"] += result is None
+        self.files_tried = {k: v for k, v in self.files_tried.items() if v > now - RETRY}
+        return found
+
 
 def loop(database_url: str, pause: float = 120, once: bool = False) -> int:
     client = Client()
