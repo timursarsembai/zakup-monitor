@@ -77,18 +77,27 @@
     document.addEventListener("click", (e) => { if (!tools.contains(e.target) && e.target !== burger) set(false); });
     document.addEventListener("keydown", (e) => { if (e.key === "Escape") set(false); });
   })();
-  // Вид таблиц с переключателем «Таблица / Плитка» (data-rview-box): один выбор на весь сайт,
-  // запоминается; на телефоне по умолчанию плитка.
+  // Вид таблиц с переключателем «Таблица / Плитка» (data-rview-box): выбор запоминается — общий
+  // на весь сайт, а у своей группы (data-rview-box="catalog", кнопки в data-rview-group="catalog") —
+  // отдельный. По умолчанию: data-rview-default у таблицы, иначе на телефоне плитка.
+  const rviewKey = (group) => "zakup-rview" + (group ? "-" + group : "");
+  const rviewGroup = (button) => button.closest("[data-rview-group]")?.dataset.rviewGroup || "";
   window.applyRView = () => {
-    let view = matchMedia("(max-width: 760px)").matches ? "cards" : "table";
-    try { view = localStorage.getItem("zakup-rview") || view; } catch (e) {}
-    for (const box of document.querySelectorAll("[data-rview-box]")) box.dataset.rview = view;
-    for (const b of document.querySelectorAll("[data-rview]:not([data-rview-box])")) b.setAttribute("aria-pressed", String(b.dataset.rview === view));
+    const views = {};
+    for (const box of document.querySelectorAll("[data-rview-box]")) {
+      const group = box.dataset.rviewBox || "";
+      let view = box.dataset.rviewDefault || (matchMedia("(max-width: 760px)").matches ? "cards" : "table");
+      try { view = localStorage.getItem(rviewKey(group)) || view; } catch (e) {}
+      box.dataset.rview = views[group] = view;
+    }
+    for (const b of document.querySelectorAll("button[data-rview]")) {
+      b.setAttribute("aria-pressed", String(b.dataset.rview === views[rviewGroup(b)]));
+    }
   };
   document.addEventListener("click", (event) => {
     const button = event.target.closest("button[data-rview]");
     if (!button) return;
-    try { localStorage.setItem("zakup-rview", button.dataset.rview); } catch (e) {}
+    try { localStorage.setItem(rviewKey(rviewGroup(button)), button.dataset.rview); } catch (e) {}
     window.applyRView();
   });
   window.applyRView();

@@ -70,6 +70,7 @@ def test_products_page_open_to_all(client, conn):
     # Каталог открыт всем (решение владельца 2026-11-12), без входа.
     page = client.get("/products?q=стол&sort=price").text
     assert "Стол дубовый" in page and "Материал: дуб" in page and "цена на" in page
+    assert 'data-rview-box="catalog" data-rview-default="cards"' in page  # по умолчанию — плитка
     assert "Ничего не нашлось" in client.get("/products?q=диван").text
 
 

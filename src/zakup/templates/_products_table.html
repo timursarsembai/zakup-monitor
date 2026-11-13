@@ -1,6 +1,7 @@
 {# Таблица товаров с фильтрами — каталог (products.html) и страница продавца (seller.html).
    Нужны в контексте: p (products.listing), sorts, fresh_days, action, products_url, product_path,
-   seller_path. Вид «таблица / плитка» — общий переключатель data-rview (app.js). #}
+   seller_path. Вид «таблица / плитка» — переключатель data-rview (app.js), у каталога свой выбор;
+   по умолчанию — плитка (и на компьютере). #}
 {% macro products_styles() %}
   .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 13px; white-space: nowrap; border: 1px solid var(--line); }
   .badge.sub { background: color-mix(in srgb, var(--accent) 14%, transparent); border-color: transparent; }
@@ -46,13 +47,13 @@
   <label class="check"><span>&nbsp;</span><span><input type="checkbox" name="available" value="1" {% if p.available %}checked{% endif %}> {{ _("в наличии") }}</span></label>
   <label>{{ _("Сортировка") }}<select name="sort">{% for key, name in sorts.items() %}<option value="{{ key }}" {% if p.sort == key %}selected{% endif %}>{{ _(name) }}</option>{% endfor %}</select></label>
   <button class="primary">{{ _("Показать") }}</button>
-  <div class="view-switch" role="group" aria-label="{{ _("Вид отображения") }}">
+  <div class="view-switch" role="group" data-rview-group="catalog" aria-label="{{ _("Вид отображения") }}">
     <button type="button" data-rview="table"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18M3 12h18M3 19h18"/></svg><span>{{ _("Таблица") }}</span></button>
     <button type="button" data-rview="cards"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5"/></svg><span>{{ _("Плитка") }}</span></button>
   </div>
 </form>
 <p>{{ _("Товаров:") }} <b>{{ p.total }}</b></p>
-<div class="table-wrap" data-rview-box><table class="prod-table">
+<div class="table-wrap" data-rview-box="catalog" data-rview-default="cards" data-rview="cards"><table class="prod-table">
   <tr><th></th><th>{{ _("Товар") }}</th><th>{{ _("Продавец") }}</th><th>{{ _("Цена, ₸") }}</th><th>{{ _("Категория") }}</th><th>{{ _("Найден в лотах") }}</th></tr>
   {% for r in p.rows %}
   <tr>

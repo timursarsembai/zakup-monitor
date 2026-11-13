@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% from "_products_table.html" import products_table, products_styles with context %}
 {# Каталог товаров из поиска с ИИ (zakup.products) — открыт всем (web/catalog.py); лоты, где
-   товар находили, — по подписке. Вид «таблица / плитка» — общий переключатель data-rview (app.js). #}
+   товар находили, — по подписке. Вид «таблица / плитка» — переключатель data-rview (app.js), по умолчанию плитка. #}
 {% block title %}{{ _("Каталог товаров") }}{% endblock %}
 {% block description %}{{ _("Товары для госзакупок с ценами продавцов Казахстана: характеристики, цена на дату, где купить.") }}{% endblock %}
 {% block style %}
