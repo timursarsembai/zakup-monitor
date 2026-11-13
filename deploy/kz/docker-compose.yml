@@ -1,0 +1,69 @@
+# Сервис учётных записей на сервере в Казахстане (docs/ACCOUNTS_KZ.md).
+# Запуск: из корня репозитория — docker compose -f deploy/kz/docker-compose.yml up -d --build
+# Секреты — в .env рядом с этим файлом (не в репозитории): ID_DB_PASSWORD, ID_SIGNING_KEY,
+# ID_DEVICE_KEY, ID_SERVICE_KEY, ID_TELEGRAM_TOKEN; ещё ID_PROXY_IP и PROXY_NETWORK. Порт наружу не открыт: адрес id.tenderim.com
+# ведёт сюда через nginx-proxy-manager (сеть PROXY_NETWORK).
+name: tenderim-id
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "3"
+
+services:
+  id-db:
+    image: postgres:16-alpine
+    container_name: tenderim-id-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: tenderim_id
+      POSTGRES_DB: tenderim_id
+      POSTGRES_PASSWORD: ${ID_DB_PASSWORD:?set ID_DB_PASSWORD in deploy/kz/.env}
+    command: ["postgres", "-c", "shared_buffers=32MB", "-c", "max_connections=20"]
+    volumes:
+      - id-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tenderim_id -d tenderim_id"]
+      interval: 10s
+      retries: 5
+    networks: [internal]
+    mem_limit: 192m
+    logging: *logging
+
+  id-app:
+    build: ../..
+    image: tenderim-id
+    container_name: tenderim-id-app
+    restart: unless-stopped
+    depends_on:
+      id-db:
+        condition: service_healthy
+    entrypoint: ["uvicorn", "zakup_id.app:app", "--host", "0.0.0.0", "--port", "8000",
+                 "--workers", "2", "--proxy-headers",
+                 # Только адрес nginx-proxy-manager (docker inspect): с «*» любой клиент подделал бы свой IP.
+                 "--forwarded-allow-ips", "${ID_PROXY_IP:?set ID_PROXY_IP (address of nginx-proxy-manager)}"]
+    environment:
+      ID_DATABASE_URL: postgresql://tenderim_id:${ID_DB_PASSWORD}@id-db:5432/tenderim_id
+      ID_SIGNING_KEY: "${ID_SIGNING_KEY:?run python -m zakup_id.keys}"
+      ID_DEVICE_KEY: ${ID_DEVICE_KEY:?set ID_DEVICE_KEY}
+      ID_SERVICE_KEY: ${ID_SERVICE_KEY:?set ID_SERVICE_KEY}
+      ID_SITE_URL: ${ID_SITE_URL:-https://tenderim.com}
+      ID_COOKIE_DOMAIN: ${ID_COOKIE_DOMAIN:-.tenderim.com}
+      ID_TELEGRAM_TOKEN: ${ID_TELEGRAM_TOKEN:-}
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    pids_limit: 128
+    networks: [internal, proxy]
+    mem_limit: 256m
+    logging: *logging
+
+volumes:
+  id-pgdata:
+
+networks:
+  internal:
+  proxy:
+    external: true
+    name: ${PROXY_NETWORK:?set PROXY_NETWORK (docker network of nginx-proxy-manager)}
