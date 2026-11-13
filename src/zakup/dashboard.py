@@ -1,7 +1,9 @@
 """Главная страница — общая аналитика рынка госзакупок по нашей базе.
 
 Цифры одинаковы для всех и тяжёлые (агрегаты по десяткам тысяч лотов),
-поэтому кэшируются на 5 минут и пересчитываются в фоне.
+поэтому кэшируются и пересчитываются в фоне: открытые закупки — раз в 5 минут,
+итоги протоколов и спрос — раз в час (меняются медленно, а считаются дольше всего:
+десятки секунд, когда таблицы не в памяти).
 """
 
 import time
@@ -14,7 +16,9 @@ from zakup.filters import METHODS, OPEN_STATUSES, REGIONS, SUBJECTS
 from zakup.goszakup import PORTAL_TZ
 
 MARKET_TTL = 300
+SLOW_TTL = 3600
 _market_cache: tuple[float, dict[str, Any]] | None = None
+_slow_cache: tuple[float, tuple[dict[str, tuple], dict[str, Any]]] | None = None
 
 
 def market_cached() -> tuple[dict[str, Any] | None, bool]:
@@ -38,23 +42,36 @@ def market(conn: psycopg.Connection, now: datetime | None = None) -> dict[str, A
     global _market_cache
     now = now or datetime.now(UTC)
     today = now.astimezone(PORTAL_TZ).date()
+    region_results, slow = _slow(conn, now, today)
     data: dict[str, Any] = {"computed_at": now}
     data.update(_now(conn, now, today))
-    # Динамика по дням, дням недели и часам — trends.py (страница грузит её отдельно).
-    data["since"] = _rows(conn, """
-        SELECT min(day) FROM (
-            SELECT (publish_date AT TIME ZONE 'Asia/Almaty')::date AS day FROM announcements
-            GROUP BY 1 HAVING count(*) >= 500) busy""")[0][0] or today
-    data.update(_regions(conn))
+    data.update(_regions(conn, region_results))
     data.update(_largest(conn))
-    data.update(_competition(conn))
-    data.update(_demand(conn, now))
+    data.update(slow)
     # Как «Обновлено» в поиске: отметка сборщика или последнее объявление с лотами.
     data["freshness"] = _rows(conn, "SELECT greatest((SELECT max(updated_at) FROM sync_state), "
                                     "(SELECT max(lots_ready_at) FROM announcements "
                                     "WHERE lots_ready_at < publish_date + interval '1 day'))")[0]
     _market_cache = (time.monotonic() + MARKET_TTL, data)
     return data
+
+
+def _slow(conn, now: datetime, today) -> tuple[dict[str, tuple], dict[str, Any]]:
+    """Медленно меняющаяся часть (итоги, спрос, начало статистики) — из своего кэша на час:
+    (итоги по областям для вкладки «Регионы», данные страницы). Пока кэш свежий, `now`
+    не учитывается — цифры на момент прошлого расчёта."""
+    global _slow_cache
+    if _slow_cache is not None and _slow_cache[0] > time.monotonic():
+        return _slow_cache[1]
+    # Динамика по дням, дням недели и часам — trends.py (страница грузит её отдельно).
+    data: dict[str, Any] = {"since": _rows(conn, """
+        SELECT min(day) FROM (
+            SELECT (publish_date AT TIME ZONE 'Asia/Almaty')::date AS day FROM announcements
+            GROUP BY 1 HAVING count(*) >= 500) busy""")[0][0] or today}
+    data.update(_competition(conn, now))
+    data.update(_demand(conn, now))
+    _slow_cache = (time.monotonic() + SLOW_TTL, (_region_results(conn), data))
+    return _slow_cache[1]
 
 
 # Способ закупки по id портала → название группы («Запрос ценовых предложений» и т.д.).
@@ -95,8 +112,20 @@ def _now(conn, now: datetime, today) -> dict[str, Any]:
     return data
 
 
-def _regions(conn) -> dict[str, Any]:
-    """Вкладка «Регионы»: открытые лоты и итоги по месту поставки."""
+def _region_results(conn) -> dict[str, tuple]:
+    """Итоги по месту поставки для вкладки «Регионы»: код области → (с победителем,
+    не состоялись, среднее число заявок)."""
+    return {code: (w, f, o) for code, w, f, o in _rows(conn, """
+        SELECT left(k, 2), count(DISTINCT r.lot_id) FILTER (WHERE r.outcome = 'winner'),
+               count(DISTINCT r.lot_id) FILTER (WHERE r.outcome = 'failed'),
+               avg(jsonb_array_length(r.offers)) FILTER (WHERE r.outcome = 'winner')
+        FROM lot_results r JOIN lots l ON l.id = r.lot_id JOIN announcements a ON a.id = l.trd_buy_id,
+             unnest(coalesce(nullif(l.kato, '{}'), a.kato)) k
+        GROUP BY 1""")}
+
+
+def _regions(conn, competition: dict[str, tuple]) -> dict[str, Any]:
+    """Вкладка «Регионы»: открытые лоты по месту поставки и итоги (competition)."""
     data: dict[str, Any] = {}
     regions = _rows(conn, f"""
         SELECT left(k, 2), count(DISTINCT l.id), coalesce(sum(l.amount), 0),
@@ -104,13 +133,6 @@ def _regions(conn) -> dict[str, Any]:
         FROM lots l JOIN announcements a ON a.id = l.trd_buy_id,
              unnest(coalesce(nullif(l.kato, '{{}}'), a.kato)) k
         WHERE {OPEN} AND l.status_id = ANY(%(open)s) GROUP BY 1""")
-    competition = {code: (w, f, o) for code, w, f, o in _rows(conn, """
-        SELECT left(k, 2), count(DISTINCT r.lot_id) FILTER (WHERE r.outcome = 'winner'),
-               count(DISTINCT r.lot_id) FILTER (WHERE r.outcome = 'failed'),
-               avg(jsonb_array_length(r.offers)) FILTER (WHERE r.outcome = 'winner')
-        FROM lot_results r JOIN lots l ON l.id = r.lot_id JOIN announcements a ON a.id = l.trd_buy_id,
-             unnest(coalesce(nullif(l.kato, '{}'), a.kato)) k
-        GROUP BY 1""")}
     data["regions"] = sorted(
         ((REGIONS[code], count, total, total / count if count else 0, with_advance / count if count else 0,
           *competition.get(code, (0, 0, None)))
@@ -141,7 +163,7 @@ def _largest(conn) -> dict[str, Any]:
     return data
 
 
-def _competition(conn) -> dict[str, Any]:
+def _competition(conn, now: datetime) -> dict[str, Any]:
     """Вкладка «Конкуренция»: итоги из протоколов."""
     data: dict[str, Any] = {}
     data["results"] = _rows(conn, """
@@ -172,11 +194,8 @@ def _competition(conn) -> dict[str, Any]:
         WHERE outcome = 'winner' AND winner_name IS NOT NULL AND winner_bin IS NOT NULL
         GROUP BY winner_bin ORDER BY 3 DESC, 4 DESC LIMIT 10""")
     # По разделам и областям за 90 дней: где сильнее снижают цену и где мало конкурентов.
-    from zakup import outcomes
-
-    now = datetime.now(UTC)
     # Только коды, которые понимает фильтр «Итогов»: иначе ссылка открыла бы итоги без фильтра.
-    from zakup import catalog
+    from zakup import catalog, outcomes
     from zakup.filters import REGIONS
 
     data["results_by_division"] = [r for r in outcomes.by_group(conn, "divisions", 90, now, limit=20)

@@ -670,9 +670,6 @@ def test_results_page_filters_summary_and_paid_export(client, conn):
 
 
 def test_analytics_shows_results_by_category(client, conn):
-    from zakup import dashboard
-
-    dashboard._market_cache = None
     page = client.get("/analytics")
     assert page.status_code == 200 and "Снижение цены и конкуренция по категориям" in page.text
 

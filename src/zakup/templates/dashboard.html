@@ -50,7 +50,7 @@
 {% endblock %}
 {% block main %}
 <h1>{{ _("Обзор рынка госзакупок") }}</h1>
-<p class="muted">{{ _("По данным портала goszakup.gov.kz в нашей базе с") }} {{ m.since.strftime("%d.%m.%Y") if m.since else "—" }}. {{ _("Обновлено") }} {{ (m.freshness[0]|local).strftime("%d.%m %H:%M") if m.freshness[0] else "—" }}{{ _(", цифры пересчитываются раз в 5 минут.") }}</p>
+<p class="muted">{{ _("По данным портала goszakup.gov.kz в нашей базе с") }} {{ m.since.strftime("%d.%m.%Y") if m.since else "—" }}. {{ _("Обновлено") }} {{ (m.freshness[0]|local).strftime("%d.%m %H:%M") if m.freshness[0] else "—" }}{{ _(". Открытые закупки пересчитываются раз в 5 минут, итоги и спрос — раз в час.") }}</p>
 
 <nav class="tabs" role="tablist">
   <a href="#now" role="tab" data-tab="now">{{ _("Сейчас") }}</a>

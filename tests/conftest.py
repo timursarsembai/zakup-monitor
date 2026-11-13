@@ -48,6 +48,14 @@ def conn(_schema):
 
 
 @pytest.fixture(autouse=True)
+def _fresh_market():
+    """Кэши «Анализа рынка» живут в модуле: каждый тест считает по своим данным."""
+    from zakup import dashboard
+
+    dashboard._market_cache = dashboard._slow_cache = None
+
+
+@pytest.fixture(autouse=True)
 def _no_internet(monkeypatch):
     """Тесты не ходят в интернет: настоящий запрос — ошибка соединения (как офлайн).
     Тестовый клиент сайта работает через свой транспорт и не задет."""
