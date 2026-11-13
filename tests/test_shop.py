@@ -179,3 +179,21 @@ def test_hidden_shop_stays_hidden_after_claim(client, conn):
     claim = conn.execute("SELECT id FROM seller_claims").fetchone()[0]
     assert shop.decide_claim(conn, claim, user, True) == "approved"
     assert shop.get(conn, user)["status"] == "hidden"
+
+
+def test_popups_for_guests_and_future_sellers(client, conn):
+    # Гость: вход, в каталоге — «станьте продавцом» и после входа — в свой магазин.
+    lots = client.get("/lots?q=стул").text
+    assert 'data-popup="guest"' in lots and 'action="/login"' in lots
+    assert 'name="next" value="/lots?q=' in lots
+    catalog = client.get("/products").text
+    assert 'data-popup="guest-seller"' in catalog and "Станьте продавцом" in catalog
+    assert 'name="next" value="/my/shop"' in catalog
+    assert 'id="popup"' not in client.get("/login").text
+    # Вошедший: в каталоге без магазина — однократно (data-days="0"), с магазином и вне каталога — нет.
+    user = _as_client(client, conn)
+    catalog = client.get("/products").text
+    assert f'data-popup="seller-{user}"' in catalog and 'data-days="0"' in catalog and 'href="/my/shop"' in catalog
+    assert 'id="popup"' not in client.get("/lots").text
+    client.post("/my/shop", data=SHOP, headers=ORIGIN)
+    assert 'id="popup"' not in client.get("/products").text

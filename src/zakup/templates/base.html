@@ -166,10 +166,17 @@
   dialog.paywall { width: min(480px, calc(100vw - 32px)); border: 1px solid var(--line); border-radius: 14px; padding: 0; background: var(--bg); color: var(--fg); }
   dialog.paywall::backdrop { background: rgba(0, 0, 0, .55); }
   .pw-wrap { padding: 22px 22px 18px; position: relative; }
-  .pw-wrap h2 { margin: 0 0 10px; font-size: 20px; }
+  .pw-wrap h2 { margin: 0 0 10px; padding-right: 40px; font-size: 20px; }
   .pw-wrap ul { padding-left: 20px; margin: 8px 0 12px; } .pw-wrap li { margin: 4px 0; }
   .pw-close { position: absolute; top: 10px; right: 10px; }
   .pw-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 14px; }
+  .pw-actions button.link { padding: 0; border: 0; background: none; font: inherit; color: inherit; text-decoration: underline; cursor: pointer; }
+  .popup-form { display: grid; gap: 10px; margin: 12px 0 4px; }
+  .popup-form label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+  .popup-form input { width: 100%; padding: 10px 12px; font: inherit; font-size: 16px; border: 1px solid var(--line);
+                      border-radius: 8px; background: transparent; color: var(--fg); }
+  .popup-form .popup-submit { padding: 10px 16px; font: inherit; font-weight: 600; border: 0; border-radius: 8px;
+                       background: var(--accent); color: var(--on-accent); cursor: pointer; }
   .pw-buy { padding: 10px 16px; border-radius: 8px; background: var(--accent); color: var(--on-accent); font-weight: 600; }
   .primary-link { background: var(--accent); color: var(--on-accent) !important; border-color: transparent !important; }
   .impersonating { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: center; padding: 8px 12px; background: #b45309; color: #fff; font-size: 14px; }
@@ -483,6 +490,48 @@
     </div>
   </div>
 </dialog>
+{# Всплывающее окно: гостю — вход (в каталоге — «станьте продавцом»), вошедшему в каталоге
+   без своего магазина — один раз предложение стать продавцом. Закрытое не повторяется
+   (data-days дней, 0 — больше никогда); показ и память — app.js. #}
+{% set here = request.url.path %}
+{% set seller_pages = here.startswith("/products") or here.startswith("/sellers") %}
+{% if not request.state.user_id
+      and not here.startswith(("/login", "/register", "/forgot", "/reset", "/staff", "/offer", "/privacy")) %}
+<dialog class="paywall" id="popup" data-popup="{{ 'guest-seller' if seller_pages else 'guest' }}" data-days="3" aria-labelledby="popup-title">
+  <div class="pw-wrap">
+    <button type="button" class="pw-close" data-pw-close aria-label="{{ _("Закрыть") }}">✕</button>
+    {% if seller_pages %}
+    <h2 id="popup-title">{{ _("Станьте продавцом — покажите свои товары в лотах") }}</h2>
+    <p>{{ _("Выложите товары с ценами в каталог Tenderim: их увидят участники госзакупок прямо на страницах подходящих лотов, с вашими контактами. Это бесплатно.") }}</p>
+    {% else %}
+    <h2 id="popup-title">{{ _("Войдите в Tenderim") }}</h2>
+    <p>{{ _("Подписки на новые лоты, уведомления в Telegram, избранное и поиск товаров под лот с ИИ — после входа.") }}</p>
+    {% endif %}
+    <form class="popup-form" method="post" action="/login">
+      <input type="hidden" name="next" value="{{ '/my/shop' if seller_pages else here ~ ('?' ~ request.url.query if request.url.query else '') }}">
+      <label>{{ _("Телефон") }}<input name="email" type="tel" inputmode="tel" placeholder="+7 7__ ___ __ __" autocomplete="tel" required></label>
+      <label>{{ _("Пароль") }}<input name="password" type="password" autocomplete="current-password" required></label>
+      <button class="popup-submit">{{ _("Войти") }}</button>
+    </form>
+    <div class="pw-actions">
+      <a class="pw-buy" href="/register">{{ _("Зарегистрироваться") }}</a>
+      <a href="/forgot">{{ _("Забыли пароль?") }}</a>
+    </div>
+  </div>
+</dialog>
+{% elif offer_shop and not request.state.staff %}
+<dialog class="paywall" id="popup" data-popup="seller-{{ request.state.user_id }}" data-days="0" aria-labelledby="popup-title">
+  <div class="pw-wrap">
+    <button type="button" class="pw-close" data-pw-close aria-label="{{ _("Закрыть") }}">✕</button>
+    <h2 id="popup-title">{{ _("Продаёте товары? Станьте продавцом") }}</h2>
+    <p>{{ _("Добавьте свои товары в каталог: участники госзакупок увидят их с ценами и вашими контактами прямо на страницах подходящих лотов. Это бесплатно.") }}</p>
+    <div class="pw-actions">
+      <a class="pw-buy" href="/my/shop">{{ _("Добавить товары") }}</a>
+      <button type="button" class="link" data-pw-close>{{ _("Не сейчас") }}</button>
+    </div>
+  </div>
+</dialog>
+{% endif %}
 <script src="/static/app.js?v={{ asset_v }}"></script>
 </body>
 </html>

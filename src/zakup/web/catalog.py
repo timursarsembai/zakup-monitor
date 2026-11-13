@@ -46,7 +46,11 @@ def products_page(request: Request, user: Viewer, q: str = "", category: str = "
     """Каталог товаров: найденные поиском с ИИ (zakup.products), позже — и свои у продавцов."""
     with core.pool.connection() as conn:
         data = products.listing(conn, **_catalog_args(q, category, sort, page, price_min, price_max, available))
+        # Вошедшему без своего магазина — однократное предложение стать продавцом (base.html).
+        offer_shop = bool(user) and not conn.execute(
+            "SELECT EXISTS (SELECT 1 FROM sellers WHERE user_id = %s)", (user,)).fetchone()[0]
     return templates.TemplateResponse(request, "products.html", {
+        "offer_shop": offer_shop,
         "p": data, "sorts": products.SORTS, "fresh_days": products.FRESH_DAYS,
         "product_path": products.path, "seller_path": sellers.path,
         "products_url": _catalog_url("/products", data), "action": "/products"})

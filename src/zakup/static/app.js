@@ -21,6 +21,35 @@
     dialog.querySelector("[data-pw-close]").addEventListener("click", () => dialog.close());
   })();
 
+  // Всплывающее окно (base.html, #popup): через 2 с после загрузки, если не открыто другое
+  // окно. Закрытое помним: data-days дней, 0 — навсегда. Без localStorage не показываем —
+  // иначе окно выскакивало бы на каждой странице.
+  (() => {
+    const dialog = document.getElementById("popup");
+    if (!dialog || typeof dialog.showModal !== "function") return;
+    const key = "zakup-popup-" + dialog.dataset.popup;
+    const days = Number(dialog.dataset.days || 0);
+    try {
+      const closedAt = Number(localStorage.getItem(key));
+      if (closedAt && (!days || Date.now() - closedAt < days * 86400000)) return;
+    } catch (e) { return; }
+    const remember = () => { try { localStorage.setItem(key, String(Date.now())); } catch (e) {} };
+    dialog.addEventListener("close", remember);
+    // Переход по ссылке из окна («Добавить товары») — тоже «показали».
+    for (const link of dialog.querySelectorAll("a")) link.addEventListener("click", remember);
+    for (const button of dialog.querySelectorAll("[data-pw-close]")) button.addEventListener("click", () => dialog.close());
+    // Клик мимо окна (по затемнению) — закрыть; но не когда выделяли текст в поле и отпустили снаружи.
+    let downOnBackdrop = false;
+    dialog.addEventListener("pointerdown", (event) => { downOnBackdrop = event.target === dialog; });
+    dialog.addEventListener("click", (event) => { if (downOnBackdrop && event.target === dialog) dialog.close(); });
+    setTimeout(() => {
+      // Не мешаем: открыто меню или другое окно, или человек уже печатает.
+      if (document.querySelector('dialog[open], [role="dialog"]:not([hidden]):not(dialog)')) return;
+      if (document.activeElement && document.activeElement.matches("input, textarea, select, [contenteditable]")) return;
+      dialog.showModal();
+    }, 2000);
+  })();
+
   (() => {
     const root = document.documentElement;
     const panel = document.querySelector("[data-a11y-panel]");
