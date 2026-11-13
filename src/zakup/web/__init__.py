@@ -31,6 +31,7 @@ async def lifespan(_: FastAPI):
     # фоновый расчёт мешал бы пересозданию тестовой базы.
     if "pytest" not in sys.modules:
         core._spawn(public._recount_market)
+        core._spawn(public._recount_catalog)
     yield
     core.pool.close()
 

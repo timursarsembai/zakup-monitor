@@ -848,3 +848,37 @@ def test_market_failed_recount_waits_before_retry(client, monkeypatch):
     client.get("/analytics")
     client.get("/analytics")
     assert calls == [1]
+
+
+def test_catalog_counts_from_snapshot_without_waiting(client, conn, monkeypatch):
+    """После перезапуска «Категории» — из снимка в базе сразу, пересчёт — в фоне."""
+    from zakup import catalog
+    from zakup.web import public
+
+    _announcement_with_lots(conn)
+    assert "Бумага и изделия из бумаги" in client.get("/categories").text  # первый раз — считаем
+    assert conn.execute("SELECT 1 FROM app_settings WHERE key = 'catalog_counts'").fetchone()
+    monkeypatch.setattr(catalog, "_counts", {"at": 0.0, "rows": {}})  # «перезапуск»
+    recounts = []
+    monkeypatch.setattr(public, "_catalog_in_background", lambda: recounts.append(1))
+    monkeypatch.setattr(catalog, "refresh", lambda *a, **k: (_ for _ in ()).throw(AssertionError("waited")))
+    assert "Бумага и изделия из бумаги" in client.get("/categories").text
+    assert recounts == [1]
+    client.get("/regions")
+    assert recounts == [1]  # пересчёт уже взят — второй раз не запускаем
+
+
+def test_catalog_snapshot_too_old_or_broken_is_ignored(conn):
+    import json
+
+    from zakup import catalog
+
+    def put(value):
+        conn.execute("""INSERT INTO app_settings (key, value) VALUES ('catalog_counts', %s)
+                        ON CONFLICT (key) DO UPDATE SET value = excluded.value""", (value,))
+
+    put(json.dumps({"at": "2026-01-01T00:00:00+00:00", "rows": [["17", "75", 3, 100.0]]}))
+    assert catalog._load_snapshot(conn) == {}
+    put("not json")
+    assert catalog._load_snapshot(conn) == {}
+    assert conn.execute("SELECT 1").fetchone() == (1,)  # транзакция цела

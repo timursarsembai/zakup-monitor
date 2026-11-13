@@ -28,6 +28,16 @@
     const dialog = document.getElementById("popup");
     if (!dialog || typeof dialog.showModal !== "function") return;
     const key = "zakup-popup-" + dialog.dataset.popup;
+    // Гостю — не на первой странице визита (пришёл из поиска или по ссылке): поисковики
+    // понижают страницы, закрытые окном сразу при заходе. Только когда перешёл по сайту.
+    // Вторая страница — переход с нашей страницы или второй просмотр за визит (вкладку);
+    // счётчик — на случай, если браузер не передаёт, откуда пришли.
+    if (dialog.dataset.popup.startsWith("guest")) {
+      let fromSite = false, views = 0;
+      try { fromSite = new URL(document.referrer).host === location.host; } catch (e) {}
+      try { views = Number(sessionStorage.getItem("zakup-views") || 0) + 1; sessionStorage.setItem("zakup-views", String(views)); } catch (e) {}
+      if (!fromSite && views < 2) return;
+    }
     const days = Number(dialog.dataset.days || 0);
     try {
       const closedAt = Number(localStorage.getItem(key));

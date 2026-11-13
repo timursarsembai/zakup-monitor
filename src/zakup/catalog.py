@@ -6,10 +6,13 @@
 Регион — первые две цифры КАТО места поставки (как в фильтре поиска).
 """
 
+import json
+import logging
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import psycopg
@@ -129,13 +132,45 @@ def open_filter(division: str | None = None, region: str | None = None) -> Filte
                    sort="end")
 
 
-def counts(conn: psycopg.Connection, now: datetime | None = None) -> dict[tuple[str, str], tuple[int, float]]:
-    """Открытые лоты по (категория, регион): число и сумма. Пересчёт раз в час. Запрос — вне
-    блокировки: пересчитывает один поток, остальные пока получают прежние цифры."""
+Counts = dict[tuple[str, str], tuple[int, float]]
+# Последние цифры хранятся и в базе: после перезапуска сайт сразу показывает их, а не
+# считает при посетителе (на холодной базе — секунды, под нагрузкой — дольше предела 15 с).
+SNAPSHOT_KEY = "catalog_counts"
+SNAPSHOT_MAX_AGE = timedelta(days=1)  # старше — лоты в нём давно закрылись, не показываем
+
+
+def counts(conn: psycopg.Connection, now: datetime | None = None,
+           background: Callable[[], None] | None = None) -> Counts:
+    """Открытые лоты по (категория, регион): число и сумма. Пересчёт раз в час, один поток
+    за раз. С background (сайт) посетитель пересчёта не ждёт: прежние цифры — из памяти или
+    снимка в базе, пересчёт — background() (refresh на своём соединении). Без прежних цифр
+    (самый первый раз) или без background — считает сразу."""
     with _lock:
-        if _counts["at"] > time.monotonic() and _counts["rows"]:
-            return _counts["rows"]
-        _counts["at"] = time.monotonic() + 60  # пересчёт взят; не удастся — повтор через минуту
+        rows, fresh = _counts["rows"], _counts["at"] > time.monotonic()
+    if rows and fresh:
+        return rows
+    if not rows and background is not None:
+        rows = _load_snapshot(conn)
+        if rows:
+            with _lock:
+                if not _counts["rows"]:
+                    _counts["rows"] = rows  # срок не ставим: устаревшие — пересчитать
+                rows = _counts["rows"]
+    with _lock:
+        take = _counts["at"] <= time.monotonic()
+        if take:
+            _counts["at"] = time.monotonic() + 60  # пересчёт взят; не удастся — повтор через минуту
+    if rows and background is not None:
+        if take:
+            background()
+        return rows
+    if not take and rows:
+        return rows
+    return refresh(conn, now)
+
+
+def refresh(conn: psycopg.Connection, now: datetime | None = None) -> Counts:
+    """Пересчитать сводку, положить в память и в снимок."""
     where, params = open_filter().where(now or datetime.now(UTC), "lots")
     rows = conn.execute(
         f"""SELECT coalesce({LOT_DIVISION}, ''), coalesce({LOT_REGION}, ''), count(*), coalesce(sum(l.amount), 0)
@@ -143,12 +178,36 @@ def counts(conn: psycopg.Connection, now: datetime | None = None) -> dict[tuple[
     result = {(d, r): (n, float(s)) for d, r, n, s in rows}
     with _lock:
         _counts.update(rows=result, at=time.monotonic() + TTL)
+    try:
+        with conn.transaction():
+            conn.execute("""INSERT INTO app_settings (key, value) VALUES (%s, %s)
+                            ON CONFLICT (key) DO UPDATE SET value = excluded.value""",
+                         (SNAPSHOT_KEY, json.dumps({"at": datetime.now(UTC).isoformat(),
+                                                    "rows": [[d, r, n, s] for (d, r), (n, s) in result.items()]})))
+    except psycopg.Error:
+        logging.getLogger(__name__).exception("catalog: snapshot not saved")
     return result
 
-def totals(conn: psycopg.Connection, by: str) -> dict[str, tuple[int, float]]:
+
+def _load_snapshot(conn: psycopg.Connection) -> Counts:
+    try:
+        with conn.transaction():  # точка сохранения: сбой чтения не портит транзакцию страницы
+            row = conn.execute("SELECT value FROM app_settings WHERE key = %s", (SNAPSHOT_KEY,)).fetchone()
+        if not row:
+            return {}
+        stored = json.loads(row[0])
+        if datetime.now(UTC) - datetime.fromisoformat(stored["at"]) > SNAPSHOT_MAX_AGE:
+            return {}
+        return {(d, r): (int(n), float(s)) for d, r, n, s in stored["rows"]}
+    except (psycopg.Error, ValueError, TypeError, KeyError):
+        logging.getLogger(__name__).exception("catalog: snapshot not loaded")
+        return {}
+
+def totals(conn: psycopg.Connection, by: str,
+           background: Callable[[], None] | None = None) -> dict[str, tuple[int, float]]:
     """Сводка по категориям (by="division") или регионам (by="region")."""
     out: dict[str, list] = {}
-    for (division, region), (n, amount) in counts(conn).items():
+    for (division, region), (n, amount) in counts(conn, background=background).items():
         key = division if by == "division" else region
         if key in (DIVISIONS if by == "division" else REGIONS):
             item = out.setdefault(key, [0, 0.0])
@@ -170,7 +229,7 @@ def _scope(division: str | None, region: str | None) -> tuple[str, dict[str, str
 
 
 def page(conn: psycopg.Connection, division: str | None, region: str | None,
-         now: datetime | None = None) -> dict[str, Any]:
+         now: datetime | None = None, background: Callable[[], None] | None = None) -> dict[str, Any]:
     """Открытые лоты подборки и кто в ней покупает и выигрывает (за всё время). Держится
     в памяти PAGE_TTL: «кто покупает» — за всё время и считается сотни миллисекунд."""
     key = (division, region)
@@ -179,7 +238,7 @@ def page(conn: psycopg.Connection, division: str | None, region: str | None,
         return cached[1]
     now = now or datetime.now(UTC)
     n, amount = 0, 0.0
-    for (d, r), (count, total) in counts(conn, now).items():
+    for (d, r), (count, total) in counts(conn, now, background).items():
         if (not division or d == division) and (not region or r == region):
             n, amount = n + count, amount + total
     condition, scope_params = _scope(division, region)
@@ -208,11 +267,11 @@ def page(conn: psycopg.Connection, division: str | None, region: str | None,
         _pages[key] = (time.monotonic() + PAGE_TTL, data)
     return data
 
-def sitemap_paths(conn: psycopg.Connection) -> list[str]:
+def sitemap_paths(conn: psycopg.Connection, background: Callable[[], None] | None = None) -> list[str]:
     """Хабы, категории, регионы и пары «категория в регионе», где есть открытые лоты."""
     paths = ["/categories", "/regions"]
-    paths += [f"/category/{code}" for code in sorted(totals(conn, "division"))]
-    paths += [f"/region/{code}" for code in sorted(totals(conn, "region"))]
-    paths += [f"/category/{d}/{r}" for (d, r), (n, _) in sorted(counts(conn).items())
+    paths += [f"/category/{code}" for code in sorted(totals(conn, "division", background))]
+    paths += [f"/region/{code}" for code in sorted(totals(conn, "region", background))]
+    paths += [f"/category/{d}/{r}" for (d, r), (n, _) in sorted(counts(conn, background=background).items())
               if n and d in DIVISIONS and r in REGIONS]
     return paths

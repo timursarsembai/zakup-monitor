@@ -281,7 +281,7 @@ WIN_SORT_NAMES = {"date": "Сначала новые", "amount": "Сумма п�
 def categories_page(request: Request, user: Viewer):
     """Все категории закупок (разделы КПВЭД) с числом открытых лотов."""
     with core.pool.connection() as conn:
-        totals = catalog.totals(conn, "division")
+        totals = catalog.totals(conn, "division", _catalog_in_background)
     items = sorted(((code, totals.get(code, (0, 0))) for code in catalog.DIVISIONS), key=lambda i: -i[1][0])
     return templates.TemplateResponse(request, "catalog_index.html", {"kind": "division", "items": items})
 
@@ -289,7 +289,7 @@ def categories_page(request: Request, user: Viewer):
 @router.get("/regions")
 def regions_page(request: Request, user: Viewer):
     with core.pool.connection() as conn:
-        totals = catalog.totals(conn, "region")
+        totals = catalog.totals(conn, "region", _catalog_in_background)
     items = sorted(((code, totals.get(code, (0, 0))) for code in REGIONS), key=lambda i: -i[1][0])
     return templates.TemplateResponse(request, "catalog_index.html", {"kind": "region", "items": items})
 
@@ -298,8 +298,8 @@ def _catalog_page(request: Request, division: str | None, region: str | None):
     if (division and division not in catalog.DIVISIONS) or (region and region not in REGIONS):
         raise HTTPException(404, "Нет такой категории или региона")
     with core.pool.connection() as conn:
-        data = catalog.page(conn, division, region)
-        counts = catalog.counts(conn)
+        data = catalog.page(conn, division, region, background=_catalog_in_background)
+        counts = catalog.counts(conn, background=_catalog_in_background)
     # Соседние подборки: в категории — по регионам, в регионе — по категориям.
     if division:
         nearby = sorted(((r, n) for (d, r), (n, _) in counts.items() if d == division and r in REGIONS and n),
@@ -452,7 +452,7 @@ def sitemap_index() -> Response:
 def sitemap_part(kind: str) -> Response:
     if kind == "static":
         with core.pool.connection() as conn:
-            catalog_paths = catalog.sitemap_paths(conn)
+            catalog_paths = catalog.sitemap_paths(conn, _catalog_in_background)
         urls = [(f"{SITE_URL}{path}", None) for path in (
             "/", "/announcements", "/lots", "/orgs/customers", "/orgs/suppliers", "/results", "/analytics", "/calculator", "/pricing", "/offer", "/privacy", "/contacts",
             "/products", "/sellers", *catalog_paths)]
@@ -835,11 +835,36 @@ def _market_busy() -> Response:
 
 
 def _compute_market() -> dict[str, Any]:
-    with psycopg.connect(core.pool.conninfo, autocommit=True, connect_timeout=5,
-                         options=f"-c statement_timeout={MARKET_TIMEOUT_MS}") as conn:
+    with _analytics_connection() as conn:
         data = dashboard.market(conn)
         dashboard.save_snapshot(conn, data)
         return data
+
+
+def _analytics_connection() -> psycopg.Connection:
+    """Своё соединение для тяжёлых фоновых пересчётов: не из пула страниц, без долгой
+    транзакции и с пределом побольше."""
+    return psycopg.connect(core.pool.conninfo, autocommit=True, connect_timeout=5,
+                           options=f"-c statement_timeout={MARKET_TIMEOUT_MS}")
+
+
+_catalog_lock = threading.Lock()
+
+
+def _recount_catalog() -> None:
+    if not _catalog_lock.acquire(blocking=False):
+        return  # уже считается (при запуске или медленная база) — второй не нужен
+    try:
+        with _analytics_connection() as conn:
+            catalog.refresh(conn)
+    except Exception:
+        core.logger.exception("catalog: background recount failed")  # повтор — через минуту
+    finally:
+        _catalog_lock.release()
+
+
+def _catalog_in_background() -> None:
+    core._spawn(_recount_catalog)
 
 
 # После сбоя пересчёта — пауза: иначе каждый заход запускал бы новый тяжёлый расчёт.
