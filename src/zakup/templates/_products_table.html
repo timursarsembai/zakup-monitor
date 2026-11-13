@@ -1,16 +1,19 @@
+{% from "_filters.html" import filter_styles with context %}
 {# Таблица товаров с фильтрами — каталог (products.html) и страница продавца (seller.html).
    Нужны в контексте: p (products.listing), sorts, fresh_days, action, products_url, product_path,
    seller_path. Вид «таблица / плитка» — переключатель data-rview (app.js), у каталога свой выбор;
    по умолчанию — плитка (и на компьютере). #}
 {% macro products_styles() %}
+{{ filter_styles() }}
+  .prod-panel .fgrid .wide { grid-column: 1 / -1; }
+  .prod-panel .cat-list { max-height: 320px; overflow-y: auto; }
+  .found-row { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; margin: 12px 0 8px; }
+  @media (max-width: 760px) { .prod-panel .desk-sort { display: none; } }
+  @media (min-width: 761px) { :root[data-chips=desktop] .prod-panel .desk-sort { display: none; } }
   .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 13px; white-space: nowrap; border: 1px solid var(--line); }
   .badge.sub { background: color-mix(in srgb, var(--accent) 14%, transparent); border-color: transparent; }
   .chip-link { display: inline-block; padding: 4px 10px; margin: 0 4px 6px 0; border: 1px solid var(--line); border-radius: 999px; font-size: 14px; white-space: nowrap; }
 
-  .p-tools { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: end; margin: 12px 0; }
-  .p-tools label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
-  .p-tools input, .p-tools select { padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); font: inherit; min-width: 180px; max-width: 100%; }
-  .p-tools input[type=search] { min-width: 240px; }
   .view-switch { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
   .view-switch button { display: inline-flex; align-items: center; gap: 6px; border: 0; border-radius: 0; padding: 6px 10px; color: var(--muted); background: none; }
   .view-switch button[aria-pressed=true] { background: var(--accent); color: var(--on-accent); }
@@ -34,25 +37,64 @@
   [data-rview=cards] table.prod-table td.p-img { flex: 1 1 100%; }
   [data-rview=cards] table.prod-table td.p-img img { width: 100%; height: 160px; }
   [data-rview=cards] table.prod-table td.p-name { flex: 1 1 100%; }
-  .p-tools label.check span:last-child { display: flex; gap: 6px; align-items: center; color: var(--fg); font-size: 14px; padding: 7px 0; }
-  .p-tools label.check input { min-width: 0; }
 {% endmacro %}
 {% macro products_table() %}
-<form method="get" action="{{ action }}" class="p-tools">
-  <label>{{ _("Название или продавец") }}<input type="search" name="q" value="{{ p.q }}" placeholder="{{ _("например, огнетушитель") }}"></label>
-  <label>{{ _("Категория") }}<select name="category"><option value="">{{ _("Все") }}</option>
-    {% for code, n in p.divisions %}<option value="{{ code }}" {% if p.division == code %}selected{% endif %}>{{ division_name(code) or code }} ({{ n }})</option>{% endfor %}</select></label>
-  <label>{{ _("Цена от, ₸") }}<input name="price_min" inputmode="decimal" value="{{ p.price_min_text }}" style="min-width:110px;width:110px"></label>
-  <label>{{ _("до, ₸") }}<input name="price_max" inputmode="decimal" value="{{ p.price_max_text }}" style="min-width:110px;width:110px"></label>
-  <label class="check"><span>&nbsp;</span><span><input type="checkbox" name="available" value="1" {% if p.available %}checked{% endif %}> {{ _("в наличии") }}</span></label>
-  <label>{{ _("Сортировка") }}<select name="sort">{% for key, name in sorts.items() %}<option value="{{ key }}" {% if p.sort == key %}selected{% endif %}>{{ _(name) }}</option>{% endfor %}</select></label>
-  <button class="primary">{{ _("Показать") }}</button>
+{# Фильтр — как в поиске лотов и справочнике организаций: строка условий закреплена сверху,
+   условие открывает своё поле, «Фильтры» — всё; результаты — без перезагрузки (filters.js). #}
+{% set price_value = ((_("от") ~ " " ~ p.price_min_text) if p.price_min_text else "") ~ (" " if p.price_min_text and p.price_max_text else "") ~ ((_("до") ~ " " ~ p.price_max_text) if p.price_max_text else "") %}
+{% set chips = [("q", _("Название, продавец"), ("«" ~ p.q[:16] ~ "»") if p.q else ""),
+                ("category", _("Категория"), ((division_name(p.division) or p.division)[:24]) if p.division else ""),
+                ("price", _("Цена"), price_value)] %}
+<div class="chipbar" data-chipbar>
+  <div class="chip-fixed">
+    <button type="button" class="chip-icon" data-chip-open="sort" aria-label="{{ _("Сортировка") }}" title="{{ _("Сортировка") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4v16M3 8l4-4 4 4M17 20V4M13 16l4 4 4-4"/></svg></button>
+    <button type="button" class="chip-icon" data-chip-open="all" aria-label="{{ _("Фильтры") }}" title="{{ _("Фильтры") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>{% set n = (chips | map(attribute=2) | select | list | length) + (1 if p.available else 0) %}{% if n %}<span class="count">{{ n }}</span>{% endif %}</button>
+  </div>
+  <button type="button" class="chip-arrow" data-chip-arrow="-1" aria-label="{{ _("Назад") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg></button>
+  <div class="chip-scroll">
+    {% for key, label, value in chips %}<button type="button" class="chip {{ 'set' if value }}" data-chip-open="{{ key }}" data-title="{{ label }}">{{ value or label }}<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>{% endfor %}
+    <button type="button" class="chip {{ 'set' if p.available }}" data-chip-toggle="available">{{ _("В наличии") }}</button>
+  </div>
+  <button type="button" class="chip-arrow" data-chip-arrow="1" aria-label="{{ _("Дальше") }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></button>
+</div>
+<div class="filter-backdrop" data-filter-backdrop hidden></div>
+
+<form method="get" action="{{ action }}" class="filters-panel prod-panel" id="filters" aria-label="{{ _("Фильтр") }}">
+  <div class="sheet-head"><b>{{ _("Фильтр") }}</b><button type="button" data-filter-close aria-label="{{ _("Закрыть") }}">✕</button></div>
+  <div class="fgrid">
+    <div class="wide" data-chip="q"><label class="fl" for="p-q">{{ _("Название или продавец") }}</label><input id="p-q" type="search" name="q" value="{{ p.q }}" placeholder="{{ _("например, огнетушитель") }}"></div>
+    <div data-chip="category"><span class="fl">{{ _("Категория") }}</span>
+      <div class="radio-list cat-list">
+        <label class="check"><input type="radio" name="category" value="" {% if not p.division %}checked{% endif %}> {{ _("Все категории") }}</label>
+        {% for code, n in p.divisions %}<label class="check"><input type="radio" name="category" value="{{ code }}" {% if p.division == code %}checked{% endif %}> {{ division_name(code) or code }} <span class="muted">· {{ n }}</span></label>{% endfor %}
+      </div></div>
+    <div data-chip="price"><span class="fl">{{ _("Цена, ₸, от — до") }}</span>
+      <div class="pair"><input name="price_min" inputmode="decimal" value="{{ p.price_min_text }}" placeholder="{{ _("от") }}" aria-label="{{ _("Цена от, ₸") }}"><input name="price_max" inputmode="decimal" value="{{ p.price_max_text }}" placeholder="{{ _("до") }}" aria-label="{{ _("до, ₸") }}"></div></div>
+    <div data-chip="available"><label class="check"><input type="checkbox" name="available" value="1" {% if p.available %}checked{% endif %}> {{ _("Только в наличии") }}</label></div>
+    <div class="desk-sort"><label class="fl" for="p-sort">{{ _("Сортировка") }}</label><select id="p-sort" name="sort" data-sort-field>{% for key, name in sorts.items() %}<option value="{{ key }}" {% if p.sort == key %}selected{% endif %}>{{ _(name) }}</option>{% endfor %}</select></div>
+  </div>
+  <div class="sort-pick" data-chip="sort">
+    <span class="fl">{{ _("Сортировка") }}</span>
+    {% for key, name in sorts.items() %}<button type="button" class="sort-option {{ 'on' if p.sort == key }}" data-sort-value="{{ key }}">{{ _(name) }}</button>{% endfor %}
+  </div>
+  <div class="single-actions">
+    <button type="button" data-chip-reset>{{ _("Сбросить") }}</button>
+    <button class="primary">{{ _("Применить") }}</button>
+  </div>
+  <div class="panel-actions">
+    <button class="primary">{{ _("Найти") }}</button>
+    <a href="{{ action }}" data-reset-all>{{ _("Сбросить") }}</a>
+  </div>
+</form>
+
+<div data-results>
+<div class="found-row">
+  <span class="muted">{{ _("Товаров:") }} <b>{{ p.total }}</b>{% if action == "/products" %} · <a href="/sellers">{{ _("Все продавцы") }} →</a>{% endif %}</span>
   <div class="view-switch" role="group" data-rview-group="catalog" aria-label="{{ _("Вид отображения") }}">
     <button type="button" data-rview="table"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18M3 12h18M3 19h18"/></svg><span>{{ _("Таблица") }}</span></button>
     <button type="button" data-rview="cards"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5"/></svg><span>{{ _("Плитка") }}</span></button>
   </div>
-</form>
-<p>{{ _("Товаров:") }} <b>{{ p.total }}</b></p>
+</div>
 <div class="table-wrap" data-rview-box="catalog" data-rview-default="cards" data-rview="cards"><table class="prod-table">
   <tr><th></th><th>{{ _("Товар") }}</th><th>{{ _("Продавец") }}</th><th>{{ _("Цена, ₸") }}</th><th>{{ _("Категория") }}</th><th>{{ _("Найден в лотах") }}</th></tr>
   {% for r in p.rows %}
@@ -68,8 +110,10 @@
     <td data-label="{{ _("Найден в лотах") }}">{% if not r.lots_found %}—{% elif request.state.paid %}{% for lot in r.lots[-3:]|reverse %}<a href="/lots/{{ lot }}">{{ lot }}</a>{{ ", " if not loop.last }}{% endfor %}{% if r.lots|length > 3 %} <span class="muted">{{ _("и ещё") }} {{ r.lots|length - 3 }}</span>{% endif %}{% else %}{{ r.lots_found }} · <button type="button" class="link-button" data-paid data-feature="catalog_lots">{{ _("по подписке") }} 🔒</button>{% endif %}</td>
   </tr>
   {% else %}
-  <tr><td colspan="6" class="muted">{{ _("Пока пусто: каталог пополняется с каждым поиском товаров.") if not p.q and not p.division and p.price_min is none and p.price_max is none and not p.available else _("Ничего не нашлось.") }}</td></tr>
+  <tr><td colspan="6" class="muted">{{ _("Пока пусто: каталог пополняется каждый день.") if not p.q and not p.division and p.price_min is none and p.price_max is none and not p.available else _("Ничего не нашлось.") }}</td></tr>
   {% endfor %}
 </table></div>
 {% if p.pages > 1 %}<div class="pager">{% if p.page > 1 %}<a href="{{ products_url(page=p.page - 1) }}">← {{ _("Назад") }}</a>{% endif %}<span class="muted">{{ _("стр.") }} {{ p.page }} {{ _("из") }} {{ p.pages }}</span>{% if p.page < p.pages %}<a href="{{ products_url(page=p.page + 1) }}">{{ _("Дальше") }} →</a>{% endif %}</div>{% endif %}
+</div>
+<script src="/static/filters.js?v={{ asset_v }}"></script>
 {% endmacro %}
