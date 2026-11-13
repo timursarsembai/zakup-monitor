@@ -47,8 +47,11 @@ def start_research(
     more: Annotated[str, Form()] = "",
 ):
     with core.pool.connection() as conn:
-        if research.lot_context(conn, lot_id) is None:
+        info = research.lot_context(conn, lot_id)
+        if info is None:
             raise HTTPException(404, "Нет данных лота: откройте страницу объявления")
+        if not info["has_spec"]:
+            raise HTTPException(409, "У лота нет техспецификации — искать товары не по чему")
         staff = request.state.staff
         try:
             research.enqueue(conn, user, lot_id, region, whole_kz == "1",

@@ -86,7 +86,7 @@
   {% if job.base_id %}
   <p class="{{ 'muted' if r.exhausted else '' }}">{% if r.exhausted %}{{ _("Больше подходящих предложений не нашлось — показано всё, что есть.") }}{% else %}{{ _("Добавлено новых предложений:") }} <b>{{ r.added }}</b>{% endif %}</p>
   {% endif %}
-  {% if r["items"] and not r.exhausted and not busy %}
+  {% if r["items"] and not r.exhausted and not busy and lot_info and lot_info.has_spec %}
   <form class="more-form" data-search method="post" action="/lots/{{ lot_id }}/research">
     <input type="hidden" name="more" value="1">
     <button class="primary">➕ {{ _("Найти ещё") }}{% if not request.state.staff %} <span class="cost">×1</span>{% endif %}</button>

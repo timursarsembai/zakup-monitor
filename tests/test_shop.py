@@ -68,7 +68,9 @@ def test_shop_without_bin_waits_for_moderation(client, conn):
     assert shop.tiers(conn, pid) == [(1, 25000), (10, 23000), (50, 21000)]
     path = products.path({"id": pid, "name": "Стул офисный"})
     # Владельцу — видно (с пометкой), остальным — нет, пока магазин на проверке.
-    assert "Цены по количеству" in client.get(path).text
+    page = client.get(path).text
+    # Узкая таблица — по ширине экрана телефона, без прокрутки вбок.
+    assert "Цены по количеству" in page and '<table class="narrow">' in page
     own_page = client.get(sellers.path(seller)).text
     assert "на проверке" in own_page and "Стул офисный" in own_page  # свои товары владельцу видны
     conn.execute("""INSERT INTO product_catalog (url_key, url, name, price, division)

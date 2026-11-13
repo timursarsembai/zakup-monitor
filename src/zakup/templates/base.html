@@ -159,6 +159,9 @@
     .a11y-panel { position: fixed; left: 12px; right: 12px; top: 56px; width: auto; }
     header .who { display: none; }
     .table-wrap table { min-width: 760px; }
+    /* Узкие таблицы (две колонки: количество — цена, название — значение) — по ширине экрана. */
+    .table-wrap table.narrow { min-width: 0; }
+    .table-wrap table.narrow td { overflow-wrap: anywhere; }
   }
   dialog.paywall { width: min(480px, calc(100vw - 32px)); border: 1px solid var(--line); border-radius: 14px; padding: 0; background: var(--bg); color: var(--fg); }
   dialog.paywall::backdrop { background: rgba(0, 0, 0, .55); }

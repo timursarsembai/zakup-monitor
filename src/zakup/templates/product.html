@@ -70,7 +70,7 @@
 {% if item.tiers|length > 1 %}
 <section>
   <h2>{{ _("Цены по количеству") }}</h2>
-  <div class="table-wrap"><table>
+  <div class="table-wrap"><table class="narrow">
     <tr><th>{{ _("Количество") }}</th><th class="num">{{ _("Цена за единицу, ₸") }}</th></tr>
     {% for t in item.tiers %}<tr><td>{{ _("от") }} {{ '%g'|format(t.min_qty) }}{% if item.price_unit %} {{ item.price_unit }}{% endif %}</td><td class="num"><b>{{ t.price | money }}</b></td></tr>{% endfor %}
   </table></div>
@@ -87,14 +87,14 @@
 {% if item.specs %}
 <section>
   <h2>{{ _("Характеристики") }}</h2>
-  <div class="table-wrap"><table class="specs">{% for s in item.specs %}<tr><td>{{ s.name }}</td><td>{{ s.value }}</td></tr>{% endfor %}</table></div>
+  <div class="table-wrap"><table class="specs narrow">{% for s in item.specs %}<tr><td>{{ s.name }}</td><td>{{ s.value }}</td></tr>{% endfor %}</table></div>
 </section>
 {% endif %}
 
 {% if item.price_history %}
 <section>
   <h2>{{ _("История цены") }}</h2>
-  <div class="table-wrap"><table>
+  <div class="table-wrap"><table class="narrow">
     <tr><th>{{ _("Дата") }}</th><th class="num">{{ _("Цена, ₸") }}</th></tr>
     <tr><td>{{ (item.checked_at|local).strftime("%d.%m.%Y") }}</td><td class="num"><b>{{ item.price | money if item.price is not none else "—" }}</b></td></tr>
     {% for h in item.price_history %}<tr><td>{{ h.at[8:10] }}.{{ h.at[5:7] }}.{{ h.at[:4] }}</td><td class="num">{{ h.price | money }}</td></tr>{% endfor %}

@@ -96,7 +96,8 @@ def test_announcements_page_lot_page_and_portal_fields(client, conn):
     assert "Бумага А4" in client.get("/lots?applied=1&deadline_mode=&enstru=1712").text
     lot = client.get("/lots/5001").text
     assert "Бумага А4" in lot and "/a/500" in lot and "Другие лоты (1)" in lot
-    assert 'data-tab="research"' in lot and 'data-panel="others"' in lot  # разделы — вкладками
+    # Разделы — вкладками; «Поиск товаров» — только с техспецификацией (её здесь нет).
+    assert 'data-tab="bid"' in lot and 'data-panel="others"' in lot and 'data-tab="research"' not in lot
     assert "/lots/5002" in lot
     workbook = client.get("/export.xlsx?applied=1&deadline_mode=")
     assert workbook.status_code == 200 and workbook.content[:2] == b"PK"

@@ -3,7 +3,7 @@
 
 
 from tests.web_helpers import ORIGIN, _announcement_with_lots, _login
-from zakup import auth, db
+from zakup import auth, db, details, research
 
 
 def test_lot_page_research_section_and_start(client, conn, monkeypatch):
@@ -32,6 +32,40 @@ def test_lot_page_research_section_and_start(client, conn, monkeypatch):
     monkeypatch.setenv("ZAKUP_SECRET_KEY", "")
     bad = client.post("/settings/ai", data={"provider": "openai"}, headers=ORIGIN)
     assert bad.status_code == 422
+
+
+def test_research_tab_hidden_without_spec(client, conn):
+    from tests.test_research import _lot
+
+    _lot(conn)
+    conn.execute("DELETE FROM lot_specs WHERE lot_id = 90")
+    conn.commit()
+    # Файл есть, но ещё не разобран — поиск есть (ориентируется на описание).
+    detail = conn.execute("SELECT detail FROM announcements WHERE id = 9").fetchone()[0]
+    detail["Lots"][0]["Files"] = [{"nameRu": "Техническая спецификация", "filePath": "https://ows.goszakup.gov.kz/f"}]
+    assert research.lot_context(conn, 90)["has_spec"] is False
+    details.save(conn, detail)
+    conn.commit()
+    assert research.lot_context(conn, 90)["has_spec"] is True
+    # Файла нет вовсе — искать не по чему.
+    details.save(conn, {**detail, "Lots": [{**detail["Lots"][0], "Files": []}]})
+    conn.commit()
+    _login(client)
+    page = client.get("/lots/90").text
+    # Без техспецификации искать не по чему: ни вкладки, ни запуска.
+    assert 'data-tab="research"' not in page and 'id="research"' not in page
+    response = client.post("/lots/90/research", data={"region": "г.Актобе", "whole_kz": "1"},
+                           headers=ORIGIN, follow_redirects=False)
+    assert response.status_code == 409
+    assert conn.execute("SELECT count(*) FROM lot_research").fetchone()[0] == 0
+    # Уже сделанный поиск остаётся виден, но «Найти ещё» без спецификации нет.
+    conn.execute("""INSERT INTO lot_research (lot_id, user_id, provider, region, status, finished_at, result)
+        SELECT 90, id, 'anthropic', 'Актобе', 'done', now(), '{"summary": "s", "items": [{"name": "Стол дуб",
+        "seller": "М", "price": 1, "unit_price": 1, "url": "https://m.kz/1", "fit": "полностью"}]}'
+        FROM users LIMIT 1""")
+    conn.commit()
+    page = client.get("/lots/90").text
+    assert 'data-tab="research"' in page and "искать товары не по чему" in page and "Найти ещё" not in page
 
 
 def test_research_list_page(client, conn):

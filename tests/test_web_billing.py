@@ -12,6 +12,8 @@ def test_search_balance_charge_refund_history(client, conn):
     from zakup import credits
 
     _announcement_with_lots(conn)
+    # Поиск товаров — только по техспецификации.
+    conn.execute("INSERT INTO lot_specs (lot_id, file_url, text) VALUES (5001, 'https://ows.goszakup.gov.kz/x', 'Стол')")
     auth.set_password(conn, "+77011112233", "client-password-1")
     conn.execute("UPDATE users SET role = 'user', paid_until = now() + interval '30 days' WHERE email = '+77011112233'")
     conn.commit()

@@ -50,6 +50,9 @@ def lot_context(conn: psycopg.Connection, lot_id: int) -> dict[str, Any] | None:
         "places": "; ".join(places) or "не указано",
         "kato": kato,
         "spec": (spec[0] if spec and spec[0] else "нет — ориентируйся на описание")[:SPEC_LIMIT],
+        # Без техспецификации поиску товаров не по чему искать (вкладка скрыта). Есть файл, но
+        # он ещё не разобран или не разбирается — поиск есть (ориентируется на описание).
+        "has_spec": bool(info["spec_url"] or (spec and spec[0])),
     }
 
 

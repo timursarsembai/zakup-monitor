@@ -172,9 +172,13 @@
    #results открывают нужную вкладку (lot.js). #}
 {% set has_spec = spec_file(lot) %}
 {% set has_results = lot.id in results or (end and end < now) %}
+{# Поиск товаров — по техспецификации: без неё вкладка нужна только ради товаров продавцов
+   или уже сделанного поиска (его результаты). #}
+{% set can_search = lot_info and lot_info.has_spec %}
+{% set has_research = can_search or shop_offers or job %}
 <nav class="tabs lot-tabs" role="tablist" aria-label="{{ _("Разделы лота") }}">
   {% if has_spec %}<button type="button" role="tab" data-tab="spec">{{ _("Техспецификация") }}</button>{% endif %}
-  <button type="button" role="tab" data-tab="research">{{ _("Поиск товаров") }}</button>
+  {% if has_research %}<button type="button" role="tab" data-tab="research">{{ _("Поиск товаров") }}</button>{% endif %}
   {% if rivals %}<button type="button" role="tab" data-tab="suppliers">{{ _("Конкуренты") }}</button>{% endif %}
   <button type="button" role="tab" data-tab="bid">{{ _("Цена заявки") }}</button>
   {% if has_results %}<button type="button" role="tab" data-tab="results">{{ _("Итоги") }}</button>{% endif %}
@@ -185,7 +189,7 @@
 
 {% if has_spec %}<div data-panel="spec" id="spec">{{ lot_spec(lot, open=true) }}</div>{% endif %}
 
-<div data-panel="research" hidden>
+{% if has_research %}<div data-panel="research" hidden>
 {% if shop_offers %}
 {# Свои каталоги продавцов под лот (zakup.offers.for_lot): цена — оптовая ступень по количеству лота. #}
 <section class="research-box" id="offers">
@@ -211,7 +215,7 @@
 {% endif %}
 <section class="research-box" id="research">
   <h2 style="margin-top:0">{{ _("Поиск товаров с ИИ") }}</h2>
-  {% if lot_info %}
+  {% if can_search %}
   <form class="research-form" data-search method="post" action="/lots/{{ lot.id }}/research">
     <input name="region" value="{{ region }}" aria-label="{{ _("Где искать в первую очередь") }}" placeholder="{{ _("Регион поставки") }}">
     <input type="hidden" name="whole_kz" value="1"><span class="muted">{{ _("и по всему Казахстану") }}</span>
@@ -222,12 +226,14 @@
   <p class="muted">{{ _("Claude прочитает техспецификацию, найдёт в интернете подходящие товары — сначала в регионе поставки, потом по Казахстану — и посчитает маржу от цены в лоте. Сейчас ищет:") }} {{ provider_name }}{% if request.state.role == "admin" %} (<a href="/settings#ai">{{ _("настройки") }}</a>){% endif %}.</p>
   {% if manual_links %}<div class="manual"><span class="muted">{{ _("Искать самому:") }}</span>
     {% for label, url in manual_links %}<a class="chip-link" href="{{ url }}" target="_blank" rel="noopener noreferrer">🔎 {{ _(label) }}</a>{% endfor %}</div>{% endif %}
+  {% elif lot_info %}
+  <p class="muted">{{ _("У лота нет техспецификации — искать товары не по чему.") }}</p>
   {% else %}
   <p class="muted">{{ _("Нет данных лота для поиска.") }}</p>
   {% endif %}
   {% set lot_id = lot.id %}<div data-research data-src="/lots/{{ lot.id }}/research">{% include "research_fragment.html" %}</div>
 </section>
-</div>
+</div>{% endif %}
 
 {% if rivals %}<div data-panel="suppliers" hidden>{{ suppliers_block(rivals, lot.id, request.state.paid, rivals_shown) }}</div>{% endif %}
 
