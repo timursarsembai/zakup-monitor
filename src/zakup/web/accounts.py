@@ -189,7 +189,7 @@ def _start(request: Request, purpose: str, raw_phone: str):
         try:
             flow = signup.start(conn, phone, purpose, ip)
         except signup.SignupError as error:
-            return _phone_page(request, purpose, raw_phone, i18n.gettext(str(error)), 429)
+            return _phone_page(request, purpose, raw_phone, error.translated(), 429)
     _audit(request, None, "otp_sent", login=phone, purpose=purpose)
     return _code_page(request, purpose, flow, phone)
 
@@ -224,7 +224,7 @@ def _finish(request: Request, purpose: str, flow: str, code: str, password: str,
         try:
             phone = signup.verify(conn, flow, purpose, code)
         except signup.SignupError as error:
-            return _code_page(request, purpose, flow, phone, i18n.gettext(str(error)), 422)
+            return _code_page(request, purpose, flow, phone, error.translated(), 422)
         if purpose == "register":
             old = conn.execute("SELECT id, deleted_at, may_reregister, trial_until FROM users WHERE email = %s",
                                (phone,)).fetchone()

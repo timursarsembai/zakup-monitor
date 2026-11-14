@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="{{ lang }}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>{{ title }} — Tenderim</title>
+<style>
+  :root { --bg: #f5f6f8; --card: #fff; --text: #1d2330; --muted: #667085; --accent: #1f6feb; --error: #b42318; --line: #d0d5dd; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #111418; --card: #1b2027; --text: #e6e8eb; --muted: #98a2b3; --accent: #4c8dff; --error: #f97066; --line: #344054; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 420px; margin: 0 auto; padding: 32px 16px; }
+  .brand { display: block; margin-bottom: 20px; font-weight: 700; font-size: 20px; color: var(--text); text-decoration: none; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 24px; }
+  h1 { font-size: 22px; margin: 0 0 12px; }
+  .hint, .muted { color: var(--muted); }
+  .error { color: var(--error); }
+  .field { margin: 14px 0; }
+  label { display: block; margin-bottom: 4px; font-size: 14px; }
+  input { width: 100%; padding: 10px 12px; font: inherit; color: inherit; background: transparent; border: 1px solid var(--line); border-radius: 8px; }
+  button { width: 100%; margin-top: 8px; padding: 11px; font: inherit; font-weight: 600; color: #fff; background: var(--accent); border: 0; border-radius: 8px; cursor: pointer; }
+  .foot { margin-top: 16px; text-align: center; }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <a class="brand" href="{{ site }}/">Tenderim</a>
+  {% if step == "message" %}
+  <div class="card"><h1>{{ title }}</h1><p>{{ message }}</p></div>
+  {% else %}
+  <form class="card" method="post" action="{{ action }}">
+    <h1>{{ title }}</h1>
+    {% if hint %}<p class="hint">{{ hint }}</p>{% endif %}
+    {% if step == "code" %}<p class="hint">{{ _("Код отправлен по SMS на номер") }} <b>{{ phone }}</b>.</p>{% endif %}
+    {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+    <input type="hidden" name="lang" value="{{ lang }}">
+    {% if step == "phone" %}
+    <div class="field">
+      <label for="phone">{{ _("Телефон") }}</label>
+      <input id="phone" name="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="+7 7XX XXX XX XX" value="{{ phone }}" required autofocus>
+    </div>
+    <button>{{ _("Получить код") }}</button>
+    {% elif step == "code" %}
+    <input type="hidden" name="flow" value="{{ flow }}">
+    <div class="field">
+      <label for="code">{{ _("Код из SMS") }}</label>
+      <input id="code" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="8" required autofocus>
+    </div>
+    {% endif %}
+    {% if step in ("code", "password") %}
+    {% if step == "password" %}
+    <div class="field">
+      <label for="current">{{ _("Текущий пароль") }}</label>
+      <input id="current" name="current" type="password" autocomplete="current-password" required autofocus>
+    </div>
+    {% endif %}
+    <div class="field">
+      <label for="password">{{ _("Придумайте пароль") if purpose == "register" else _("Новый пароль") }} <span class="muted">{{ _("— не короче 10 знаков") }}</span></label>
+      <input id="password" name="password" type="password" autocomplete="new-password" minlength="10" required>
+    </div>
+    <div class="field">
+      <label for="password2">{{ _("Повторите пароль") }}</label>
+      <input id="password2" name="password2" type="password" autocomplete="new-password" minlength="10" required>
+    </div>
+    <button>{{ _("Зарегистрироваться") if purpose == "register" else _("Сохранить пароль") }}</button>
+    {% endif %}
+  </form>
+  {% if again %}<p class="foot"><a href="{{ again }}">{{ _("Не пришёл код? Отправить заново") }}</a></p>{% endif %}
+  {% endif %}
+  <p class="foot"><a href="{{ site }}/">{{ _("На главную") }}</a></p>
+</main>
+</body>
+</html>

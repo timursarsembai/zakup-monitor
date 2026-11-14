@@ -26,7 +26,15 @@ PER_DAY = {"register": 100, "reset": 50}
 
 
 class SignupError(Exception):
-    pass
+    """Текст для человека: шаблон по-русски и значения — перевод по шаблону (translated)."""
+
+    def __init__(self, text: str, **values):
+        super().__init__(text.format(**values) if values else text)
+        self.text, self.values = text, values
+
+    def translated(self) -> str:
+        from zakup import i18n
+        return i18n.gettext(self.text, **self.values)
 
 
 def registration_open(conn: psycopg.Connection) -> bool:
@@ -134,8 +142,8 @@ def verify(conn: psycopg.Connection, flow: str, purpose: str, code: str) -> str:
         raise SignupError("Не удалось проверить код. Попробуйте ещё раз.") from None
     if not confirmed:
         left = MAX_ATTEMPTS - attempts
-        raise SignupError(f"Неверный код. Осталось попыток: {left}." if left else
-                          "Неверный код. Попытки закончились — запросите новый.")
+        raise SignupError("Неверный код. Осталось попыток: {left}." if left else
+                          "Неверный код. Попытки закончились — запросите новый.", left=left)
     conn.execute("UPDATE otp_requests SET verified_at = now(), used_at = now() WHERE flow = %s", (flow,))
     conn.commit()
     # Номер — из ответа kazpayment, а не из формы: только его они подтвердили.

@@ -32,7 +32,7 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 [tool.setuptools.package-data]
-zakup_id = ["migrations/*.sql"]
+zakup_id = ["migrations/*.sql", "templates/*.html"]
 zakup = ["migrations/*.sql", "templates/*.html", "templates/*/*.html", "static/*", "fonts/*"]
 
 [tool.pytest.ini_options]

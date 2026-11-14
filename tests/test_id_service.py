@@ -55,6 +55,7 @@ def service(id_db, monkeypatch):
         conn.execute("INSERT INTO accounts (id, login, password_hash, telegram_chat_id) "
                      "VALUES (7, '+77011112233', %s, '555')", (hash_password("верный-пароль"),))
         conn.commit()
+        accounts.sync_ids(conn)   # как после переноса: новые номера — после перенесённых
         client.db = conn
         yield client
 
@@ -151,7 +152,6 @@ def test_revoke_ends_every_session_and_block_holds(service):
 
 
 def test_sync_ids_after_import(service):
-    accounts.sync_ids(service.db)
     new = service.db.execute("INSERT INTO accounts (login) VALUES ('new@example.com') RETURNING id").fetchone()
     assert new == (8,)
 
@@ -177,3 +177,157 @@ def test_notify_sends_to_chat_and_forgets_gone_chat(service, monkeypatch):
         {"ok": False, "error_code": 403, "description": "Forbidden: bot was blocked by the user"}))
     assert _api(service, "/api/notify", {"user_id": 7, "text": "x"}).json()["reason"] == "chat_gone"
     assert service.db.execute("SELECT telegram_chat_id FROM accounts").fetchone() == (None,)
+
+
+@pytest.fixture
+def sms(monkeypatch):
+    """kazpayment без сети: код всегда 1234, номер подтверждает тот, на который отправили."""
+    from zakup import kazpayment
+    sent = []
+    monkeypatch.setattr(kazpayment, "request_otp", lambda phone: sent.append(phone) or f"req-{phone}")
+    monkeypatch.setattr(kazpayment, "verify_otp",
+                        lambda request_id, code: request_id.removeprefix("req-") if code == "1234" else None)
+    return sent
+
+
+def _open_registration(client):
+    assert _api(client, "/api/registration", {"open": True}).json() == {"open": True}
+
+
+def _flow(reply):
+    import re
+    return re.search(r'name="flow" value="([^"]+)"', reply.text).group(1)
+
+
+def _own(client, path, data):
+    return client.post(path, data=data, headers={"origin": "https://id.tenderim.com"}, follow_redirects=False)
+
+
+def test_registration_closed_by_default_then_full_flow(service, sms):
+    assert service.get("/register").status_code == 403
+    _open_registration(service)
+    assert "Получить код" in service.get("/register").text
+    taken = _own(service, "/register", {"phone": "+7 701 111 22 33"})
+    assert taken.status_code == 422 and "уже зарегистрирован" in taken.text
+    step = _own(service, "/register", {"phone": "8 702 000 11 22"})
+    assert step.status_code == 200 and sms == ["+77020001122"] and "+77020001122" in step.text
+    flow = _flow(step)
+    short = _own(service, "/register/code", {"flow": flow, "code": "1234", "password": "коротко", "password2": "коротко"})
+    assert short.status_code == 422
+    wrong = _own(service, "/register/code", {"flow": flow, "code": "9999", "password": "длинный-пароль",
+                                             "password2": "длинный-пароль"})
+    assert "Неверный код" in wrong.text
+    done = _own(service, "/register/code", {"flow": flow, "code": "1234", "password": "длинный-пароль",
+                                            "password2": "длинный-пароль"})
+    assert done.headers["location"] == f"{SITE}/welcome/company"
+    claims = token.read(done.cookies.get(token.COOKIE), PUBLIC)
+    assert claims.user_id == 8
+    assert _api_get(service, "/api/accounts/8") == {"previous_id": None, "deleted": False}
+    service.cookies.clear()
+    assert _login(service, login="+77020001122", password="длинный-пароль").headers["location"] == f"{SITE}/my"
+
+
+def _api_get(client, path):
+    return client.get(path, headers={"authorization": f"Bearer {SERVICE_KEY}"}).json()
+
+
+def test_deleted_number_registers_again_only_when_allowed(service, sms):
+    _open_registration(service)
+    _api(service, "/api/status", {"user_id": 7, "deleted": True})
+    assert "error=password" in _login(service).headers["location"]
+    closed = _own(service, "/register", {"phone": "+77011112233"})
+    assert closed.status_code == 403
+    _api(service, "/api/status", {"user_id": 7, "may_reregister": True})
+    flow = _flow(_own(service, "/register", {"phone": "+77011112233"}))
+    done = _own(service, "/register/code", {"flow": flow, "code": "1234", "password": "новый-пароль-1",
+                                            "password2": "новый-пароль-1"})
+    new_id = token.read(done.cookies.get(token.COOKIE), PUBLIC).user_id
+    assert new_id != 7 and _api_get(service, f"/api/accounts/{new_id}")["previous_id"] == 7
+
+
+def test_password_reset_by_sms_ends_old_sessions(service, sms):
+    old = _login(service).cookies.get(token.COOKIE)
+    assert _own(service, "/forgot", {"phone": "+77779998877"}).status_code == 404
+    flow = _flow(_own(service, "/forgot", {"phone": "87011112233"}))
+    done = _own(service, "/forgot/code", {"flow": flow, "code": "1234", "password": "сброшенный-пароль",
+                                          "password2": "сброшенный-пароль"})
+    assert done.headers["location"] == f"{SITE}/"
+    assert _api(service, "/api/renew", {"token": old}).status_code == 401
+    service.cookies.clear()
+    assert _login(service, password="сброшенный-пароль").headers["location"] == f"{SITE}/my"
+
+
+def test_phone_checks_are_limited_per_address(service, sms):
+    _open_registration(service)
+    for _ in range(10):
+        _own(service, "/forgot", {"phone": "+77779998877"})
+    assert _own(service, "/forgot", {"phone": "+77011112233"}).status_code == 429
+    assert sms == []
+
+
+def test_password_change_needs_session_and_current_password(service):
+    assert service.get("/password", follow_redirects=False).headers["location"].startswith(f"{SITE}/login")
+    first = _login(service)
+    service.cookies.set(token.COOKIE, first.cookies.get(token.COOKIE), domain="id.tenderim.com")
+    assert "Текущий пароль" in service.get("/password").text
+    bad = _own(service, "/password", {"current": "не-тот", "password": "другой-пароль", "password2": "другой-пароль"})
+    assert bad.status_code == 422 and "неверный" in bad.text
+    ok = _own(service, "/password", {"current": "верный-пароль", "password": "другой-пароль",
+                                     "password2": "другой-пароль"})
+    assert ok.headers["location"] == f"{SITE}/settings?notice=password"
+    assert _api(service, "/api/renew", {"token": first.cookies.get(token.COOKIE)}).status_code == 401
+    assert _api(service, "/api/renew", {"token": ok.cookies.get(token.COOKIE)}).status_code == 200
+
+
+def test_kazakh_pages(service):
+    assert 'lang="kk"' in service.get("/forgot?lang=kk").text
+
+
+def test_blocked_number_gets_no_reset_sms(service, sms):
+    _api(service, "/api/revoke", {"user_id": 7, "block": True})
+    reply = _own(service, "/forgot", {"phone": "+77011112233"})
+    assert reply.status_code == 403 and sms == []
+
+
+def test_replaced_record_cannot_be_restored(service, sms):
+    _open_registration(service)
+    _api(service, "/api/status", {"user_id": 7, "deleted": True, "may_reregister": True})
+    flow = _flow(_own(service, "/register", {"phone": "+77011112233"}))
+    _own(service, "/register/code", {"flow": flow, "code": "1234", "password": "новый-пароль-1",
+                                     "password2": "новый-пароль-1"})
+    assert _api(service, "/api/status", {"user_id": 7, "deleted": False}).status_code == 409
+    assert _api(service, "/api/status", {"user_id": 99, "deleted": True}).status_code == 404
+
+
+def test_deleted_account_gets_no_messages(service, monkeypatch):
+    import zakup_id.app as id_app
+    monkeypatch.setenv("ID_TELEGRAM_TOKEN", "bot-token")
+    monkeypatch.setattr(id_app.httpx, "post", lambda *a, **k: pytest.fail("must not send"))
+    _api(service, "/api/status", {"user_id": 7, "deleted": True})
+    assert _api(service, "/api/notify", {"user_id": 7, "text": "x"}).json()["reason"] == "no_chat"
+
+
+def test_wrong_code_message_in_kazakh(service, sms):
+    flow = _flow(_own(service, "/forgot", {"phone": "+77011112233", "lang": "kk"}))
+    reply = _own(service, "/forgot/code", {"flow": flow, "code": "0000", "password": "сброшенный-пароль",
+                                           "password2": "сброшенный-пароль", "lang": "kk"})
+    assert "Қалған әрекеттер: 4" in reply.text
+
+
+def test_replaced_token_does_not_open_password_page(service):
+    old = _login(service).cookies.get(token.COOKIE)
+    _api(service, "/api/renew", {"token": old})
+    service.db.execute("UPDATE sessions SET renewed_at = now() - interval '1 hour'")
+    service.db.commit()
+    service.cookies.set(token.COOKIE, old, domain="id.tenderim.com")
+    assert service.get("/password", follow_redirects=False).status_code == 303
+
+
+def test_parallel_password_guesses_stay_limited(service):
+    first = _login(service).cookies.get(token.COOKIE)
+    service.cookies.set(token.COOKIE, first, domain="id.tenderim.com")
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(8) as pool:
+        replies = list(pool.map(lambda i: _own(service, "/password", {
+            "current": f"guess-{i}", "password": "другой-пароль", "password2": "другой-пароль"}), range(12)))
+    assert sum("Текущий пароль неверный" in r.text for r in replies) == accounts.MAX_FAILURES_PER_LOGIN
