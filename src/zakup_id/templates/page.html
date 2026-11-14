@@ -36,10 +36,16 @@
     {% if step == "code" %}<p class="hint">{{ _("Код отправлен по SMS на номер") }} <b>{{ phone }}</b>.</p>{% endif %}
     {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
     <input type="hidden" name="lang" value="{{ lang }}">
-    {% if step == "phone" %}
+    {% if step == "newphone" %}
     <div class="field">
-      <label for="phone">{{ _("Телефон") }}</label>
-      <input id="phone" name="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="+7 7XX XXX XX XX" value="{{ phone }}" required autofocus>
+      <label for="current">{{ _("Текущий пароль") }}</label>
+      <input id="current" name="current" type="password" autocomplete="current-password" required autofocus>
+    </div>
+    {% endif %}
+    {% if step in ("phone", "newphone") %}
+    <div class="field">
+      <label for="phone">{{ _("Новый номер телефона") if step == "newphone" else _("Телефон") }}</label>
+      <input id="phone" name="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="+7 7XX XXX XX XX" value="{{ phone }}" required{% if step == "phone" %} autofocus{% endif %}>
     </div>
     <button>{{ _("Получить код") }}</button>
     {% elif step == "code" %}
@@ -49,7 +55,9 @@
       <input id="code" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="8" required autofocus>
     </div>
     {% endif %}
-    {% if step in ("code", "password") %}
+    {% if step == "code" and purpose == "phone" %}
+    <button>{{ _("Подтвердить номер") }}</button>
+    {% elif step in ("code", "password") %}
     {% if step == "password" %}
     <div class="field">
       <label for="current">{{ _("Текущий пароль") }}</label>

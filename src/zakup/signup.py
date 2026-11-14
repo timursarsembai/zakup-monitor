@@ -22,7 +22,7 @@ PER_NET_HOUR = 10         # кодов в час с одной подсети (/
 PER_PHONE_DAY = 5         # кодов в сутки на один номер
 # Кодов в сутки всего (≈40 ₸ за SMS) — у регистрации и восстановления свои: выбрав
 # лимит регистраций, нельзя закрыть восстановление пароля настоящим клиентам.
-PER_DAY = {"register": 100, "reset": 50}
+PER_DAY = {"register": 100, "reset": 50, "phone": 30}  # phone — смена номера (zakup_id)
 
 
 class SignupError(Exception):
@@ -65,8 +65,10 @@ def _network(ip: str | None) -> str | None:
     return str(ipaddress.ip_network(f"{ip}/{prefix}", strict=False))
 
 
-def start(conn: psycopg.Connection, phone: str, purpose: str, ip: str | None) -> str:
-    """Отправляет код и возвращает flow для следующего шага."""
+def start(conn: psycopg.Connection, phone: str, purpose: str, ip: str | None,
+          account_id: int | None = None) -> str:
+    """Отправляет код и возвращает flow для следующего шага. account_id — шаг принадлежит
+    этой записи (смена телефона в zakup_id: столбец есть только в базе сервиса)."""
     # Счётчики и запись шага — под общей блокировкой и до отправки SMS: иначе пачка
     # одновременных запросов видит одни и те же старые счётчики и обходит лимиты.
     conn.execute("SELECT pg_advisory_xact_lock(%s)", (OTP_LOCK,))
@@ -92,8 +94,10 @@ def start(conn: psycopg.Connection, phone: str, purpose: str, ip: str | None) ->
     flow = secrets.token_urlsafe(24)
     conn.execute(
         """INSERT INTO otp_requests (flow, purpose, phone, request_id, ip)
-           VALUES (%s, %s, %s, '', %s)""",
-        (flow, purpose, phone, ip),
+           VALUES (%s, %s, %s, '', %s)""" if account_id is None else
+        """INSERT INTO otp_requests (flow, purpose, phone, request_id, ip, account_id)
+           VALUES (%s, %s, %s, '', %s, %s)""",
+        (flow, purpose, phone, ip) + (() if account_id is None else (account_id,)),
     )
     conn.commit()
     try:
@@ -112,24 +116,31 @@ def start(conn: psycopg.Connection, phone: str, purpose: str, ip: str | None) ->
     return flow
 
 
-def pending(conn: psycopg.Connection, flow: str, purpose: str) -> str | None:
-    """Телефон незавершённого шага или None (нет, истёк, использован, исчерпан)."""
+def _owner(account_id: int | None) -> tuple[str, tuple]:
+    return ("", ()) if account_id is None else (" AND account_id = %s", (account_id,))
+
+
+def pending(conn: psycopg.Connection, flow: str, purpose: str, account_id: int | None = None) -> str | None:
+    """Телефон незавершённого шага или None (нет, истёк, использован, исчерпан, чужой)."""
+    owner, value = _owner(account_id)
     row = conn.execute(
         f"""SELECT phone FROM otp_requests WHERE flow = %s AND purpose = %s AND used_at IS NULL
-            AND attempts < {MAX_ATTEMPTS} AND created_at > now() - %s""",
-        (flow, purpose, FLOW_TTL),
+            AND attempts < {MAX_ATTEMPTS} AND created_at > now() - %s{owner}""",
+        (flow, purpose, FLOW_TTL) + value,
     ).fetchone()
     return row[0] if row else None
 
 
-def verify(conn: psycopg.Connection, flow: str, purpose: str, code: str) -> str:
+def verify(conn: psycopg.Connection, flow: str, purpose: str, code: str,
+           account_id: int | None = None) -> str:
     """Проверяет код и закрывает flow. Возвращает подтверждённый номер."""
+    owner, value = _owner(account_id)
     row = conn.execute(
         f"""UPDATE otp_requests SET attempts = attempts + 1
             WHERE flow = %s AND purpose = %s AND used_at IS NULL
-              AND attempts < {MAX_ATTEMPTS} AND created_at > now() - %s
+              AND attempts < {MAX_ATTEMPTS} AND created_at > now() - %s{owner}
             RETURNING request_id, phone, attempts""",
-        (flow, purpose, FLOW_TTL),
+        (flow, purpose, FLOW_TTL) + value,
     ).fetchone()
     conn.commit()
     if row is None:

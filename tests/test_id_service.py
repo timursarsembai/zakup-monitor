@@ -331,3 +331,79 @@ def test_parallel_password_guesses_stay_limited(service):
         replies = list(pool.map(lambda i: _own(service, "/password", {
             "current": f"guess-{i}", "password": "другой-пароль", "password2": "другой-пароль"}), range(12)))
     assert sum("Текущий пароль неверный" in r.text for r in replies) == accounts.MAX_FAILURES_PER_LOGIN
+
+
+def _signed_in_client(client):
+    client.cookies.set(token.COOKIE, _login(client).cookies.get(token.COOKIE), domain="id.tenderim.com")
+
+
+def test_phone_change_needs_password_and_code_on_new_number(service, sms):
+    _signed_in_client(service)
+    assert "Новый номер телефона" in service.get("/phone").text
+    bad = _own(service, "/phone", {"current": "не-тот", "phone": "+77050001122"})
+    assert bad.status_code == 422 and sms == []
+    service.db.execute("INSERT INTO accounts (login, phone) VALUES ('+77050009999', '+77050009999')")
+    service.db.commit()
+    busy = _own(service, "/phone", {"current": "верный-пароль", "phone": "+77050009999"})
+    assert "уже используется" in busy.text and sms == []
+    step = _own(service, "/phone", {"current": "верный-пароль", "phone": "8 705 000 11 22"})
+    assert sms == ["+77050001122"] and "Подтвердить номер" in step.text
+    done = _own(service, "/phone/code", {"flow": _flow(step), "code": "1234"})
+    assert done.headers["location"] == f"{SITE}/settings?notice=phone"
+    assert service.db.execute("SELECT login, phone FROM accounts WHERE id = 7").fetchone() == (
+        "+77050001122", "+77050001122")
+    service.cookies.clear()
+    assert _login(service, login="+77050001122").headers["location"] == f"{SITE}/my"
+
+
+def test_phone_change_flow_belongs_to_its_account(service, sms):
+    _signed_in_client(service)
+    flow = _flow(_own(service, "/phone", {"current": "верный-пароль", "phone": "+77050001122"}))
+    service.db.execute("INSERT INTO accounts (id, login, password_hash) VALUES (50, 'other@example.com', %s)",
+                       (hash_password("другой-человек"),))
+    service.db.commit()
+    service.cookies.clear()
+    other = _login(service, login="other@example.com", password="другой-человек")
+    service.cookies.set(token.COOKIE, other.cookies.get(token.COOKIE), domain="id.tenderim.com")
+    assert _own(service, "/phone/code", {"flow": flow, "code": "1234"}).status_code == 410
+    # Сотрудник (логин — e-mail) меняет только телефон, логин остаётся.
+    flow = _flow(_own(service, "/phone", {"current": "другой-человек", "phone": "+77060001122"}))
+    _own(service, "/phone/code", {"flow": flow, "code": "1234"})
+    assert service.db.execute("SELECT login, phone FROM accounts WHERE id = 50").fetchone() == (
+        "other@example.com", "+77060001122")
+
+
+def test_phone_change_takes_released_number_and_warns_owner(service, sms, monkeypatch):
+    import zakup_id.app as id_app
+    sent = []
+
+    class Reply:
+        def json(self):
+            return {"ok": True}
+    monkeypatch.setenv("ID_TELEGRAM_TOKEN", "bot-token")
+    monkeypatch.setattr(id_app.httpx, "post", lambda url, json, timeout: sent.append(json) or Reply())
+    # Номер удалённой записи, которой разрешили заново, — можно занять.
+    service.db.execute("INSERT INTO accounts (login, phone, deleted_at, may_reregister) "
+                       "VALUES ('+77050001122', '+77050001122', now(), true)")
+    service.db.commit()
+    other_browser = _login(service).cookies.get(token.COOKIE)
+    service.cookies.clear()
+    _signed_in_client(service)
+    own = _own(service, "/phone", {"current": "верный-пароль", "phone": "+77011112233"})
+    assert "уже ваш номер" in own.text and sms == []
+    step = _own(service, "/phone", {"current": "верный-пароль", "phone": "+77050001122"})
+    done = _own(service, "/phone/code", {"flow": _flow(step), "code": "1234"})
+    assert done.headers["location"] == f"{SITE}/settings?notice=phone"
+    assert service.db.execute("SELECT login FROM accounts WHERE phone = '+77050001122'").fetchone() == (
+        "+77050001122",)
+    assert sent and "…1122" in sent[0]["text"] and "…2233" in sent[0]["text"]
+    # Другие входы закрыты, этот — нет.
+    assert _api(service, "/api/renew", {"token": other_browser}).status_code == 401
+    assert service.get("/phone").status_code == 200
+
+
+def test_password_lockout_answers_429(service):
+    _signed_in_client(service)
+    for _ in range(accounts.MAX_FAILURES_PER_LOGIN):
+        _own(service, "/phone", {"current": "не-тот", "phone": "+77050001122"})
+    assert _own(service, "/phone", {"current": "верный-пароль", "phone": "+77050001122"}).status_code == 429

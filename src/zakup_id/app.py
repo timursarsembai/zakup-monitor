@@ -22,7 +22,7 @@ from fastapi.templating import Jinja2Templates
 from psycopg_pool import ConnectionPool
 
 from zakup import i18n, signup
-from zakup.auth import MIN_PASSWORD_LENGTH, normalize_phone
+from zakup.auth import MIN_PASSWORD_LENGTH, is_phone_login, normalize_phone
 from zakup_id import accounts, config, db, token
 
 logger = logging.getLogger(__name__)
@@ -152,12 +152,13 @@ def _page(request: Request, step: str, purpose: str, status_code: int = 200, **v
     _ = i18n.gettext
     register = purpose == "register"
     titles = {"register": _("Регистрация"), "reset": _("Новый пароль") if step == "code" else
-              _("Восстановление пароля"), "password": _("Смена пароля")}
+              _("Восстановление пароля"), "password": _("Смена пароля"), "phone": _("Смена телефона")}
     hints = {"register": _("Пришлём код по SMS, затем вы придумаете пароль."),
-             "reset": _("Пришлём код по SMS на номер, с которым вы регистрировались.")}
-    path = {"register": "/register", "reset": "/forgot", "password": "/password"}[purpose]
+             "reset": _("Пришлём код по SMS на номер, с которым вы регистрировались."),
+             "phone": _("Пришлём код по SMS на новый номер.")}
+    path = {"register": "/register", "reset": "/forgot", "password": "/password", "phone": "/phone"}[purpose]
     context = {"lang": i18n.language(), "site": config.site_url(), "step": step, "purpose": purpose,
-               "title": titles[purpose], "hint": hints.get(purpose) if step == "phone" else None,
+               "title": titles[purpose], "hint": hints.get(purpose) if step in ("phone", "newphone") else None,
                "action": path + ("/code" if step == "code" else ""), "phone": "", "error": None,
                "again": f"{path}?lang={i18n.language()}" if step == "code" else None}
     if register and step == "message":
@@ -290,16 +291,19 @@ def _finish(request: Request, purpose: str, flow: str, code: str, password: str,
     return _signed_in(_back(target), account_id, sid)
 
 
-def _session(request: Request) -> int | None:
-    """Номер вошедшего пользователя по жетону в cookie (страницы самого сервиса)."""
+def _claims(request: Request) -> token.Claims | None:
+    """Жетон вошедшего пользователя из cookie, если его сессия жива (страницы самого сервиса)."""
     claims = token.read(request.cookies.get(token.COOKIE), token.public_key(config.signing_key()))
-    if claims is None:
-        return None
-    if not claims.usable(datetime.now(UTC)):
+    if claims is None or not claims.usable(datetime.now(UTC)):
         return None
     with pool.connection() as conn:
         alive = accounts.session_account(conn, claims.user_id, claims.sid, claims.gen)
-    return claims.user_id if alive else None
+    return claims if alive else None
+
+
+def _session(request: Request) -> int | None:
+    claims = _claims(request)
+    return claims.user_id if claims else None
 
 
 @app.get("/password")
@@ -310,6 +314,18 @@ def password_page(request: Request, lang: str = "ru"):
     return _page(request, "password", "password")
 
 
+def _current_password(conn, account_id: int, current: str) -> tuple[str | None, int]:
+    """(ошибка, код ответа) или (None, 422): текущий пароль под пределом подбора. Попытка
+    пишется неудачной до проверки — параллельные запросы по чужой сессии не обходят предел."""
+    attempt = accounts.claim_attempt(conn, f"#password:{account_id}", None, accounts.MAX_FAILURES_PER_LOGIN)
+    if attempt is None:
+        return i18n.gettext("Слишком много неудачных попыток. Попробуйте через 15 минут."), 429
+    if not accounts.check_password(conn, account_id, current):
+        return i18n.gettext("Текущий пароль неверный."), 422
+    accounts.confirm_attempt(conn, attempt)
+    return None, 422
+
+
 @app.post("/password", dependencies=[Depends(from_site)])
 def password_change(request: Request, current: Annotated[str, Form()], password: Annotated[str, Form()],
                     password2: Annotated[str, Form()], lang: Annotated[str, Form()] = "ru"):
@@ -318,27 +334,96 @@ def password_change(request: Request, current: Annotated[str, Form()], password:
     account_id = _session(request)
     if account_id is None:
         return _back("/login", next="/settings")
-    mark = f"#password:{account_id}"   # подбор текущего пароля по чужой сессии — тот же предел
     with pool.connection() as conn:
-        # Попытка пишется неудачной до проверки: параллельные запросы не обходят предел.
-        attempt = accounts.claim_attempt(conn, mark, None, accounts.MAX_FAILURES_PER_LOGIN)
-        if attempt is None:
-            error = _("Слишком много неудачных попыток. Попробуйте через 15 минут.")
-        elif not accounts.check_password(conn, account_id, current):
-            error = _("Текущий пароль неверный.")
-        elif len(password) < MIN_PASSWORD_LENGTH:
-            error = _("Пароль — не короче 10 знаков.")
-        elif password != password2:
-            error = _("Пароли не совпадают.")
-        else:
-            error = None
-            accounts.confirm_attempt(conn, attempt)
+        error, status_code = _current_password(conn, account_id, current)
+        if error is None:
+            error = (_("Пароль — не короче 10 знаков.") if len(password) < MIN_PASSWORD_LENGTH else
+                     _("Пароли не совпадают.") if password != password2 else None)
+        if error is None:
             accounts.set_password(conn, account_id, password)   # закрывает все входы…
             sid = accounts.create_session(conn, account_id, _ip(request), request.headers.get("user-agent"))
             conn.commit()                                       # …кроме этого, нового
     if error:
-        return _page(request, "password", "password", 422, error=error)
+        return _page(request, "password", "password", status_code, error=error)
     return _signed_in(_back("/settings", notice="password"), account_id, sid)
+
+
+@app.get("/phone")
+def phone_page(request: Request, lang: str = "ru"):
+    _lang(lang)
+    if _session(request) is None:
+        return _back("/login", next="/settings")
+    return _page(request, "newphone", "phone")
+
+
+
+
+
+@app.post("/phone", dependencies=[Depends(from_site)])
+def phone_start(request: Request, current: Annotated[str, Form()], phone: Annotated[str, Form()],
+                lang: Annotated[str, Form()] = "ru"):
+    """Новый номер: текущий пароль (иначе укравший сессию увёл бы аккаунт на свой номер),
+    затем код по SMS на новый номер."""
+    _ = i18n.gettext
+    _lang(lang)
+    account_id = _session(request)
+    if account_id is None:
+        return _back("/login", next="/settings")
+    new = normalize_phone(phone)
+    with pool.connection() as conn:
+        error, status_code = _current_password(conn, account_id, current)
+        own = conn.execute("SELECT login, phone FROM accounts WHERE id = %s", (account_id,)).fetchone()
+        if error is None and new is None:
+            error = _("Нужен казахстанский мобильный номер: +7 7XX XXX XX XX.")
+        elif error is None and new in own:
+            error = _("Это уже ваш номер.")
+        # Ответ говорит, занят ли номер: и вошедшему — не больше PHONE_CHECKS_PER_HOUR проверок.
+        elif error is None and accounts.claim_attempt(conn, f"#phone-check:account-{account_id}", None,
+                                                      PHONE_CHECKS_PER_HOUR, timedelta(hours=1)) is None:
+            error, status_code = _("Слишком много попыток. Попробуйте через час."), 429
+        elif error is None and not accounts.number_free(conn, new):
+            error = _("Этот номер уже используется.")
+    if error:
+        return _page(request, "newphone", "phone", status_code, phone=phone, error=error)
+    with db.connect(config.database_url()) as conn:   # отправка SMS ждёт kazpayment — не из пула
+        try:
+            flow = signup.start(conn, new, "phone", _ip(request), account_id=account_id)
+        except signup.SignupError as failure:
+            return _page(request, "newphone", "phone", 429, phone=phone, error=failure.translated())
+    return _page(request, "code", "phone", flow=flow, phone=new)
+
+
+@app.post("/phone/code", dependencies=[Depends(from_site)])
+def phone_finish(request: Request, flow: Annotated[str, Form()], code: Annotated[str, Form()],
+                 lang: Annotated[str, Form()] = "ru"):
+    _ = i18n.gettext
+    _lang(lang)
+    claims = _claims(request)
+    if claims is None:
+        return _back("/login", next="/settings")
+    account_id = claims.user_id
+    with db.connect(config.database_url()) as conn:
+        # Шаг — только этой записи: чужая сессия, даже зная flow, его не завершит.
+        phone = signup.pending(conn, flow, "phone", account_id)
+        if phone is None:
+            return _page(request, "newphone", "phone", 410, error=_("Код устарел. Запросите новый."))
+        try:
+            phone = signup.verify(conn, flow, "phone", code, account_id)
+        except signup.SignupError as failure:
+            return _page(request, "code", "phone", 422, flow=flow, phone=phone, error=failure.translated())
+        login, old = conn.execute("SELECT login, phone FROM accounts WHERE id = %s", (account_id,)).fetchone()
+        old = old or (login if is_phone_login(login) else None)
+        if not accounts.change_phone(conn, account_id, phone, claims.sid):
+            return _page(request, "newphone", "phone", 422, error=_("Этот номер уже используется."))
+    # Владелец узнаёт о смене (если номер увели — по Telegram, на прежний номер вход уже не работает).
+    hidden = f"…{phone[-4:]}"
+    was = f" (был …{old[-4:]})" if old else ""
+    try:
+        _send_telegram(account_id, f"Tenderim: телефон для входа изменён на {hidden}{was}. "
+                                   "Если это были не вы — срочно напишите в поддержку.")
+    except HTTPException:
+        logger.warning("phone change notice to %s not sent", account_id)
+    return _back("/settings", notice="phone")
 
 
 @app.post("/api/renew", dependencies=[Depends(service)])
@@ -367,6 +452,10 @@ def revoke(user_id: Annotated[int, Body()], block: Annotated[bool | None, Body()
 def notify(user_id: Annotated[int, Body()], text: Annotated[str, Body()],
            buttons: Annotated[list[list[dict]] | None, Body()] = None):
     """Сообщение пользователю в Telegram: основной сайт знает только номер, чат — здесь."""
+    return _send_telegram(user_id, text, buttons)
+
+
+def _send_telegram(user_id: int, text: str, buttons: list[list[dict]] | None = None) -> dict:
     # Соединение не держим, пока ждём Telegram (до 15 с): иначе медленный Telegram
     # занял бы все соединения, и встали бы вход и продление.
     with pool.connection() as conn:

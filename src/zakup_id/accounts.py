@@ -10,7 +10,7 @@ from datetime import timedelta
 
 import psycopg
 
-from zakup.auth import hash_password, normalize_email, normalize_phone, verify_password
+from zakup.auth import hash_password, is_phone_login, normalize_email, normalize_phone, verify_password
 
 SESSION_TTL = timedelta(days=30)
 MAX_FAILURES_PER_LOGIN = 5
@@ -170,16 +170,20 @@ def register(conn: psycopg.Connection, phone: str, password: str) -> int | str:
     if status in ("taken", "closed"):
         conn.rollback()
         return status
-    previous = None
-    if status == "reregister":
-        previous = conn.execute(
-            "UPDATE accounts SET login = login || '#deleted-' || id, phone = NULL WHERE login = %s RETURNING id",
-            (phone,)).fetchone()[0]
+    previous = _retire_deleted(conn, phone) if status == "reregister" else None
     account_id = conn.execute(
         "INSERT INTO accounts (login, phone, password_hash, previous_id) VALUES (%s, %s, %s, %s) RETURNING id",
         (phone, phone, hash_password(password), previous)).fetchone()[0]
     conn.commit()
     return account_id
+
+
+def _retire_deleted(conn: psycopg.Connection, phone: str) -> int:
+    """Номер удалённой записи (повторно разрешён) переходит новому владельцу: старая запись
+    остаётся под логином …#deleted-N и без телефона. Возвращает её номер."""
+    return conn.execute(
+        "UPDATE accounts SET login = login || '#deleted-' || id, phone = NULL WHERE login = %s RETURNING id",
+        (phone,)).fetchone()[0]
 
 
 def set_password(conn: psycopg.Connection, account_id: int, password: str) -> None:
@@ -247,3 +251,29 @@ def set_status(conn: psycopg.Connection, account_id: int, deleted: bool | None,
         conn.execute("DELETE FROM sessions WHERE account_id = %s", (account_id,))
     conn.commit()
     return "ok"
+
+
+def number_free(conn: psycopg.Connection, phone: str) -> bool:
+    """Номер можно занять: свободен или принадлежал удалённой записи с разрешением заново."""
+    return phone_status(conn, phone) in ("free", "reregister")
+
+
+def change_phone(conn: psycopg.Connection, account_id: int, phone: str, keep_sid: str) -> bool:
+    """Подтверждённый новый номер. У клиентов телефон — ещё и логин; у сотрудников логин —
+    e-mail, меняется только телефон. Прочие входы и метки браузеров закрываются (кроме этой
+    сессии): если номер увёл укравший сессию, его другие входы тоже пропадут.
+    False — номер успели занять."""
+    conn.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", ("login:" + phone,))
+    status = phone_status(conn, phone)
+    if status not in ("free", "reregister"):
+        conn.rollback()
+        return False
+    if status == "reregister":
+        _retire_deleted(conn, phone)
+    login = conn.execute("SELECT login FROM accounts WHERE id = %s", (account_id,)).fetchone()[0]
+    conn.execute("UPDATE accounts SET phone = %s, login = %s, device_gen = device_gen + 1 WHERE id = %s",
+                 (phone, phone if is_phone_login(login) else login, account_id))
+    conn.execute("DELETE FROM sessions WHERE account_id = %s AND sid_hash <> %s",
+                 (account_id, _sid_hash(keep_sid)))
+    conn.commit()
+    return True
