@@ -9,7 +9,7 @@ from tests.web_helpers import ORIGIN
 from zakup import auth, products, sellers, shop
 
 SHOP = {"name": "ТОО «Мебель-Строй»", "phone": ["8 701 111 22 33", ""], "city": "Алматы",
-        "regions": "Алматы, Алматинская область", "prices_with_vat": "1"}
+        "regions": "Алматы, Алматинская область", "prices_with_vat": "1", "bin": "990440001122"}
 
 
 def _as_client(client, conn, login="+77011112233"):
@@ -34,10 +34,13 @@ def test_tiers_and_forms_validated():
         with pytest.raises(shop.Invalid):
             shop.parse_tiers(retail, qty, price)
     with pytest.raises(shop.Invalid):
-        shop.parse_shop(name="Магазин", phones=["", ""])
+        shop.parse_shop(name="Магазин", phones=["", ""], bin="990440001122")
     with pytest.raises(shop.Invalid):
-        shop.parse_shop(name="Магазин", phones=["701"])
-    data = shop.parse_shop(name="  Магазин  ", phones=["87011112233", "+7 701 111 22 33"], website="zeta.kz")
+        shop.parse_shop(name="Магазин", phones=["701"], bin="990440001122")
+    with pytest.raises(shop.Invalid, match="Укажите БИН"):
+        shop.parse_shop(name="Магазин", phones=["87011112233"])
+    data = shop.parse_shop(name="  Магазин  ", phones=["87011112233", "+7 701 111 22 33"], website="zeta.kz",
+                           bin="990440001122")
     assert data["phones"] == [{"number": "+7 (701) 111-22-33", "label": "", "whatsapp": False}]
     assert data["website"] == "https://zeta.kz" and data["name"] == "Магазин"
     assert shop.parse_specs("Цвет: белый\n\nРазмер: 50×70") == [{"name": "Цвет", "value": "белый"},
@@ -49,10 +52,12 @@ def test_tiers_and_forms_validated():
     assert item["division"] == "31" and item["tiers"] == [(1, Decimal("5000"))]
 
 
-def test_shop_without_bin_waits_for_moderation(client, conn):
+def test_shop_needs_bin_and_unknown_bin_waits_for_moderation(client, conn):
     user = _as_client(client, conn)
     assert "Стать продавцом" in client.get("/my/shop").text
     assert client.post("/my/shop", data={**SHOP, "phone": [""]}, headers=ORIGIN).status_code == 422
+    no_bin = client.post("/my/shop", data={**SHOP, "bin": ""}, headers=ORIGIN)
+    assert no_bin.status_code == 422 and "Укажите БИН/ИИН" in no_bin.text
     assert client.post("/my/shop", data=SHOP, headers=ORIGIN, follow_redirects=False).status_code == 303
     seller = shop.get(conn, user)
     assert seller["status"] == "pending" and seller["kind"] == "own" and not seller["verified"]
@@ -113,6 +118,12 @@ def test_bin_in_registry_makes_shop_verified(client, conn, monkeypatch):
     client.post("/my/shop", data={**SHOP, "bin": "123456789012"}, headers=ORIGIN)
     seller = shop.get(conn, user)
     assert seller["status"] == "active" and seller["verified"] and asked == ["123456789012"]
+    # БИН/ИИН на странице продавца — только вошедшим, как контакты.
+    page = f"/sellers/{seller['id']}"
+    assert "123456789012" in client.get(page).text
+    client.cookies.clear()
+    assert "123456789012" not in client.get(page).text and "БИН/ИИН" in client.get(page).text
+    user = _as_client(client, conn)
     # Тот же БИН — реестр снова не спрашиваем; скрытый модератором — владелец не откроет.
     conn.execute("UPDATE sellers SET status = 'hidden' WHERE id = %s", (seller["id"],))
     conn.commit()
@@ -137,8 +148,9 @@ def test_claim_found_shop(client, conn, monkeypatch):
     assert client.post(path + "/claim", data={"comment": ""}, headers=ORIGIN).status_code == 422
     bad = client.post(path + "/claim", data={"comment": "x", "bin": "12"}, headers=ORIGIN)
     assert bad.status_code == 422 and f'action="{path}/claim"' in bad.text
-    # БИН в заявке не указан — останется БИН прежнего (проверенного) магазина.
-    client.post(path + "/claim", data={"comment": "Пишу с почты info@zeta.kz"}, headers=ORIGIN)
+    assert client.post(path + "/claim", data={"comment": "x"}, headers=ORIGIN).status_code == 422  # без БИН
+    client.post(path + "/claim", data={"comment": "Пишу с почты info@zeta.kz", "bin": "123456789012"},
+                headers=ORIGIN)
     assert "Заявка отправлена" in client.get(path).text
     claim = conn.execute("SELECT id FROM seller_claims WHERE seller_id = %s", (found,)).fetchone()[0]
 
@@ -175,7 +187,7 @@ def test_hidden_shop_stays_hidden_after_claim(client, conn):
     client.post("/my/shop", data=SHOP, headers=ORIGIN)
     conn.execute("UPDATE sellers SET status = 'hidden' WHERE user_id = %s", (user,))
     conn.commit()
-    client.post(f"/sellers/{found}-beta/claim", data={"comment": "мой"}, headers=ORIGIN)
+    client.post(f"/sellers/{found}-beta/claim", data={"comment": "мой", "bin": "990440001122"}, headers=ORIGIN)
     claim = conn.execute("SELECT id FROM seller_claims").fetchone()[0]
     assert shop.decide_claim(conn, claim, user, True) == "approved"
     assert shop.get(conn, user)["status"] == "hidden"
@@ -197,3 +209,39 @@ def test_popups_for_guests_and_future_sellers(client, conn):
     assert 'id="popup"' not in client.get("/lots").text
     client.post("/my/shop", data=SHOP, headers=ORIGIN)
     assert 'id="popup"' not in client.get("/products").text
+
+
+def test_shop_approved_without_bin_stays_active_when_bin_added(client, conn):
+    user = _as_client(client, conn)
+    client.post("/my/shop", data=SHOP, headers=ORIGIN)
+    # Одобрен сотрудником, когда БИН ещё был необязательным.
+    conn.execute("UPDATE sellers SET bin = NULL, status = 'active' WHERE user_id = %s", (user,))
+    conn.commit()
+    client.post("/my/shop", data={**SHOP, "name": "Новое имя"}, headers=ORIGIN)
+    seller = shop.get(conn, user)
+    assert seller["status"] == "active" and seller["bin"] == SHOP["bin"] and not seller["verified"]
+
+
+def test_bin_search_and_claim_form_details(client, conn):
+    conn.execute("""INSERT INTO product_catalog (url_key, url, name, seller, price)
+                    VALUES ('gamma.kz/p/1', 'https://gamma.kz/p/1', 'Стол', 'Gamma', 50000)""")
+    sellers.link(conn)
+    found = conn.execute("SELECT id FROM sellers WHERE domain = 'gamma.kz'").fetchone()[0]
+    conn.execute("UPDATE sellers SET bin = '111122223333' WHERE id = %s", (found,))
+    conn.commit()
+    # По БИН ищут только вошедшие (сам БИН гостям не показываем).
+    assert "Gamma" not in client.get("/sellers?q=111122223333").text
+    user = _as_client(client, conn)
+    assert "Gamma" in client.get("/sellers?q=111122223333").text
+    client.post("/my/shop", data=SHOP, headers=ORIGIN)
+    path = f"/sellers/{found}-gamma"
+    # БИН найденного магазина не показываем как факт; в заявке — подсказка из своего магазина.
+    page = client.get(path).text
+    assert "111122223333" not in page and f'value="{SHOP["bin"]}"' in page
+    bad = client.post(path + "/claim", data={"comment": "  ", "bin": "444455556666"}, headers=ORIGIN)
+    assert bad.status_code == 422 and 'value="444455556666"' in bad.text
+    client.post(path + "/claim", data={"comment": "мой", "bin": "444455556666"}, headers=ORIGIN)
+    _as_admin(client)
+    staff = client.get("/staff/sellers").text
+    assert "У магазина сейчас:" in staff and "111122223333" in staff and SHOP["bin"] in staff
+    assert user

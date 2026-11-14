@@ -108,7 +108,7 @@ def sellers_page(request: Request, user: Viewer, q: str = "", city: str = "", ca
     page = min(max(page, 1), MAX_PAGE)
     with core.pool.connection() as conn:
         data = sellers.listing(conn, q[:200], city[:80], category[:2] if category.isdigit() else "", sort, page,
-                               verified=verified == "1", kind=kind)
+                               verified=verified == "1", kind=kind, by_bin=user is not None)
 
     def url(**changes) -> str:
         values = {"q": data["q"], "city": data["city"], "category": data["division"], "sort": data["sort"],
@@ -122,7 +122,8 @@ def sellers_page(request: Request, user: Viewer, q: str = "", city: str = "", ca
 
 def _seller_page(request: Request, conn, seller: dict, user: int | None, *, q: str = "", category: str = "",
                  sort: str = "updated", page: int = 1, price_min: str = "", price_max: str = "",
-                 available: str = "", claim_error: str | None = None, status_code: int = 200):
+                 available: str = "", claim_error: str | None = None, claim_form: dict | None = None,
+                 status_code: int = 200):
     """Страница продавца — и обычная, и с ошибкой в заявке «Это мой магазин»."""
     owner = user is not None and seller["user_id"] == user
     canonical = sellers.path(seller)
@@ -131,6 +132,8 @@ def _seller_page(request: Request, conn, seller: dict, user: int | None, *, q: s
                             hidden=request.state.staff or owner)
     return templates.TemplateResponse(request, "seller.html", {
         "owner": owner, "claimed": shop.pending_claim(conn, seller["id"], user), "claim_error": claim_error,
+        # Заявка: введённое не пропадает после ошибки; БИН — подсказкой из своего магазина.
+        "claim_form": claim_form or {"bin": (shop.get(conn, user) or {}).get("bin") if user else None},
         "seller": seller, "p": data, "sorts": products.SORTS, "fresh_days": products.FRESH_DAYS,
         "product_path": products.path, "seller_path": sellers.path,
         "products_url": _catalog_url(canonical, data), "action": canonical}, status_code=status_code)
@@ -163,7 +166,8 @@ def seller_claim(request: Request, user: User, key: str, bin: Annotated[str, For
         try:
             ok = shop.claim(conn, seller["id"], user, bin, comment)
         except shop.Invalid as error:
-            return _seller_page(request, conn, seller, user, claim_error=str(error), status_code=422)
+            return _seller_page(request, conn, seller, user, claim_error=str(error),
+                                claim_form={"bin": bin, "comment": comment}, status_code=422)
     if ok:
         _audit(request, user, "seller_claim", str(seller["id"]))
     return RedirectResponse(sellers.path(seller) + "?claimed=1", status_code=303)

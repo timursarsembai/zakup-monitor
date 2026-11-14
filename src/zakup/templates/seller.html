@@ -27,6 +27,9 @@
 {% if seller.description %}<p>{{ seller.description }}</p>{% endif %}
 <dl class="facts">
   {% if seller.city %}<dt>{{ _("Город") }}</dt><dd>{{ seller.city }}</dd>{% endif %}
+  {# БИН/ИИН — как контакты, только вошедшим (решение владельца 2026-11-14); у найденных в
+     интернете его указал не продавец — не показываем. #}
+  {% if seller.bin and seller.kind == "own" %}<dt>{{ _("БИН/ИИН") }}</dt><dd>{% if request.state.user_id %}{{ seller.bin }}{% else %}<a href="/login?next={{ request.url.path | urlencode }}">{{ _("Войдите, чтобы увидеть") }}</a>{% endif %}</dd>{% endif %}
   {% if seller.phone_list %}<dt>{{ _("Телефон") }}</dt><dd>{% if request.state.user_id %}{% for ph in seller.phone_list %}{% if ph.tel %}<a href="tel:{{ ph.tel }}">{{ ph.number }}</a>{% else %}{{ ph.number }}{% endif %}{{ ", " if not loop.last }}{% endfor %}{% else %}<a href="/login?next={{ request.url.path | urlencode }}">{{ _("Войдите, чтобы увидеть") }}</a>{% endif %}</dd>{% endif %}
   {% if seller.website %}<dt>{{ _("Сайт") }}</dt><dd><a href="{{ seller.website }}" target="_blank" rel="noopener noreferrer nofollow">{{ seller.website | replace("https://", "") }}</a></dd>
   {% elif seller.domain %}<dt>{{ _("Где продаёт") }}</dt><dd>{{ seller.domain }}</dd>{% endif %}
@@ -45,8 +48,8 @@
   <form method="post" action="{{ seller_path(seller) }}/claim" class="p-tools" style="flex-direction:column;align-items:stretch;max-width:560px">
     {% if claim_error %}<p class="gone" role="alert">{{ _(claim_error) }}</p>{% endif %}
     <p class="muted" style="margin:0">{{ _("Магазин перейдёт вам: сможете менять контакты и выкладывать свои товары с ценами. Проверим, что он ваш, — обычно в течение рабочего дня.") }}</p>
-    <label>{{ _("БИН/ИИН организации") }}<input name="bin" inputmode="numeric" maxlength="12" pattern="\d{12}" placeholder="{{ _("12 цифр") }}"></label>
-    <label>{{ _("Как подтвердить, что магазин ваш") }}<textarea name="comment" required maxlength="1000" rows="3" style="padding:7px 9px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit" placeholder="{{ _("Например: напишите нам с почты на домене сайта, или телефон магазина совпадает с моим") }}"></textarea></label>
+    <label>{{ _("БИН/ИИН организации") }} *<input name="bin" value="{{ claim_form.bin or '' }}" inputmode="numeric" maxlength="12" pattern="\d{12}" placeholder="{{ _("12 цифр") }}" required></label>
+    <label>{{ _("Как подтвердить, что магазин ваш") }}<textarea name="comment" required maxlength="1000" rows="3" style="padding:7px 9px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit" placeholder="{{ _("Например: напишите нам с почты на домене сайта, или телефон магазина совпадает с моим") }}">{{ claim_form.comment or '' }}</textarea></label>
     <div><button class="primary">{{ _("Отправить заявку") }}</button></div>
   </form>
   {% else %}<p><a href="/login?next={{ seller_path(seller) | urlencode }}">{{ _("Войдите") }}</a>{{ _(", чтобы отправить заявку.") }}</p>{% endif %}

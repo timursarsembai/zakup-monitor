@@ -50,7 +50,7 @@ def shop_save(request: Request, user: User, name: Field = "", phone: Many = None
         current = shop.get(conn, user)
         # Реестр — когда БИН новый или ещё не подтверждён (прошлый раз сеть могла подвести);
         # сеть — до наших изменений: соединение коммитится.
-        registry = shop.registry_name(conn, data["bin"]) if data["bin"] and (
+        registry = shop.registry_name(conn, data["bin"]) if (
             current is None or current["bin"] != data["bin"] or not current["verified"]) else None
         row = shop.save(conn, user, data, registry)
     _audit(request, user, "shop_save", str(row["id"]), status=row["status"], verified=row["verified"])

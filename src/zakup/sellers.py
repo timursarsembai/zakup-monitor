@@ -162,15 +162,17 @@ def _choices(conn: psycopg.Connection) -> tuple[list[str], list[str]]:
 
 
 def listing(conn: psycopg.Connection, q: str = "", city: str = "", division: str = "",
-            sort: str = "products", page: int = 1, verified: bool = False, kind: str = "") -> dict[str, Any]:
-    """Список продавцов: поиск по названию (или БИН, сайту), город, категория товаров, только
-    проверенные, свой магазин или найден в интернете; только с товарами (или свои магазины)
-    и не скрытые."""
+            sort: str = "products", page: int = 1, verified: bool = False, kind: str = "",
+            by_bin: bool = False) -> dict[str, Any]:
+    """Список продавцов: поиск по названию (или сайту, а вошедшим — by_bin — и по БИН: сам БИН
+    показываем только вошедшим), город, категория товаров, только проверенные, свой магазин
+    или найден в интернете; только с товарами (или свои магазины) и не скрытые."""
     sort = sort if sort in SORTS else "products"
     kind = kind if kind in KINDS else ""
     where, having, params = ["s.status = 'active'"], ["(count(p.id) > 0 OR s.kind = 'own')"], {}
     if q.strip():
-        where.append("(s.name ILIKE %(like)s OR s.domain ILIKE %(like)s OR s.bin = %(q)s)")
+        where.append("(s.name ILIKE %(like)s OR s.domain ILIKE %(like)s"
+                     + (" OR s.bin = %(q)s)" if by_bin else ")"))
         params["like"] = "%" + q.strip().replace("%", "").replace("_", "") + "%"
         params["q"] = q.strip()
     if verified:

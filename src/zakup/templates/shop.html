@@ -54,10 +54,10 @@
     <label class="fld">{{ _("Сайт") }}<input name="website" value="{{ form.get('website') or '' }}" maxlength="300" placeholder="example.kz"></label>
     <label class="fld">{{ _("Город") }}<input name="city" value="{{ form.get('city') or '' }}" maxlength="80"></label>
     <label class="fld">{{ _("Доставка в регионы (через запятую)") }}<input name="regions" value="{{ (form.get('regions') or []) | join(', ') }}"></label>
-    <label class="fld">{{ _("БИН/ИИН") }}<input name="bin" value="{{ form.get('bin') or '' }}" inputmode="numeric" maxlength="12" pattern="\d{12}" placeholder="{{ _("12 цифр") }}"></label>
+    <label class="fld">{{ _("БИН/ИИН") }} *<input name="bin" value="{{ form.get('bin') or '' }}" inputmode="numeric" maxlength="12" pattern="\d{12}" placeholder="{{ _("12 цифр") }}" required></label>
     <label class="fld wide">{{ _("О магазине") }}<textarea name="description" maxlength="3000">{{ form.get('description') or '' }}</textarea></label>
     <label class="check-line wide"><input type="checkbox" name="prices_with_vat" value="1" {% if form.get('prices_with_vat') %}checked{% endif %}> {{ _("Цены указаны с НДС") }}</label>
-    <p class="muted wide" style="margin:0">{{ _("По БИН проверим организацию в реестре юрлиц: найдём — у магазина будет значок «проверен» и он появится в каталоге сразу. Без БИН или если в реестре нет — магазин проверит сотрудник.") }}</p>
+    <p class="muted wide" style="margin:0">{{ _("По БИН проверим организацию в реестре юрлиц: найдём — у магазина будет значок «проверен» и он появится в каталоге сразу. Если в реестре нет — магазин проверит сотрудник.") }}</p>
     <div class="wide"><button class="primary">{{ _("Сохранить") if shop else _("Создать магазин") }}</button></div>
   </form>
 </section>

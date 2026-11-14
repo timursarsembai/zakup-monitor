@@ -69,7 +69,7 @@ def test_seller_pages(client, conn):
     conn.commit()
     verified = client.get("/sellers?verified=1").text
     assert "Дом Диванов" in verified and "Другой продавец" not in verified
-    assert "Дом Диванов" in client.get("/sellers?q=123456789012").text
+    assert "Дом Диванов" not in client.get("/sellers?q=123456789012").text   # по БИН — только вошедшим
 
     page = client.get(path)
     assert page.status_code == 200

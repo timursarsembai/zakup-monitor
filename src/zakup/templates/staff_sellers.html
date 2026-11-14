@@ -55,7 +55,9 @@
     {% for c in claims %}
     <tr><td><a href="{{ seller_path({"id": c.seller_id, "name": c.name}) }}">{{ c.name }}</a>{% if c.domain %}<div class="muted">{{ c.domain }}</div>{% endif %}</td>
       <td>{{ c.login }}<div class="muted">{{ (c.created_at|local).strftime("%d.%m.%Y %H:%M") }}</div></td>
-      <td>{{ c.bin or "—" }}{% if c.registry %}<div class="muted">{{ c.registry }}</div>{% endif %}</td>
+      <td>{{ c.bin or "—" }}{% if c.registry %}<div class="muted">{{ c.registry }}</div>{% endif %}
+        {% if c.shop_bin and c.shop_bin != c.bin %}<div class="gone">{{ _("У магазина сейчас:") }} {{ c.shop_bin }}</div>{% endif %}
+        {% if c.own_bin and c.own_bin != c.bin %}<div class="gone">{{ _("В его магазине:") }} {{ c.own_bin }}</div>{% endif %}</td>
       <td style="white-space:pre-line">{{ c.comment }}</td>
       <td><div class="row-actions">
         <form method="post" action="/staff/claims/{{ c.id }}" data-confirm="{{ _("Передать магазин этому пользователю?") }}"><input type="hidden" name="decision" value="approve"><button class="primary">{{ _("Передать") }}</button></form>

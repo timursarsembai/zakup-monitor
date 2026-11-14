@@ -61,11 +61,15 @@ def _number(value: str | None, what: str) -> Decimal | None:
     return number
 
 
-def _bin(value: str | None) -> str | None:
+def _bin(value: str | None) -> str:
+    """БИН/ИИН продавца — обязателен (решение владельца 2026-11-14): магазин и заявку на
+    магазин без него не принимаем."""
     value = (value or "").strip()
-    if value and not (value.isdigit() and len(value) == 12):
+    if not value:
+        raise Invalid("Укажите БИН/ИИН организации.")
+    if not (value.isdigit() and len(value) == 12):
         raise Invalid("БИН/ИИН — 12 цифр.")
-    return value or None
+    return value
 
 
 def _sync_products(conn: psycopg.Connection, seller: dict[str, Any]) -> None:
@@ -142,11 +146,14 @@ def save(conn: psycopg.Connection, user: int, data: dict[str, Any], registry: st
     current = conn.cursor(row_factory=dict_row).execute(
         "SELECT * FROM sellers WHERE user_id = %s FOR UPDATE", (user,)).fetchone()
     same_bin = current is not None and current["bin"] == data["bin"]
-    verified = bool(data["bin"]) and (registry is not None or (same_bin and current["verified"]))
+    verified = registry is not None or (same_bin and current["verified"])
+    # Магазин, одобренный сотрудником ещё без БИН (до того, как БИН стал обязательным):
+    # вписал БИН — остаётся в каталоге, а не уходит снова на проверку.
+    first_bin = current is not None and current["bin"] is None
     if current is not None and current["status"] == "hidden":
         status = "hidden"
-    elif verified or (same_bin and current["status"] == "active"):
-        # Проверен по реестру — или раньше одобрен сотрудником с тем же БИН.
+    elif verified or ((same_bin or first_bin) and current["status"] == "active"):
+        # Проверен по реестру — или раньше одобрен сотрудником с тем же БИН (или без БИН).
         status = "active"
     else:
         status = "pending"
@@ -439,7 +446,10 @@ def moderation(conn: psycopg.Connection) -> dict[str, Any]:
                FROM sellers s LEFT JOIN users u ON u.id = s.user_id
                WHERE s.status = 'pending' ORDER BY s.created_at""").fetchall(),
         "claims": cur.execute(
+            # БИН найденного магазина и магазина просящего — рядом с БИН заявки: при передаче
+            # он перепишется, и несовпадение сотрудник должен видеть.
             """SELECT c.id, c.bin, c.comment, c.created_at, s.id AS seller_id, s.name, s.domain, u.email AS login,
+                      s.bin AS shop_bin, (SELECT o.bin FROM sellers o WHERE o.user_id = c.user_id) AS own_bin,
                       (SELECT name_ru FROM legal_entities WHERE bin = c.bin) AS registry
                FROM seller_claims c JOIN sellers s ON s.id = c.seller_id JOIN users u ON u.id = c.user_id
                WHERE c.status = 'pending' ORDER BY c.created_at""").fetchall(),
