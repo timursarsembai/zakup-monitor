@@ -217,6 +217,23 @@ services:
     mem_limit: 256m
     logging: *logging
 
+  # Резерв лотов со страниц old.goszakup.gov.kz (zakup.oldportal), пока стоит список лотов OWS:
+  # открытые объявления без лотов, запрос к порталу — раз в секунду.
+  oldportal:
+    <<: *hardening
+    image: zakup
+    container_name: zakup-oldportal
+    restart: unless-stopped
+    init: true
+    depends_on:
+      worker:
+        condition: service_started
+    entrypoint: ["zakup", "oldportal", "--loop"]
+    environment: *db-env
+    cpus: 0.5
+    mem_limit: 256m
+    logging: *logging
+
   # Поиск товаров под лоты через API OpenAI/Anthropic (ключи пользователей).
   # Claude Code по подписке работает не здесь, а на хосте: deploy/zakup-research.service.
   research:

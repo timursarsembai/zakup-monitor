@@ -59,6 +59,8 @@ def _parser() -> argparse.ArgumentParser:
     skk_cmd.add_argument("--loop", action="store_true", help="работать постоянно (проход раз в 10 минут)")
     reserve_cmd = sub.add_parser("reserve", help="резерв госзакупок: свежие объявления и пункты плана с zakup.gov.kz")
     reserve_cmd.add_argument("--loop", action="store_true", help="работать постоянно (проход раз в 2 минуты)")
+    oldportal_cmd = sub.add_parser("oldportal", help="резерв лотов со страниц old.goszakup.gov.kz, пока стоит API")
+    oldportal_cmd.add_argument("--loop", action="store_true", help="работать постоянно")
     research_cmd = sub.add_parser("research", help="поиск товаров под лоты с ИИ (работает постоянно)")
     research_cmd.add_argument("--providers", default="claude_code",
                               help="через запятую: claude_code, anthropic, openai")
@@ -202,6 +204,7 @@ LOCAL = {
     "securities": lambda args: _securities(args.loop),
     "skk": lambda args: _skk(args.loop),
     "reserve": lambda args: _reserve(args.loop),
+    "oldportal": lambda args: _oldportal(args.loop),
     "set-password": lambda args: _set_password(args.email),
 }
 
@@ -273,6 +276,12 @@ def _reserve(loop: bool) -> int:
     from zakup import reserve
 
     return reserve.loop(config.database_url(), once=not loop)
+
+
+def _oldportal(loop: bool) -> int:
+    from zakup import oldportal
+
+    return oldportal.loop(config.database_url(), once=not loop)
 
 
 SPECS_BATCH = 50

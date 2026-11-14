@@ -149,8 +149,10 @@ def save(conn: psycopg.Connection, item: dict[str, Any]) -> None:
         # 10–20 минут, а то и сутками — 12–13.11.2026): лоты оставляем прежние, остальное
         # (документы, статус, протокол) — от OWS. Пометка source остаётся: refresh спросит
         # OWS снова на следующем круге.
-        stored = conn.execute("SELECT detail FROM announcements WHERE id = %s AND lots_ready AND detail ? 'source'",
-                              (int(item["id"]),)).fetchone()
+        # FOR UPDATE: резерв (reserve, oldportal) мог как раз записывать лоты — ждём его и
+        # видим их, а не затираем пустыми из прочитанного раньше.
+        stored = conn.execute("SELECT detail FROM announcements WHERE id = %s AND lots_ready AND detail ? 'source' "
+                              "FOR UPDATE", (int(item["id"]),)).fetchone()
         if stored:
             keep = {k: stored[0][k] for k in ("Lots", "source", "platformFiles") if k in stored[0]}
             item = {**item, **keep}
@@ -187,6 +189,8 @@ def save(conn: psycopg.Connection, item: dict[str, Any]) -> None:
                WHERE id = %(id)s""",
             lot,
         )
+    if lots and not item.get("source"):
+        db.drop_temp_lots(conn, int(item["id"]))  # лоты OWS пришли — временным без пары не место
     codes(conn, [int(item["id"])])
     if fields.get("itogi_date"):
         # Дата итогов у разобранных итогов лотов (миграция 0021) — по подробностям объявления.

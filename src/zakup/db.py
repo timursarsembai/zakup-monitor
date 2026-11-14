@@ -169,8 +169,11 @@ def upsert_announcement(conn: psycopg.Connection, item: dict[str, Any]) -> None:
 def upsert_lot(conn: psycopg.Connection, item: dict[str, Any], overwrite: bool = True) -> None:
     """overwrite=False — только завести отсутствующий лот (из карточки объявления): её
     сокращённый ответ не должен затирать полный из REST — они бы переписывали друг друга."""
+    temp = _temp_twin(conn, item)
     if not overwrite:
         if conn.execute("SELECT 1 FROM lots WHERE id = %s", (int(item["id"]),)).fetchone():
+            if temp:
+                adopt_temp_lot(conn, temp, int(item["id"]))
             return
     conn.execute(
         """INSERT INTO lots (
@@ -216,6 +219,94 @@ def upsert_lot(conn: psycopg.Connection, item: dict[str, Any], overwrite: bool =
                              divisions = nullif(codes2(l.enstru), '{}')
            WHERE l.id = %s AND l.regions IS NULL""",
         (int(item["id"]),))
+    if temp:
+        adopt_temp_lot(conn, temp, int(item["id"]))
+
+
+# Лоты со страниц старого портала (zakup.oldportal) — номера OWS у них нет, номер временный:
+# TEMP_LOT_BASE + номер лота портала. Настоящие номера OWS и платформы много меньше.
+TEMP_LOT_BASE = 9_000_000_000_000
+# Что ссылается на лот: таблица → столбцы ключа кроме lot_id (None — ключа с лотом нет).
+_LOT_REFS: dict[str, tuple[str, ...] | None] = {
+    "matches": ("subscription_id",), "lot_marks": ("user_id",), "chat_lots": ("chat_id",),
+    "seller_alerts": ("seller_id",), "supplier_questions": ("url",), "tech_proposals": ("url",),
+    "lot_specs": (), "bid_advice": (), "lot_results": (), "spec_summaries": (), "lot_scores": (),
+    "lot_research": None, "search_ledger": None,
+}
+# Разобранное из подробностей (место поставки, аванс, цена…) — у лота из REST этого нет.
+_DETAIL_COLUMNS = ("prepayment", "kato", "price", "unit_name", "extra_desc", "supply_date", "enstru",
+                   "spec_url", "unit_name_kz", "extra_desc_kz")
+
+
+def _temp_twin(conn: psycopg.Connection, item: dict[str, Any]) -> int | None:
+    """Временный лот с тем же номером в том же объявлении — для лота OWS. Есть — сразу
+    блокируем объявление: порядок блокировок как в details.save и oldportal.fill (сначала
+    объявление, потом лоты), иначе встречная запись подробностей даст DeadlockDetected."""
+    aid = _int(item.get("trd_buy_id"))
+    if int(item["id"]) >= TEMP_LOT_BASE or not item.get("lot_number") or not aid:
+        return None
+    row = conn.execute("SELECT id FROM lots WHERE trd_buy_id = %s AND lot_number = %s AND id >= %s",
+                       (aid, item["lot_number"], TEMP_LOT_BASE)).fetchone()
+    if row:
+        conn.execute("SELECT 1 FROM announcements WHERE id = %s FOR UPDATE", (aid,))
+    return row[0] if row else None
+
+
+def _forget_lots(conn: psycopg.Connection, ids: list[int]) -> None:
+    """Строки про лоты, у которых нет внешнего ключа (каскад их не уберёт), и сами лоты."""
+    for table in _LOT_REFS:
+        conn.execute(f"DELETE FROM {table} WHERE lot_id = ANY(%s)", (ids,))
+    conn.execute("DELETE FROM lots WHERE id = ANY(%s)", (ids,))
+
+
+def adopt_temp_lot(conn: psycopg.Connection, temp_id: int, real_id: int) -> None:
+    """Лот пришёл из OWS — временный (со старого портала) заменяем им: избранное, подборы,
+    отметки подписок («уже присылали» — второго уведомления не будет) переходят к настоящему;
+    где у настоящего уже своё — остаётся его. Разобранное из подробностей (место поставки,
+    аванс) — настоящему, пока своих нет. Старая ссылка /lots/<временный> ведёт на новый."""
+    for table, keys in _LOT_REFS.items():
+        if keys is None:
+            conn.execute(f"UPDATE {table} SET lot_id = %s WHERE lot_id = %s", (real_id, temp_id))
+            continue
+        same = "".join(f" AND x.{k} = t.{k}" for k in keys)
+        conn.execute(
+            f"""UPDATE {table} t SET lot_id = %(real)s WHERE t.lot_id = %(temp)s
+                AND NOT EXISTS (SELECT 1 FROM {table} x WHERE x.lot_id = %(real)s{same})""",
+            {"real": real_id, "temp": temp_id})
+    for table in ("match_pages", "product_catalog"):
+        column = "lot_ids" if table == "match_pages" else "lots"
+        conn.execute(f"UPDATE {table} SET {column} = array_replace({column}, %s, %s) WHERE %s = ANY({column})",
+                     (temp_id, real_id, temp_id))
+    # Регионы и разделы у лота из REST — грубые (по объявлению): точные — от временного.
+    copy = ", ".join([f"{c} = coalesce(r.{c}, t.{c})" for c in _DETAIL_COLUMNS]
+                     + [f"{c} = CASE WHEN r.kato IS NULL THEN t.{c} ELSE r.{c} END" for c in ("regions", "divisions")])
+    conn.execute(f"UPDATE lots r SET {copy} FROM lots t WHERE r.id = %s AND t.id = %s", (real_id, temp_id))
+    # Подробности объявления (по ним страницы лотов) ещё со временным — пока OWS не прислал свои.
+    conn.execute(
+        """UPDATE announcements a SET detail = jsonb_set(a.detail, '{Lots}', (
+               SELECT jsonb_agg(CASE WHEN x->>'id' = %(temp)s::text
+                                     THEN jsonb_set(x, '{id}', to_jsonb(%(real)s::bigint)) ELSE x END ORDER BY o)
+               FROM jsonb_array_elements(a.detail->'Lots') WITH ORDINALITY e(x, o)))
+           WHERE a.id = (SELECT trd_buy_id FROM lots WHERE id = %(temp)s)
+             AND jsonb_typeof(a.detail->'Lots') = 'array' AND jsonb_array_length(a.detail->'Lots') > 0""",
+        {"real": real_id, "temp": temp_id})
+    conn.execute("""INSERT INTO lot_aliases (old_id, new_id, announcement_id)
+                    SELECT %(temp)s, %(real)s, trd_buy_id FROM lots WHERE id = %(temp)s
+                    ON CONFLICT (old_id) DO UPDATE SET new_id = excluded.new_id""",
+                 {"temp": temp_id, "real": real_id})
+    _forget_lots(conn, [temp_id])
+
+
+def drop_temp_lots(conn: psycopg.Connection, announcement_id: int) -> int:
+    """Временные лоты объявления, которым в OWS не нашлось пары (лот убрали), — удаляем:
+    подробности OWS с лотами пришли, они главные. Ссылка на такой лот ведёт на объявление."""
+    ids = [r[0] for r in conn.execute("SELECT id FROM lots WHERE trd_buy_id = %s AND id >= %s",
+                                      (announcement_id, TEMP_LOT_BASE))]
+    if ids:
+        conn.execute("""INSERT INTO lot_aliases (old_id, announcement_id) SELECT unnest(%s::bigint[]), %s
+                        ON CONFLICT (old_id) DO NOTHING""", (ids, announcement_id))
+        _forget_lots(conn, ids)
+    return len(ids)
 
 
 UPSERT = {"announcements": upsert_announcement, "lots": upsert_lot}

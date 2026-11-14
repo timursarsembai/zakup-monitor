@@ -776,6 +776,15 @@ def _priced_bid(conn, lot_id: int, done: dict | None, cached: dict | None = None
 def lot_page(request: Request, user: Viewer, lot_id: int, background: BackgroundTasks, sup: str = ""):
     with core.pool.connection() as conn:
         row = conn.execute("SELECT trd_buy_id FROM lots WHERE id = %s", (lot_id,)).fetchone()
+        # Временный лот со старого портала (zakup.oldportal) заменён лотом OWS — ссылка из
+        # уведомления ведёт на настоящий.
+        alias = conn.execute("SELECT new_id, announcement_id FROM lot_aliases WHERE old_id = %s",
+                             (lot_id,)).fetchone() if row is None else None
+    if alias and (alias[0] or alias[1]):
+        # 302: не кэшируется навсегда; лота в OWS не нашлось — на объявление.
+        target = f"/lots/{alias[0]}" if alias[0] else f"/a/{alias[1]}"
+        query = f"?{request.url.query}" if request.url.query and alias[0] else ""
+        return RedirectResponse(target + query, status_code=302)
     if row is None or row[0] is None:
         raise HTTPException(404, "Такого лота нет в базе")
     context = _announcement_context(request, user, row[0], background)
