@@ -8,7 +8,7 @@ from typing import Annotated
 
 import httpx
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, Response
 
 from zakup import (
     auth,
@@ -240,10 +240,41 @@ def _other_user(conn, request: Request, actor: int, user_id: int, deleted: bool 
     return row[0]
 
 
+def _in_kz(request: Request, staff: int, action, what: str, target: str | None = None) -> Response | None:
+    """Действие сотрудника — сначала в сервисе учётных записей (Казахстан), если он включён.
+    Не вышло — страница с ошибкой и запись в журнал, здесь ничего не меняем; None — можно
+    менять у себя. Запрос туда — не держа соединение пула (как вход по жетону, web.core)."""
+    if not idservice.enabled():
+        return None
+    try:
+        action()
+    except idservice.Replaced:
+        _audit(request, staff, what + "_refused", target, reason="number re-registered")
+        return _settings_page(request, staff, tab="users", status_code=409, error=(
+            "Вернуть нельзя: номер уже занят новой регистрацией."))
+    except idservice.ServiceError as error:
+        logger.warning("id service staff action %s: %s", what, error)
+        _audit(request, staff, what + "_failed", target, reason=str(error))
+        timeout = not str(error).startswith("http ")
+        return _settings_page(request, staff, tab="users", status_code=503, error=(
+            "Сервис учётных записей не ответил — ничего не изменено. Попробуйте ещё раз." if timeout else
+            f"Сервис учётных записей отказал ({error}) — ничего не изменено. Проверьте его настройку."))
+    return None
+
+
 @router.post("/settings/registration", dependencies=[Depends(same_origin)])
 def toggle_registration(request: Request, admin: Admin):
     with core.pool.connection() as conn:
         now_open = not signup.registration_open(conn)
+
+    def flip():
+        # Своя копия могла разойтись с Казахстаном — переключаем то, что там.
+        nonlocal now_open
+        now_open = not idservice.registration_open()
+        idservice.set_registration(now_open)
+    if failed := _in_kz(request, admin, flip, "settings_registration"):
+        return failed
+    with core.pool.connection() as conn:
         signup.set_registration_open(conn, now_open)
     _audit(request, admin, "settings_registration", "открыта" if now_open else "закрыта")
     return _settings_page(request, admin, tab="users", notice=(
@@ -343,9 +374,11 @@ def set_role(request: Request, admin: Admin, user_id: int, role: Annotated[str, 
 def toggle_disabled(request: Request, staff: Staff, user_id: int):
     with core.pool.connection() as conn:
         login = _other_user(conn, request, staff, user_id)
-        disabled = conn.execute(
-            "UPDATE users SET disabled = NOT disabled WHERE id = %s RETURNING disabled", (user_id,)
-        ).fetchone()[0]
+        disabled = not conn.execute("SELECT disabled FROM users WHERE id = %s", (user_id,)).fetchone()[0]
+    if failed := _in_kz(request, staff, lambda: idservice.block(user_id, disabled), "user_disable", login):
+        return failed
+    with core.pool.connection() as conn:
+        conn.execute("UPDATE users SET disabled = %s WHERE id = %s", (disabled, user_id))
         if disabled:
             # Отключение действует сразу: выкидываем из всех открытых сессий.
             conn.execute("DELETE FROM sessions WHERE user_id = %s", (user_id,))
@@ -360,6 +393,9 @@ def delete_user(request: Request, staff: Staff, user_id: int):
     избранное остаются — администратор может вернуть."""
     with core.pool.connection() as conn:
         login = _other_user(conn, request, staff, user_id)
+    if failed := _in_kz(request, staff, lambda: idservice.set_status(user_id, deleted=True), "user_delete", login):
+        return failed
+    with core.pool.connection() as conn:
         conn.execute("UPDATE users SET deleted_at = now(), deleted_by = %s WHERE id = %s",
                      (staff, user_id))
         conn.execute("DELETE FROM sessions WHERE user_id = %s", (user_id,))
@@ -373,6 +409,10 @@ def delete_user(request: Request, staff: Staff, user_id: int):
 def restore_user(request: Request, admin: Admin, user_id: int):
     with core.pool.connection() as conn:
         login = _other_user(conn, request, admin, user_id, deleted=True)
+    if failed := _in_kz(request, admin, lambda: idservice.set_status(user_id, deleted=False), "user_restore",
+                        login):
+        return failed
+    with core.pool.connection() as conn:
         conn.execute("UPDATE users SET deleted_at = NULL, deleted_by = NULL WHERE id = %s", (user_id,))
     _audit(request, admin, "user_restore", login)
     return _settings_page(request, admin, tab="users", notice=f"Пользователь {login} восстановлен. "
@@ -383,10 +423,12 @@ def restore_user(request: Request, admin: Admin, user_id: int):
 def toggle_reregister(request: Request, admin: Admin, user_id: int):
     with core.pool.connection() as conn:
         login = _other_user(conn, request, admin, user_id, deleted=True)
-        allowed = conn.execute(
-            "UPDATE users SET may_reregister = NOT may_reregister WHERE id = %s RETURNING may_reregister",
-            (user_id,),
-        ).fetchone()[0]
+        allowed = not conn.execute("SELECT may_reregister FROM users WHERE id = %s", (user_id,)).fetchone()[0]
+    if failed := _in_kz(request, admin, lambda: idservice.set_status(user_id, may_reregister=allowed),
+                        "user_reregister", login):
+        return failed
+    with core.pool.connection() as conn:
+        conn.execute("UPDATE users SET may_reregister = %s WHERE id = %s", (allowed, user_id))
     _audit(request, admin, "user_reregister", login, allowed=allowed)
     return _settings_page(request, admin, tab="users", notice=f"{login}: повторная регистрация "
                           f"{'разрешена' if allowed else 'запрещена'}.")

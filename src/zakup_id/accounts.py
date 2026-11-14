@@ -112,13 +112,14 @@ def end_session(conn: psycopg.Connection, sid: str) -> None:
     conn.commit()
 
 
-def end_all_sessions(conn: psycopg.Connection, account_id: int, block: bool | None = None) -> int:
-    """Выйти везде; block=True — ещё и заблокировать вход, False — снять блокировку."""
+def end_all_sessions(conn: psycopg.Connection, account_id: int, block: bool | None = None) -> int | None:
+    """Выйти везде; block=True — ещё и заблокировать вход, False — снять блокировку.
+    Сколько входов закрыто; None — такой записи нет."""
     count = conn.execute("DELETE FROM sessions WHERE account_id = %s", (account_id,)).rowcount
-    conn.execute("UPDATE accounts SET device_gen = device_gen + 1, disabled = coalesce(%s, disabled) "
-                 "WHERE id = %s", (block, account_id))
+    found = conn.execute("UPDATE accounts SET device_gen = device_gen + 1, disabled = coalesce(%s, disabled) "
+                         "WHERE id = %s", (block, account_id)).rowcount
     conn.commit()
-    return count
+    return count if found else None
 
 
 def cleanup(conn: psycopg.Connection) -> None:

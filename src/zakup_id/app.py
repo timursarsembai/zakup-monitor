@@ -451,7 +451,10 @@ def revoke(user_id: Annotated[int, Body()], block: Annotated[bool | None, Body()
     """Выйти везде: жетоны перестанут продлеваться. block=True — блокировка или удаление
     (и войти снова нельзя), False — снять блокировку."""
     with pool.connection() as conn:
-        return {"ended": accounts.end_all_sessions(conn, user_id, block)}
+        ended = accounts.end_all_sessions(conn, user_id, block)
+    if ended is None:
+        raise HTTPException(404, "no such account")
+    return {"ended": ended}
 
 
 @app.get("/api/events", dependencies=[Depends(service)])
@@ -466,6 +469,13 @@ def events(limit: int = 100):
 def events_ack(ids: Annotated[list[int], Body(embed=True)]):
     with pool.connection() as conn:
         return {"acked": accounts.ack_events(conn, ids[:1000])}
+
+
+@app.get("/api/registration", dependencies=[Depends(service)])
+def registration_state():
+    """Открыта ли регистрация — переключатель сайта показывает это, а не свою копию."""
+    with pool.connection() as conn:
+        return {"open": signup.registration_open(conn)}
 
 
 @app.post("/api/registration", dependencies=[Depends(service)])

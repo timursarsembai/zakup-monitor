@@ -175,3 +175,71 @@ def test_bad_event_does_not_block_others(service, conn, monkeypatch):
     assert idservice.poll_events(conn) == 2 and owner == ["id.tenderim.com: x"]
     service.answers["/api/events"] = Reply(401, {"detail": "service key required"})
     assert idservice.poll_events(conn) == 0
+
+
+def _as_admin(service, conn):
+    conn.execute("INSERT INTO users (id, email) VALUES (700, 'id:700')")
+    conn.commit()
+    service.cookies.clear()
+    service.post("/login", data={"email": "owner@mail.kz", "password": "long-enough-password"},
+                 headers={"origin": "https://testserver"})
+
+
+def _staff(service, path):
+    return service.post(f"/settings/users/700/{path}", headers={"origin": "https://testserver"})
+
+
+def test_staff_actions_go_to_service_first(service, conn):
+    """Отключить, удалить, вернуть, разрешить заново, регистрация — сначала в Казахстане."""
+    _as_admin(service, conn)
+    for path in ("/api/revoke", "/api/status", "/api/registration"):
+        service.answers[path] = Reply(200, {"ok": True, "open": False})
+    assert _staff(service, "disable").status_code == 200
+    assert _staff(service, "delete").status_code == 200
+    assert _staff(service, "reregister").status_code == 200
+    assert _staff(service, "restore").status_code == 200
+    service.post("/settings/registration", headers={"origin": "https://testserver"})
+    # Регистрация закрыта в Казахстане (копия здесь могла разойтись) — открываем.
+    assert [c for c in service.calls if c[0] == "POST" or c[1] == "/api/registration"] == [
+        ("POST", "/api/revoke", {"user_id": 700, "block": True}),
+        ("POST", "/api/status", {"user_id": 700, "deleted": True, "may_reregister": None}),
+        ("POST", "/api/status", {"user_id": 700, "deleted": None, "may_reregister": True}),
+        ("POST", "/api/status", {"user_id": 700, "deleted": False, "may_reregister": None}),
+        ("GET", "/api/registration", None), ("POST", "/api/registration", {"open": True})]
+    row = conn.execute("SELECT disabled, deleted_at IS NULL, may_reregister FROM users WHERE id = 700").fetchone()
+    assert row == (True, True, True)
+
+
+def test_staff_action_changes_nothing_when_service_fails(service, conn):
+    _as_admin(service, conn)
+    service.answers["/api/status"] = idservice.ServiceError("ConnectTimeout")
+    reply = _staff(service, "delete")
+    assert reply.status_code == 503 and "ничего не изменено" in reply.text
+    assert conn.execute("SELECT deleted_at FROM users WHERE id = 700").fetchone() == (None,)
+    # Номер уже занят новой регистрацией — прежнюю запись не вернуть.
+    conn.execute("UPDATE users SET deleted_at = now() WHERE id = 700")
+    conn.commit()
+    service.answers["/api/status"] = Reply(409)
+    reply = _staff(service, "restore")
+    assert reply.status_code == 409
+    assert conn.execute("SELECT deleted_at IS NOT NULL FROM users WHERE id = 700").fetchone() == (True,)
+    # Записи в Казахстане нет (заведён до переезда) — меняем только здесь.
+    service.answers["/api/status"] = Reply(404, {"detail": "no such account"})
+    assert _staff(service, "reregister").status_code == 200
+    assert conn.execute("SELECT may_reregister FROM users WHERE id = 700").fetchone() == (True,)
+    # Другой 404 (неверный адрес, старая сборка) — ошибка, здесь ничего не меняем.
+    service.answers["/api/status"] = Reply(404, {"detail": "Not Found"})
+    assert _staff(service, "reregister").status_code == 503
+    assert conn.execute("SELECT may_reregister FROM users WHERE id = 700").fetchone() == (True,)
+    # Отключение не дошло — вход здесь не трогаем; регистрация — тоже.
+    conn.execute("UPDATE users SET deleted_at = NULL WHERE id = 700")
+    conn.commit()
+    service.answers["/api/revoke"] = idservice.ServiceError("ConnectTimeout")
+    assert _staff(service, "disable").status_code == 503
+    assert conn.execute("SELECT disabled FROM users WHERE id = 700").fetchone() == (False,)
+    service.answers["/api/registration"] = Reply(404)
+    reply = service.post("/settings/registration", headers={"origin": "https://testserver"})
+    assert reply.status_code == 503 and "отказал" in reply.text
+    failed = [r[0] for r in conn.execute("SELECT action FROM user_actions WHERE action LIKE '%%_failed' ORDER BY id")]
+    assert failed == ["user_delete_failed", "user_reregister_failed", "user_disable_failed",
+                      "settings_registration_failed"]

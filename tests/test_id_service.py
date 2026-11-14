@@ -149,6 +149,15 @@ def test_revoke_ends_every_session_and_block_holds(service):
     assert "error=password" in _login(service).headers["location"]
     _api(service, "/api/revoke", {"user_id": 7, "block": False})
     assert _login(service).headers["location"] == f"{SITE}/my"
+    # Нет такой записи — 404 «no such account» (сайт тогда меняет только у себя).
+    reply = _api(service, "/api/revoke", {"user_id": 999, "block": True})
+    assert reply.status_code == 404 and reply.json()["detail"] == "no such account"
+
+
+def test_registration_state_for_site(service):
+    _api(service, "/api/registration", {"open": False})
+    reply = service.get("/api/registration", headers={"authorization": "Bearer " + SERVICE_KEY})
+    assert reply.json() == {"open": False}
 
 
 def test_sync_ids_after_import(service):

@@ -124,6 +124,63 @@ def logout(value: str | None) -> None:
         logger.warning("logout not sent: %s", error)
 
 
+# --- Действия сотрудников (вкладка «Пользователи») ---
+# Сначала — в Казахстане, потом у себя: не дошло туда — здесь ничего не меняем (ServiceError).
+
+
+class Replaced(ServiceError):
+    """Номер удалённого уже занят новой регистрацией: прежнюю запись не вернуть."""
+
+
+def _detail(response: httpx.Response) -> str | None:
+    try:
+        data = response.json()
+    except ValueError:
+        return None
+    return data.get("detail") if isinstance(data, dict) else None
+
+
+def _staff_call(path: str, body: dict, account: bool = True) -> None:
+    """Записи в Казахстане нет (заведён здесь до переезда) — менять там нечего: только когда
+    сервис так и ответил («no such account»), а не любой 404 (неверный адрес, прокси, старая
+    сборка без этого пути — это ошибка, здесь тогда ничего не меняем)."""
+    response = _api("POST", path, json=body)
+    if response.status_code == 200:
+        return
+    detail = _detail(response)
+    if account and response.status_code == 404 and detail == "no such account":
+        logger.info("%s: account %s is not in the service, site only", path, body.get("user_id"))
+        return
+    if path == "/api/status" and response.status_code == 409:
+        raise Replaced("record replaced")
+    raise ServiceError(f"http {response.status_code}")
+
+
+def block(user_id: int, blocked: bool) -> None:
+    """Отключить (выйти везде и не пускать) или снова включить вход."""
+    _staff_call("/api/revoke", {"user_id": user_id, "block": blocked})
+
+
+def set_status(user_id: int, deleted: bool | None = None, may_reregister: bool | None = None) -> None:
+    """Удалить (все входы закрываются), вернуть, разрешить зарегистрироваться заново."""
+    _staff_call("/api/status", {"user_id": user_id, "deleted": deleted, "may_reregister": may_reregister})
+
+
+def registration_open() -> bool:
+    """Регистрация открыта в Казахстане (там она и идёт)."""
+    response = _api("GET", "/api/registration")
+    if response.status_code != 200:
+        raise ServiceError(f"http {response.status_code}")
+    try:
+        return bool(response.json()["open"])
+    except (ValueError, KeyError, TypeError):
+        raise ServiceError("bad answer") from None
+
+
+def set_registration(open_: bool) -> None:
+    _staff_call("/api/registration", {"open": open_}, account=False)
+
+
 # --- События сервиса → Telegram (вызывает бот) ---
 
 _TEXTS = {
