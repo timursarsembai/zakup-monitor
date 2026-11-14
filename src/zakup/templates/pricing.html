@@ -37,7 +37,7 @@
     </ul>
     <p class="muted">{{ _("Первые {days} дней после регистрации — бесплатно (кроме поиска товаров с ИИ). Дальше оплата — на 30 дней, продлевается следующей оплатой; оплата во время пробного месяца добавляет 30 дней к его концу.", days=trial_days) }}</p>
     {% if request.state.user_id %}<form method="post" action="/pay/tariff"><button class="buy">{{ _("Продлить на 30 дней") if paid_until or trial_until else _("Оплатить") }} · {{ "{:,}".format(t.price).replace(",", " ") }} ₸</button></form>
-    {% else %}<a class="buy" href="/register">{{ _("Зарегистрироваться — {days} дней бесплатно", days=trial_days) }}</a>{% endif %}
+    {% else %}<a class="buy" href="{{ account_url('/register') }}">{{ _("Зарегистрироваться — {days} дней бесплатно", days=trial_days) }}</a>{% endif %}
   </section>
   <section class="plan">
     <h2>{{ _("Поиск товаров с ИИ") }}</h2>
@@ -50,7 +50,7 @@
     <form class="calc" method="post" action="/pay/searches"><label>{{ _("Своё количество:") }} <input type="number" name="count" min="1" max="10000" value="30" data-calc></label> = <b data-calc-total></b> ₸
       {% if request.state.paid %}<button class="buy small">{{ _("Купить") }}</button>{% endif %}</form>
     {% if request.state.user_id and not request.state.paid %}<p class="muted">{{ _("Поиски докупаются к оплаченному тарифу: сначала оплатите тариф.") }}</p>{% endif %}
-    {% if not request.state.user_id %}<p><a class="buy" href="/register">{{ _("Зарегистрироваться и купить") }}</a></p>{% endif %}
+    {% if not request.state.user_id %}<p><a class="buy" href="{{ account_url('/register') }}">{{ _("Зарегистрироваться и купить") }}</a></p>{% endif %}
   </section>
 </div>
 <p class="soon">{{ _("Оплата через Kaspi или QR любого банка. После оплаты доступ и поиски начисляются автоматически, обычно за минуту.") }}</p>

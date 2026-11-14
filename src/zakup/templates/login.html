@@ -1,7 +1,7 @@
 {% extends "_auth.html" %}
 {% block auth_title %}{{ _("Вход") }}{% endblock %}
 {% block card %}
-<form class="card" method="post" action="{{ '/staff/login' if staff else '/login' }}">
+<form class="card" method="post" action="{{ account_url('/login') if id_enabled() else ('/staff/login' if staff else '/login') }}">
   <h1>{{ _("Вход для сотрудников") if staff else _("Вход") }}</h1>
   {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
   {% if notice %}<p class="ok" role="status">{{ notice }}</p>{% endif %}
@@ -9,10 +9,10 @@
   <div class="field">
     {% if staff %}
     <label for="email">{{ _("Логин") }}</label>
-    <input id="email" name="email" type="text" autocapitalize="none" spellcheck="false" value="{{ email }}" autocomplete="username" required {% if not email %}autofocus{% endif %}>
+    <input id="email" name="{{ 'login' if id_enabled() else 'email' }}" type="text" autocapitalize="none" spellcheck="false" value="{{ email }}" autocomplete="username" required {% if not email %}autofocus{% endif %}>
     {% else %}
     <label for="email">{{ _("Телефон") }}</label>
-    <input id="email" name="email" type="tel" inputmode="tel" placeholder="+7 7__ ___ __ __" value="{{ email }}" autocomplete="tel" required {% if not email %}autofocus{% endif %}>
+    <input id="email" name="{{ 'login' if id_enabled() else 'email' }}" type="tel" inputmode="tel" placeholder="+7 7__ ___ __ __" value="{{ email }}" autocomplete="tel" required {% if not email %}autofocus{% endif %}>
     {% endif %}
   </div>
   <div class="field">
@@ -22,4 +22,4 @@
   <button class="submit">{{ _("Войти") }}</button>
 </form>
 {% endblock %}
-{% block foot %}{% if staff %}<a href="/login">{{ _("Вход для клиентов по телефону") }}</a>{% else %}<a href="/register">{{ _("Регистрация") }}</a> · <a href="/forgot">{{ _("Забыли пароль?") }}</a><br><a href="/staff/login">{{ _("Вход для сотрудников") }}</a>{% endif %}{% endblock %}
+{% block foot %}{% if staff %}<a href="/login">{{ _("Вход для клиентов по телефону") }}</a>{% else %}<a href="{{ account_url('/register') }}">{{ _("Регистрация") }}</a> · <a href="{{ account_url('/forgot') }}">{{ _("Забыли пароль?") }}</a><br><a href="/staff/login">{{ _("Вход для сотрудников") }}</a>{% endif %}{% endblock %}

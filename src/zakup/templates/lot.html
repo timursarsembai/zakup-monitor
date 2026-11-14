@@ -361,7 +361,7 @@
     <div class="sc-actions"><button value="ok" class="primary">{{ _("Да, искать") }}</button><button value="cancel">{{ _("Отмена") }}</button></div>
     {% else %}
     <p>{{ _("На балансе нет поисков. Поиск товаров с ИИ — 250 ₸, пакеты выгоднее.") }}</p>
-    <div class="sc-actions"><a class="pw-buy" href="{{ '/pricing' if request.state.user_id else '/register' }}">{{ _("Купить поиски") if request.state.user_id else _("Зарегистрироваться") }}</a><button value="cancel">{{ _("Отмена") }}</button></div>
+    <div class="sc-actions"><a class="pw-buy" href="{{ '/pricing' if request.state.user_id else account_url('/register') }}">{{ _("Купить поиски") if request.state.user_id else _("Зарегистрироваться") }}</a><button value="cancel">{{ _("Отмена") }}</button></div>
     {% endif %}
   </form>
 </dialog>

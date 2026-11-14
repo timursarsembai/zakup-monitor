@@ -160,6 +160,11 @@ ACCESS_UNTIL = "greatest(u.paid_until, u.trial_until)"
 TRIAL_DAYS = 30
 
 
+_USER_FIELDS = f"""u.id, u.email, u.role,
+                  u.role IN ('admin', 'moderator') OR coalesce({ACCESS_UNTIL} > now(), false),
+                  (SELECT coalesce(sum(g.delta), 0) FROM search_ledger g WHERE g.user_id = u.id)"""
+
+
 def user_by_session(conn: psycopg.Connection, token: str | None) -> tuple | None:
     """(id, логин, роль, есть ли доступ к платному, остаток поисков, кто из администраторов
     вошёл под этим пользователем — или None) по cookie сессии.
@@ -168,15 +173,20 @@ def user_by_session(conn: psycopg.Connection, token: str | None) -> tuple | None
     if not token:
         return None
     return conn.execute(
-        f"""SELECT u.id, u.email, u.role,
-                  u.role IN ('admin', 'moderator') OR coalesce({ACCESS_UNTIL} > now(), false),
-                  (SELECT coalesce(sum(g.delta), 0) FROM search_ledger g WHERE g.user_id = u.id),
-                  s.impersonated_by
+        f"""SELECT {_USER_FIELDS}, s.impersonated_by
            FROM sessions s JOIN users u ON u.id = s.user_id
            WHERE s.token_hash = %s AND s.expires_at > now() AND NOT u.disabled
              AND u.deleted_at IS NULL""",
         (_token_hash(token),),
     ).fetchone()
+
+
+def user_by_id(conn: psycopg.Connection, user_id: int) -> tuple | None:
+    """То же, что user_by_session, — по номеру из жетона сервиса учётных записей
+    (zakup.idservice). Отключённый или удалённый здесь — не вошёл, что бы ни сказал жетон."""
+    return conn.execute(
+        f"""SELECT {_USER_FIELDS}, NULL::bigint FROM users u
+           WHERE u.id = %s AND NOT u.disabled AND u.deleted_at IS NULL""", (user_id,)).fetchone()
 
 
 # Срок входа скользящий: заходит человек — отсчёт SESSION_TTL начинается заново (не чаще раза

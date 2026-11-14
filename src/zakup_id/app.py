@@ -81,8 +81,8 @@ def _ip(request: Request) -> str | None:
     return request.client.host if request.client else None
 
 
-def _back(path: str, **query: str) -> RedirectResponse:
-    tail = f"?{urlencode(query)}" if query else ""
+def _back(path: str, fragment: str = "", **query: str) -> RedirectResponse:
+    tail = (f"?{urlencode(query)}" if query else "") + (f"#{fragment}" if fragment else "")
     return RedirectResponse(f"{config.site_url()}{path}{tail}", status_code=303)
 
 
@@ -349,7 +349,7 @@ def password_change(request: Request, current: Annotated[str, Form()], password:
             conn.commit()                                       # …кроме этого, нового
     if error:
         return _page(request, "password", "password", status_code, error=error)
-    return _signed_in(_back("/settings", notice="password"), account_id, sid)
+    return _signed_in(_back("/settings", fragment="account", notice="password"), account_id, sid)
 
 
 @app.get("/phone")
@@ -417,7 +417,7 @@ def phone_finish(request: Request, flow: Annotated[str, Form()], code: Annotated
             return _page(request, "code", "phone", 422, flow=flow, phone=phone, error=failure.translated())
         if not accounts.change_phone(conn, account_id, phone, claims.sid):
             return _page(request, "newphone", "phone", 422, error=_("Этот номер уже используется."))
-    return _back("/settings", notice="phone")
+    return _back("/settings", fragment="account", notice="phone")
 
 
 @app.post("/api/renew", dependencies=[Depends(service)])
@@ -432,6 +432,18 @@ def renew(value: Annotated[str, Body(embed=True, alias="token")]):
     if gen is None:
         raise HTTPException(401, "session ended")
     return {"token": token.issue(config.signing_key(), claims.user_id, claims.sid, gen)}
+
+
+@app.post("/api/logout", dependencies=[Depends(service)])
+def api_logout(value: Annotated[str, Body(embed=True, alias="token")]):
+    """Выход с основного сайта: он закрывает свои сессии и просит закрыть эту (кнопка
+    «Выйти» — форма сайта, не сервиса: так закрывается и вход администратора под клиентом)."""
+    claims = token.read(value, token.public_key(config.signing_key()))
+    if claims is None:
+        raise HTTPException(401, "bad token")
+    with pool.connection() as conn:
+        accounts.end_session(conn, claims.sid)
+    return {"ok": True}
 
 
 @app.post("/api/revoke", dependencies=[Depends(service)])

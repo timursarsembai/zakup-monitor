@@ -152,7 +152,19 @@ def _research(args) -> int:
     return 0
 
 
+def _local_users_allowed() -> bool:
+    """С сервисом учётных записей номера пользователей выдаёт он: своя запись здесь заняла бы
+    чужой номер (docs/ACCOUNTS_KZ.md)."""
+    from zakup import idservice
+    if idservice.enabled():
+        print("Включён сервис учётных записей (ZAKUP_ID_URL): пользователи и пароли — там.")
+        return False
+    return True
+
+
 def _add_user(args) -> int:
+    if not _local_users_allowed():
+        return 1
     with db.connect(config.database_url()) as conn:
         row = conn.execute(
             """INSERT INTO users (email, telegram_chat_id) VALUES (%s, %s)
@@ -311,6 +323,8 @@ def _securities(loop: bool) -> int:
 
 
 def _set_password(email: str) -> int:
+    if not _local_users_allowed():
+        return 1
     if sys.stdin.isatty():
         password = getpass.getpass("Пароль: ")
         if password != getpass.getpass("Ещё раз: "):

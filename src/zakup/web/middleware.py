@@ -11,7 +11,9 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from starlette.concurrency import run_in_threadpool
 
 from zakup import (
+    config,
     i18n,
+    idservice,
     visits,
 )
 from zakup.web import core
@@ -112,6 +114,14 @@ async def session_cookie(request: Request, call_next):
     touched = any(value.startswith(core.SESSION_COOKIE + "=") for value in response.headers.getlist("set-cookie"))
     if getattr(request.state, "session_renewed", False) and token and not touched:
         core._with_session(response, token)
+    # Жетон сервиса учётных записей (core._id_user): продлён — новый; сессия закрыта — стереть.
+    fresh = getattr(request.state, "id_token", None)
+    if fresh:
+        response.set_cookie(idservice.COOKIE, fresh, max_age=30 * 24 * 3600, domain=config.id_cookie_domain(),
+                            secure=True, httponly=True, samesite="lax")
+    elif getattr(request.state, "id_forget", False):
+        response.delete_cookie(idservice.COOKIE, domain=config.id_cookie_domain(), secure=True,
+                               httponly=True, samesite="lax")
     return response
 
 

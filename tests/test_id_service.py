@@ -251,7 +251,7 @@ def test_password_change_needs_session_and_current_password(service):
     assert bad.status_code == 422 and "неверный" in bad.text
     ok = _own(service, "/password", {"current": "верный-пароль", "password": "другой-пароль",
                                      "password2": "другой-пароль"})
-    assert ok.headers["location"] == f"{SITE}/settings?notice=password"
+    assert ok.headers["location"] == f"{SITE}/settings?notice=password#account"
     assert _api(service, "/api/renew", {"token": first.cookies.get(token.COOKIE)}).status_code == 401
     assert _api(service, "/api/renew", {"token": ok.cookies.get(token.COOKIE)}).status_code == 200
 
@@ -318,7 +318,7 @@ def test_phone_change_needs_password_and_code_on_new_number(service, sms):
     step = _own(service, "/phone", {"current": "верный-пароль", "phone": "8 705 000 11 22"})
     assert sms == ["+77050001122"] and "Подтвердить номер" in step.text
     done = _own(service, "/phone/code", {"flow": _flow(step), "code": "1234"})
-    assert done.headers["location"] == f"{SITE}/settings?notice=phone"
+    assert done.headers["location"] == f"{SITE}/settings?notice=phone#account"
     assert service.db.execute("SELECT login, phone FROM accounts WHERE id = 7").fetchone() == (
         "+77050001122", "+77050001122")
     service.cookies.clear()
@@ -354,7 +354,7 @@ def test_phone_change_takes_released_number_and_reports_event(service, sms):
     assert "уже ваш номер" in own.text and sms == []
     step = _own(service, "/phone", {"current": "верный-пароль", "phone": "+77050001122"})
     done = _own(service, "/phone/code", {"flow": _flow(step), "code": "1234"})
-    assert done.headers["location"] == f"{SITE}/settings?notice=phone"
+    assert done.headers["location"] == f"{SITE}/settings?notice=phone#account"
     assert service.db.execute("SELECT id FROM accounts WHERE login = '+77050001122'").fetchone() == (7,)
     # Сайт забирает событие и сам предупреждает владельца в Telegram — номера в событии нет.
     events = _api_get(service, "/api/events")["events"]

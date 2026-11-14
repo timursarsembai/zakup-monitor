@@ -8,7 +8,9 @@ from fastapi.responses import RedirectResponse
 
 from zakup import (
     auth,
+    config,
     i18n,
+    idservice,
     signup,
     subjects,
 )
@@ -29,8 +31,8 @@ router = APIRouter()
 
 
 @router.get("/login")
-def login_page(request: Request, next: str = "/", notice: str = ""):
-    return _login_form(request, next, staff=False, notice=notice)
+def login_page(request: Request, next: str = "/", notice: str = "", error: str = ""):
+    return _login_form(request, next, staff=False, notice=notice, error=error)
 
 
 @router.get("/staff/login")
@@ -38,14 +40,16 @@ def staff_login_page(request: Request, next: str = "/"):
     return _login_form(request, next, staff=True)
 
 
-def _login_form(request: Request, next: str, staff: bool, notice: str = ""):
-    with core.pool.connection() as conn:
-        if auth.user_by_session(conn, request.cookies.get(SESSION_COOKIE)):
-            return RedirectResponse(_safe_next(next), status_code=303)
+def _login_form(request: Request, next: str, staff: bool, notice: str = "", error: str = ""):
+    if core.optional_user(request) is not None:
+        return RedirectResponse(_safe_next(next), status_code=303)
     notices = {"reset": i18n.gettext("Пароль изменён — войдите с новым паролем.")}
+    # Ошибка входа с сервиса учётных записей (он возвращает сюда только код, без логина).
+    errors = {"password": i18n.gettext("Неверный телефон или пароль."),
+              "lock": i18n.gettext("Слишком много неудачных попыток. Попробуйте через 15 минут.")}
     return templates.TemplateResponse(request, "login.html", {
-        "next": _safe_next(next), "email": "", "error": None, "staff": staff,
-        "notice": notices.get(notice)})
+        "next": _safe_next(next), "email": "", "error": errors.get(error), "staff": staff,
+        "notice": notices.get(notice)}, status_code=401 if error in errors else 200)
 
 
 @router.post("/login", dependencies=[Depends(same_origin)])
@@ -131,8 +135,18 @@ def _code_page(request: Request, purpose: str, flow: str, phone: str, error: str
         "again": "/register" if register else "/forgot"}, status_code=status_code)
 
 
+def _to_service(path: str) -> RedirectResponse | None:
+    """Сервис учётных записей включён — регистрация и восстановление там (телефон и пароль
+    вводятся только в Казахстане); старые адреса и закладки ведут туда."""
+    if not idservice.enabled():
+        return None
+    return RedirectResponse(idservice.page(path, i18n.language()), status_code=303)
+
+
 @router.get("/register")
 def register_page(request: Request):
+    if moved := _to_service("/register"):
+        return moved
     with core.pool.connection() as conn:
         closed = not signup.registration_open(conn)
     return _phone_page(request, "register", closed=closed)
@@ -140,6 +154,8 @@ def register_page(request: Request):
 
 @router.get("/forgot")
 def forgot_page(request: Request):
+    if moved := _to_service("/forgot"):
+        return moved
     return _phone_page(request, "reset")
 
 
@@ -157,6 +173,8 @@ PHONE_CHECKS_PER_HOUR = 10
 
 
 def _start(request: Request, purpose: str, raw_phone: str):
+    if moved := _to_service("/register" if purpose == "register" else "/forgot"):
+        return moved
     phone = auth.normalize_phone(raw_phone)
     if phone is None:
         return _phone_page(request, purpose, raw_phone,
@@ -207,6 +225,8 @@ def forgot_finish(request: Request, flow: Annotated[str, Form()], code: Annotate
 
 
 def _finish(request: Request, purpose: str, flow: str, code: str, password: str, password2: str):
+    if moved := _to_service("/register" if purpose == "register" else "/forgot"):
+        return moved
     with core.pool.connection() as conn:
         phone = signup.pending(conn, flow, purpose)
         if phone is None:
@@ -322,4 +342,9 @@ def logout(request: Request):
     response = RedirectResponse("/login", status_code=303)
     response.delete_cookie(SESSION_COOKIE, httponly=True, secure=True, samesite="lax")
     response.delete_cookie(RETURN_COOKIE, httponly=True, secure=True, samesite="lax")
+    if idservice.enabled() and request.cookies.get(idservice.COOKIE):
+        # Вход через сервис учётных записей: его сессию закрывает он, cookie — на весь домен.
+        idservice.logout(request.cookies.get(idservice.COOKIE))
+        response.delete_cookie(idservice.COOKIE, domain=config.id_cookie_domain(), secure=True,
+                               httponly=True, samesite="lax")
     return response

@@ -17,6 +17,7 @@ from zakup import (
     client_bot,
     credits,
     history,
+    idservice,
     kaspi,
     legal,
     marks,
@@ -169,6 +170,8 @@ def change_password(
     password: Annotated[str, Form()],
     repeat: Annotated[str, Form()],
 ):
+    if idservice.enabled():   # пароли — на сервисе учётных записей (id.tenderim.com/password)
+        raise HTTPException(404, "Пароль меняется на странице входа")
     ip = request.client.host if request.client else None
     with core.pool.connection() as conn:
         # Подбор текущего пароля по чужой сессии — с тем же лимитом, что и вход.
@@ -197,6 +200,10 @@ def change_password(
 def add_user(request: Request, staff: Staff, login: Annotated[str, Form()]):
     # Логин-телефон — в том же виде, что при регистрации по SMS (+7…): иначе «8701…» стал бы
     # вторым аккаунтом того же человека.
+    if idservice.enabled():
+        # Номера и пароли — у сервиса учётных записей: запись здесь не вошла бы и заняла бы номер.
+        return _settings_page(request, staff, error="Пользователей добавляет сервис учётных записей: "
+                              "клиент регистрируется сам по SMS.", status_code=409, tab="users")
     login = auth.normalize_phone(login) or auth.normalize_email(login)
     if not login or len(login) > 100 or any(c.isspace() for c in login):
         return _settings_page(request, staff, error="Логин — без пробелов, до 100 символов.",
@@ -399,6 +406,9 @@ def reset_password(request: Request, staff: Staff, user_id: int):
         if conn.execute("SELECT role FROM users WHERE id = %s", (user_id,)).fetchone()[0] == "admin":
             # Пароль другого администратора в руках — это его аккаунт целиком.
             raise HTTPException(403, "Пароль другого администратора он сбрасывает сам")
+        if idservice.enabled():
+            # Пароли — у сервиса учётных записей: клиент восстанавливает пароль сам по SMS.
+            raise HTTPException(409, "Пароль клиент восстанавливает сам по SMS (кнопка «Забыли пароль?»)")
         password = auth.generate_password()
         auth.set_password(conn, login, password)
     _audit(request, staff, "user_reset", login)

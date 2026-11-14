@@ -14,7 +14,7 @@ from datetime import timedelta
 
 import psycopg
 
-from zakup import SITE_URL, config, db, telegram
+from zakup import SITE_URL, config, db, idservice, telegram
 
 logger = logging.getLogger(__name__)
 
@@ -221,9 +221,13 @@ def _update(conn: psycopg.Connection, update: dict) -> None:
             logger.warning("reply not sent: %s", error)
 
 
+EVENTS_EVERY = 60
+
+
 def run(database_url: str, poll_timeout: int = 50) -> None:
     telegram.call("deleteWebhook")
     logger.info("bot @%s is polling", telegram.bot_username())
+    events_at = 0.0
     while True:
         try:
             with db.connect(database_url) as conn:
@@ -250,6 +254,15 @@ def run(database_url: str, poll_timeout: int = 50) -> None:
                         conn, OFFSET_KEY, db.SyncState(update["update_id"] + 1, None, None)
                     )
                     conn.commit()
+                # События сервиса учётных записей («сменён телефон» и т.п.): Telegram — у
+                # сайта. После ответов пользователям и не чаще раза в минуту.
+                if time.monotonic() >= events_at:
+                    events_at = time.monotonic() + EVENTS_EVERY
+                    try:
+                        idservice.poll_events(conn)
+                    except Exception:
+                        conn.rollback()
+                        logger.exception("account service events failed")
         except telegram.TelegramError as error:
             logger.warning("getUpdates failed: %s", error)
             time.sleep(10)

@@ -66,3 +66,25 @@ def autofix_model() -> str:
 
 def nightly_model() -> str:
     return _get("ZAKUP_NIGHTLY_MODEL", "opus")
+
+
+# --- Сервис учётных записей в Казахстане (docs/ACCOUNTS_KZ.md) ---
+# Не задан адрес или открытый ключ — вход по-старому (сессии в своей базе).
+def id_service_url() -> str:
+    """https://id.tenderim.com — туда отправляются формы входа и регистрации."""
+    return _get("ZAKUP_ID_URL").rstrip("/")
+
+
+def id_public_key() -> str:
+    """Открытый ключ Ed25519: им сайт сам проверяет жетон входа (cookie tid)."""
+    return _get("ZAKUP_ID_PUBLIC_KEY")
+
+
+def id_service_key() -> str:
+    """Ключ запросов сайта к сервису (продление жетона, события, решения сотрудников)."""
+    return _get("ZAKUP_ID_SERVICE_KEY")
+
+
+def id_cookie_domain() -> str | None:
+    """Домен cookie жетона (".tenderim.com") — продлённый жетон ставит сайт."""
+    return _get("ZAKUP_ID_COOKIE_DOMAIN") or None

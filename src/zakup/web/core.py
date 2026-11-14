@@ -29,6 +29,7 @@ from zakup import (
     catalog,
     config,
     i18n,
+    idservice,
     legal,
     orgs,
     reports,
@@ -146,6 +147,16 @@ templates.env.globals["open_statuses"] = set(OPEN_STATUSES)
 
 
 templates.env.globals["site_url"] = SITE_URL
+
+
+def _account_url(path: str) -> str:
+    """Вход, регистрация, восстановление, выход, смена пароля и телефона — на сервисе
+    учётных записей (id.tenderim.com), если он включён; иначе — свои страницы."""
+    return idservice.page(path, i18n.language()) if idservice.enabled() else path
+
+
+templates.env.globals["account_url"] = _account_url
+templates.env.globals["id_enabled"] = idservice.enabled
 templates.env.globals["trial_days"] = auth.TRIAL_DAYS
 # Компьютер: фильтр поиска — строкой условий сверху (как на телефоне) с выпадающими шторками.
 # Не понравится — False: вернётся прежний фильтр целиком справа от результатов.
@@ -342,16 +353,51 @@ class LoginRequired(Exception):
     pass
 
 
+def _id_user(request: Request) -> int | None:
+    """Номер пользователя по жетону сервиса учётных записей (cookie tid), если он включён.
+    Один раз за запрос: продление жетона — запрос в Казахстан (без соединения из пула).
+    Новый жетон ставит middleware.session_cookie, закрытую сессию — стирает."""
+    if not idservice.enabled() or not request.cookies.get(idservice.COOKIE):
+        return None
+    if not hasattr(request.state, "id_user"):
+        resolved = idservice.resolve(request.cookies.get(idservice.COOKIE))
+        request.state.id_user = resolved[0] if resolved else None
+        request.state.id_token = resolved[1] if resolved else None
+        request.state.id_forget = resolved is None
+    return request.state.id_user
+
+
+def _token_user(request: Request) -> tuple | None:
+    """Пользователь по жетону; новый (только что зарегистрировался) — заводим запись здесь.
+    Запросы в Казахстан — вне соединений из пула: медленный сервис не занимает пул."""
+    id_user = _id_user(request)
+    if id_user is None:
+        return None
+    with pool.connection() as conn:
+        user = auth.user_by_id(conn, id_user)
+        known = user is not None or conn.execute("SELECT 1 FROM users WHERE id = %s", (id_user,)).fetchone()
+    if known:
+        return user
+    previous = idservice.previous_record(id_user)
+    with pool.connection() as conn:
+        idservice.ensure_user(conn, id_user, i18n.language(), previous)
+        return auth.user_by_id(conn, id_user)
+
+
 def optional_user(request: Request) -> int | None:
     """Кто смотрит: пользователь или гость (None). Открытые страницы доступны всем."""
     token = request.cookies.get(SESSION_COOKIE)
     with pool.connection() as conn:
+        # Своя сессия — вход администратора под пользователем и входы до переключения.
         user = auth.user_by_session(conn, token)
         # Скользящий срок входа: cookie обновит middleware.session_cookie.
         renewed = bool(user) and auth.renew_session(conn, token)
+    if user is None:
+        user = _token_user(request)
     # Повторный вызов в том же запросе уже не продлит — отметку не сбрасываем.
     request.state.session_renewed = getattr(request.state, "session_renewed", False) or renewed
-    request.state.email = user[1] if user else ""
+    # Логин вошедшего через сервис учётных записей здесь неизвестен (он в Казахстане) — «№ N».
+    request.state.email = idservice.label(user[1], user[0]) if user else ""
     request.state.role = user[2] if user else ""
     request.state.user_id = user[0] if user else None
     # Платные функции: сотрудники всегда, клиенты — пока оплачено.
