@@ -66,9 +66,10 @@ def _network(ip: str | None) -> str | None:
 
 
 def start(conn: psycopg.Connection, phone: str, purpose: str, ip: str | None,
-          account_id: int | None = None) -> str:
+          account_id: int | None = None, alert=None) -> str:
     """Отправляет код и возвращает flow для следующего шага. account_id — шаг принадлежит
-    этой записи (смена телефона в zakup_id: столбец есть только в базе сервиса)."""
+    этой записи (смена телефона в zakup_id: столбец есть только в базе сервиса). alert —
+    куда сообщить владельцу о расходе SMS (по умолчанию notify.send; у zakup_id — событие)."""
     # Счётчики и запись шага — под общей блокировкой и до отправки SMS: иначе пачка
     # одновременных запросов видит одни и те же старые счётчики и обходит лимиты.
     conn.execute("SELECT pg_advisory_xact_lock(%s)", (OTP_LOCK,))
@@ -89,7 +90,7 @@ def start(conn: psycopg.Connection, phone: str, purpose: str, ip: str | None,
         conn.rollback()
         raise SignupError("Отправка кодов временно недоступна. Попробуйте завтра.")
     if total + 1 == budget // 2:
-        notify.send(f"zakup: за сутки отправлено {total + 1} SMS-кодов ({purpose}) — половина "
+        (alert or notify.send)(f"zakup: за сутки отправлено {total + 1} SMS-кодов ({purpose}) — половина "
                     f"дневного лимита {budget}. Если клиентов столько не было — похоже на перебор.")
     flow = secrets.token_urlsafe(24)
     conn.execute(

@@ -6,7 +6,6 @@ CREATE TABLE IF NOT EXISTS accounts (
     password_hash    text,
     phone            text,
     email            text,
-    telegram_chat_id text,
     disabled         boolean NOT NULL DEFAULT false,
     -- Растёт при «выйти везде»: старые метки «этот браузер уже входил» больше не действуют.
     device_gen       integer NOT NULL DEFAULT 0,

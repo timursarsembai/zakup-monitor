@@ -1,7 +1,7 @@
 # Сервис учётных записей на сервере в Казахстане (docs/ACCOUNTS_KZ.md).
 # Запуск: из корня репозитория — docker compose -f deploy/kz/docker-compose.yml up -d --build
 # Секреты — в .env рядом с этим файлом (не в репозитории): ID_DB_PASSWORD, ID_SIGNING_KEY,
-# ID_DEVICE_KEY, ID_SERVICE_KEY, ID_TELEGRAM_TOKEN, KAZPAYMENT_API_KEY, OWNER_CHAT_ID; ещё ID_PROXY_IP и PROXY_NETWORK. Порт наружу не открыт: адрес id.tenderim.com
+# ID_DEVICE_KEY, ID_SERVICE_KEY, KAZPAYMENT_API_KEY; ещё ID_PROXY_IP и PROXY_NETWORK. Порт наружу не открыт: адрес id.tenderim.com
 # ведёт сюда через nginx-proxy-manager (сеть PROXY_NETWORK).
 name: tenderim-id
 
@@ -50,13 +50,9 @@ services:
       ID_SERVICE_KEY: ${ID_SERVICE_KEY:?set ID_SERVICE_KEY}
       ID_SITE_URL: ${ID_SITE_URL:-https://tenderim.com}
       ID_COOKIE_DOMAIN: ${ID_COOKIE_DOMAIN:-.tenderim.com}
-      ID_TELEGRAM_TOKEN: ${ID_TELEGRAM_TOKEN}
-      # SMS-коды регистрации и восстановления (kazpayment) и оповещение владельцу о
-      # расходе SMS (zakup.signup → zakup.notify).
-      # Обязательны: без них о перерасходе SMS никто бы не узнал.
+      # SMS-коды (kazpayment). В Telegram сервис не пишет никому: оповещения владельцу
+      # и пользователям — событиями (/api/events), отправляет сайт в Германии.
       KAZPAYMENT_API_KEY: "${KAZPAYMENT_API_KEY:?set KAZPAYMENT_API_KEY}"
-      ZAKUP_TELEGRAM_BOT_TOKEN: "${ID_TELEGRAM_TOKEN:?set ID_TELEGRAM_TOKEN}"
-      ZAKUP_TELEGRAM_CHAT_ID: "${OWNER_CHAT_ID:?set OWNER_CHAT_ID}"
     security_opt:
       - no-new-privileges:true
     cap_drop: [ALL]

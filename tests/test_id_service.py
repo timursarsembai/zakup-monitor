@@ -52,8 +52,8 @@ def service(id_db, monkeypatch):
     monkeypatch.setenv("ID_COOKIE_DOMAIN", "")
     from zakup_id.app import app
     with TestClient(app, base_url="https://id.tenderim.com") as client, psycopg.connect(id_db) as conn:
-        conn.execute("INSERT INTO accounts (id, login, password_hash, telegram_chat_id) "
-                     "VALUES (7, '+77011112233', %s, '555')", (hash_password("верный-пароль"),))
+        conn.execute("INSERT INTO accounts (id, login, password_hash) "
+                     "VALUES (7, '+77011112233', %s)", (hash_password("верный-пароль"),))
         conn.commit()
         accounts.sync_ids(conn)   # как после переноса: новые номера — после перенесённых
         client.db = conn
@@ -154,29 +154,6 @@ def test_revoke_ends_every_session_and_block_holds(service):
 def test_sync_ids_after_import(service):
     new = service.db.execute("INSERT INTO accounts (login) VALUES ('new@example.com') RETURNING id").fetchone()
     assert new == (8,)
-
-
-def test_notify_sends_to_chat_and_forgets_gone_chat(service, monkeypatch):
-    import zakup_id.app as id_app
-    sent = []
-
-    class Reply:
-        def __init__(self, data):
-            self.data = data
-
-        def json(self):
-            return self.data
-
-    monkeypatch.setenv("ID_TELEGRAM_TOKEN", "bot-token")
-    monkeypatch.setattr(id_app.httpx, "post",
-                        lambda url, json, timeout: sent.append(json) or Reply({"ok": True}))
-    assert _api(service, "/api/notify", {"user_id": 7, "text": "Новый лот"}).json() == {"sent": True}
-    assert sent[0]["chat_id"] == "555" and sent[0]["text"] == "Новый лот"
-    assert _api(service, "/api/notify", {"user_id": 8, "text": "x"}).json()["reason"] == "no_chat"
-    monkeypatch.setattr(id_app.httpx, "post", lambda url, json, timeout: Reply(
-        {"ok": False, "error_code": 403, "description": "Forbidden: bot was blocked by the user"}))
-    assert _api(service, "/api/notify", {"user_id": 7, "text": "x"}).json()["reason"] == "chat_gone"
-    assert service.db.execute("SELECT telegram_chat_id FROM accounts").fetchone() == (None,)
 
 
 @pytest.fixture
@@ -299,14 +276,6 @@ def test_replaced_record_cannot_be_restored(service, sms):
     assert _api(service, "/api/status", {"user_id": 99, "deleted": True}).status_code == 404
 
 
-def test_deleted_account_gets_no_messages(service, monkeypatch):
-    import zakup_id.app as id_app
-    monkeypatch.setenv("ID_TELEGRAM_TOKEN", "bot-token")
-    monkeypatch.setattr(id_app.httpx, "post", lambda *a, **k: pytest.fail("must not send"))
-    _api(service, "/api/status", {"user_id": 7, "deleted": True})
-    assert _api(service, "/api/notify", {"user_id": 7, "text": "x"}).json()["reason"] == "no_chat"
-
-
 def test_wrong_code_message_in_kazakh(service, sms):
     flow = _flow(_own(service, "/forgot", {"phone": "+77011112233", "lang": "kk"}))
     reply = _own(service, "/forgot/code", {"flow": flow, "code": "0000", "password": "сброшенный-пароль",
@@ -373,15 +342,7 @@ def test_phone_change_flow_belongs_to_its_account(service, sms):
         "other@example.com", "+77060001122")
 
 
-def test_phone_change_takes_released_number_and_warns_owner(service, sms, monkeypatch):
-    import zakup_id.app as id_app
-    sent = []
-
-    class Reply:
-        def json(self):
-            return {"ok": True}
-    monkeypatch.setenv("ID_TELEGRAM_TOKEN", "bot-token")
-    monkeypatch.setattr(id_app.httpx, "post", lambda url, json, timeout: sent.append(json) or Reply())
+def test_phone_change_takes_released_number_and_reports_event(service, sms):
     # Номер удалённой записи, которой разрешили заново, — можно занять.
     service.db.execute("INSERT INTO accounts (login, phone, deleted_at, may_reregister) "
                        "VALUES ('+77050001122', '+77050001122', now(), true)")
@@ -394,9 +355,15 @@ def test_phone_change_takes_released_number_and_warns_owner(service, sms, monkey
     step = _own(service, "/phone", {"current": "верный-пароль", "phone": "+77050001122"})
     done = _own(service, "/phone/code", {"flow": _flow(step), "code": "1234"})
     assert done.headers["location"] == f"{SITE}/settings?notice=phone"
-    assert service.db.execute("SELECT login FROM accounts WHERE phone = '+77050001122'").fetchone() == (
-        "+77050001122",)
-    assert sent and "…1122" in sent[0]["text"] and "…2233" in sent[0]["text"]
+    assert service.db.execute("SELECT id FROM accounts WHERE login = '+77050001122'").fetchone() == (7,)
+    # Сайт забирает событие и сам предупреждает владельца в Telegram — номера в событии нет.
+    events = _api_get(service, "/api/events")["events"]
+    assert [(e["user_id"], e["kind"], e["detail"], e["before"]) for e in events] == [
+        (7, "phone_changed", "…1122", "…2233")]
+    assert _api_get(service, "/api/events")["events"] == events          # пока не подтвердил — снова
+    assert _api(service, "/api/events/ack", {"ids": [events[0]["id"]]}).json() == {"acked": 1}
+    assert _api_get(service, "/api/events") == {"events": []}
+    assert service.get("/api/events").status_code == 401
     # Другие входы закрыты, этот — нет.
     assert _api(service, "/api/renew", {"token": other_browser}).status_code == 401
     assert service.get("/phone").status_code == 200
@@ -407,3 +374,12 @@ def test_password_lockout_answers_429(service):
     for _ in range(accounts.MAX_FAILURES_PER_LOGIN):
         _own(service, "/phone", {"current": "не-тот", "phone": "+77050001122"})
     assert _own(service, "/phone", {"current": "верный-пароль", "phone": "+77050001122"}).status_code == 429
+
+
+def test_sms_overspend_alert_goes_to_site_as_event(service, sms, monkeypatch):
+    from zakup import signup
+    monkeypatch.setitem(signup.PER_DAY, "reset", 2)       # половина запаса — после первого кода
+    _own(service, "/forgot", {"phone": "+77011112233"})
+    events = _api_get(service, "/api/events")["events"]
+    assert [(e["user_id"], e["kind"]) for e in events] == [(None, "owner_alert")]
+    assert "SMS" in events[0]["detail"] and "2233" not in events[0]["detail"]

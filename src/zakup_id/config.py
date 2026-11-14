@@ -44,6 +44,3 @@ def cookie_domain() -> str | None:
     """Домен cookie входа (".tenderim.com" — видна и основному сайту); пусто — только этот адрес."""
     return _get("ID_COOKIE_DOMAIN") or None
 
-
-def telegram_token() -> str | None:
-    return _get("ID_TELEGRAM_TOKEN") or None

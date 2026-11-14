@@ -7,7 +7,6 @@
 """
 
 import hmac
-import logging
 import time
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
@@ -15,17 +14,15 @@ from importlib.resources import files
 from typing import Annotated
 from urllib.parse import urlencode, urlsplit
 
-import httpx
 from fastapi import Body, Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 from psycopg_pool import ConnectionPool
 
 from zakup import i18n, signup
-from zakup.auth import MIN_PASSWORD_LENGTH, is_phone_login, normalize_phone
+from zakup.auth import MIN_PASSWORD_LENGTH, normalize_phone
 from zakup_id import accounts, config, db, token
 
-logger = logging.getLogger(__name__)
 DEVICE_COOKIE = "tdev"
 DEVICE_TTL = 365 * 24 * 3600
 
@@ -194,6 +191,13 @@ def forgot_start(request: Request, phone: Annotated[str, Form()], lang: Annotate
     return _start(request, "reset", phone)
 
 
+def _owner_alert(text: str) -> None:
+    """Сообщение владельцу о расходе SMS (из zakup.signup): Telegram — в Германии, поэтому
+    событием, а отправляет сайт."""
+    with pool.connection() as conn:
+        accounts.owner_alert(conn, text)
+
+
 def _start(request: Request, purpose: str, raw_phone: str):
     _ = i18n.gettext
     phone = normalize_phone(raw_phone)
@@ -228,7 +232,7 @@ def _start(request: Request, purpose: str, raw_phone: str):
             return _page(request, "phone", purpose, 403, phone=raw_phone, error=_(
                 "Восстановление пароля для этого номера недоступно. Обратитесь в поддержку."))
         try:
-            flow = signup.start(conn, phone, purpose, ip)
+            flow = signup.start(conn, phone, purpose, ip, alert=_owner_alert)
         except signup.SignupError as error:
             return _page(request, "phone", purpose, 429, phone=raw_phone, error=error.translated())
     return _page(request, "code", purpose, flow=flow, phone=phone)
@@ -387,7 +391,7 @@ def phone_start(request: Request, current: Annotated[str, Form()], phone: Annota
         return _page(request, "newphone", "phone", status_code, phone=phone, error=error)
     with db.connect(config.database_url()) as conn:   # отправка SMS ждёт kazpayment — не из пула
         try:
-            flow = signup.start(conn, new, "phone", _ip(request), account_id=account_id)
+            flow = signup.start(conn, new, "phone", _ip(request), account_id=account_id, alert=_owner_alert)
         except signup.SignupError as failure:
             return _page(request, "newphone", "phone", 429, phone=phone, error=failure.translated())
     return _page(request, "code", "phone", flow=flow, phone=new)
@@ -411,18 +415,8 @@ def phone_finish(request: Request, flow: Annotated[str, Form()], code: Annotated
             phone = signup.verify(conn, flow, "phone", code, account_id)
         except signup.SignupError as failure:
             return _page(request, "code", "phone", 422, flow=flow, phone=phone, error=failure.translated())
-        login, old = conn.execute("SELECT login, phone FROM accounts WHERE id = %s", (account_id,)).fetchone()
-        old = old or (login if is_phone_login(login) else None)
         if not accounts.change_phone(conn, account_id, phone, claims.sid):
             return _page(request, "newphone", "phone", 422, error=_("Этот номер уже используется."))
-    # Владелец узнаёт о смене (если номер увели — по Telegram, на прежний номер вход уже не работает).
-    hidden = f"…{phone[-4:]}"
-    was = f" (был …{old[-4:]})" if old else ""
-    try:
-        _send_telegram(account_id, f"Tenderim: телефон для входа изменён на {hidden}{was}. "
-                                   "Если это были не вы — срочно напишите в поддержку.")
-    except HTTPException:
-        logger.warning("phone change notice to %s not sent", account_id)
     return _back("/settings", notice="phone")
 
 
@@ -448,44 +442,18 @@ def revoke(user_id: Annotated[int, Body()], block: Annotated[bool | None, Body()
         return {"ended": accounts.end_all_sessions(conn, user_id, block)}
 
 
-@app.post("/api/notify", dependencies=[Depends(service)])
-def notify(user_id: Annotated[int, Body()], text: Annotated[str, Body()],
-           buttons: Annotated[list[list[dict]] | None, Body()] = None):
-    """Сообщение пользователю в Telegram: основной сайт знает только номер, чат — здесь."""
-    return _send_telegram(user_id, text, buttons)
-
-
-def _send_telegram(user_id: int, text: str, buttons: list[list[dict]] | None = None) -> dict:
-    # Соединение не держим, пока ждём Telegram (до 15 с): иначе медленный Telegram
-    # занял бы все соединения, и встали бы вход и продление.
+@app.get("/api/events", dependencies=[Depends(service)])
+def events(limit: int = 100):
+    """Недоставленные события («телефон изменён», служебные владельцу); сайт подтверждает
+    обработанные через /api/events/ack — до этого они приходят снова."""
     with pool.connection() as conn:
-        row = conn.execute("""SELECT telegram_chat_id FROM accounts
-                              WHERE id = %s AND NOT disabled AND deleted_at IS NULL""",
-                           (user_id,)).fetchone()
-    if not row or not row[0]:
-        return {"sent": False, "reason": "no_chat"}
-    bot = config.telegram_token()
-    if not bot:
-        return {"sent": False, "reason": "not_configured"}
-    payload = {"chat_id": row[0], "text": text, "parse_mode": "HTML", "disable_web_page_preview": True}
-    if buttons:
-        payload["reply_markup"] = {"inline_keyboard": buttons}
-    try:
-        reply = httpx.post(f"https://api.telegram.org/bot{bot}/sendMessage", json=payload, timeout=15)
-        data = reply.json()
-    except (httpx.HTTPError, ValueError) as error:
-        logger.warning("telegram to %s failed: %s", user_id, type(error).__name__)
-        raise HTTPException(502, "telegram unavailable") from None
-    if data.get("ok"):
-        return {"sent": True}
-    # Пользователь удалил чат или заблокировал бота — больше не пытаемся.
-    if data.get("error_code") == 403 or "chat not found" in str(data.get("description", "")):
-        with pool.connection() as conn:
-            conn.execute("UPDATE accounts SET telegram_chat_id = NULL WHERE id = %s AND telegram_chat_id = %s",
-                         (user_id, row[0]))
-        return {"sent": False, "reason": "chat_gone"}
-    logger.warning("telegram to %s refused: %s", user_id, data.get("description"))
-    return {"sent": False, "reason": "refused"}
+        return {"events": accounts.pending_events(conn, min(max(limit, 1), 500))}
+
+
+@app.post("/api/events/ack", dependencies=[Depends(service)])
+def events_ack(ids: Annotated[list[int], Body(embed=True)]):
+    with pool.connection() as conn:
+        return {"acked": accounts.ack_events(conn, ids[:1000])}
 
 
 @app.post("/api/registration", dependencies=[Depends(service)])

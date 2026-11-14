@@ -270,10 +270,38 @@ def change_phone(conn: psycopg.Connection, account_id: int, phone: str, keep_sid
         return False
     if status == "reregister":
         _retire_deleted(conn, phone)
-    login = conn.execute("SELECT login FROM accounts WHERE id = %s", (account_id,)).fetchone()[0]
+    login, old = conn.execute("SELECT login, phone FROM accounts WHERE id = %s", (account_id,)).fetchone()
+    old = old or (login if is_phone_login(login) else None)
     conn.execute("UPDATE accounts SET phone = %s, login = %s, device_gen = device_gen + 1 WHERE id = %s",
                  (phone, phone if is_phone_login(login) else login, account_id))
     conn.execute("DELETE FROM sessions WHERE account_id = %s AND sid_hash <> %s",
                  (account_id, _sid_hash(keep_sid)))
+    # Сайт предупредит владельца в Telegram (если номер увели — на прежний вход уже нет).
+    conn.execute("INSERT INTO events (account_id, kind, detail, before) VALUES (%s, 'phone_changed', %s, %s)",
+                 (account_id, f"…{phone[-4:]}", f"…{old[-4:]}" if old else None))
     conn.commit()
     return True
+
+
+def pending_events(conn: psycopg.Connection, limit: int = 100) -> list[dict]:
+    """Недоставленные события по порядку. Только чтение: подтверждает сайт (ack_events)."""
+    rows = conn.execute("""SELECT id, account_id, kind, detail, before, created_at FROM events
+                           WHERE delivered_at IS NULL ORDER BY id LIMIT %s""", (limit,)).fetchall()
+    return [{"id": r[0], "user_id": r[1], "kind": r[2], "detail": r[3], "before": r[4],
+             "at": r[5].isoformat()} for r in rows]
+
+
+def ack_events(conn: psycopg.Connection, ids: list[int]) -> int:
+    """Сайт получил и обработал эти события. Доставленные старше 30 дней удаляются;
+    недоставленные хранятся, пока сайт их не заберёт."""
+    done = conn.execute("UPDATE events SET delivered_at = now() WHERE id = ANY(%s) AND delivered_at IS NULL",
+                        (ids,)).rowcount
+    conn.execute("DELETE FROM events WHERE delivered_at < now() - interval '30 days'")
+    conn.commit()
+    return done
+
+
+def owner_alert(conn: psycopg.Connection, text: str) -> None:
+    """Служебное сообщение владельцу (перерасход SMS): отправит сайт своим ботом."""
+    conn.execute("INSERT INTO events (kind, detail) VALUES ('owner_alert', %s)", (text,))
+    conn.commit()
