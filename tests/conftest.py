@@ -5,7 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg_pool import ConnectionPool
 
-from zakup import auth, branding, catalog, db, orgs, outcomes, products, sellers, suppliers, tariff, web
+from zakup import auth, branding, catalog, db, orgs, outcomes, products, selections, sellers, suppliers, tariff, web
 from zakup.goszakup import Page
 
 
@@ -130,6 +130,8 @@ def client(conn, monkeypatch):
     monkeypatch.setattr(web.public, "_sitemap_catalog", {"at": 0.0, "n": (0, 0)})
     monkeypatch.setattr(catalog, "_counts", {"at": 0.0, "rows": {}})
     monkeypatch.setattr(catalog, "_pages", {})
+    monkeypatch.setattr(selections, "_counts", {"at": 0.0, "rows": {}})
+    monkeypatch.setattr(selections, "_pages", {})
     monkeypatch.setattr(orgs, "_sitemap", {"at": 0.0, "bins": []})
     auth.set_password(conn, "owner@mail.kz", "long-enough-password")
     conn.execute("UPDATE users SET role = 'admin' WHERE email = 'owner@mail.kz'")

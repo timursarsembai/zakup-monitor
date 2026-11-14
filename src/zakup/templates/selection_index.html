@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}{{ _("Подборки тендеров") }} — {{ _("Казахстан") }}{% endblock %}
+{% block description %}{{ _("Горящие и крупные тендеры, запрос ценовых предложений и закупки для малого бизнеса: открытые лоты goszakup.gov.kz по всей стране и по регионам.") }}{% endblock %}
+{% block style %}
+  .cat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; margin-top: 16px; }
+  .cat-grid a { display: block; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; color: var(--fg); }
+  .cat-grid a:hover { border-color: var(--accent); }
+  .cat-grid b { display: block; }
+  .switch { margin: 0 0 6px; }
+{% endblock %}
+{% block main %}
+<h1>{{ _("Подборки тендеров") }}</h1>
+<p class="switch"><a href="/categories">{{ _("По категориям →") }}</a> · <a href="/regions">{{ _("По регионам →") }}</a></p>
+<div class="cat-grid">
+  {% for s, n, amount in items %}
+  <a href="/tendery/{{ s.slug }}"><b>{{ _(s.title) }}</b>
+    <span class="muted">{{ _(s.lead) }}</span><br>
+    <span class="muted">{% if n %}{{ _("открыто лотов:") }} {{ n }} · {{ amount | money }} ₸{% else %}{{ _("сейчас открытых лотов нет") }}{% endif %}</span></a>
+  {% endfor %}
+</div>
+{% endblock %}

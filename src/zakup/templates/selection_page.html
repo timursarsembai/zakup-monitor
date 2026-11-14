@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% set where = region_name(region) if region else "" %}
+{% set heading = _(s.title) ~ (" — " ~ where if where else " " ~ _("в Казахстане")) %}
+{% block title %}{{ heading }}{% endblock %}
+{% block description %}{{ _(s.lead) }} {{ _("Открыто лотов:") }} {{ d.total }} {{ _("на") }} {{ d.amount | money }} ₸.{% endblock %}
+{% block structured %}
+{% set crumbs = [{"@type": "ListItem", "position": 1, "name": _("Подборки тендеров"), "item": lang_url("/tendery")},
+                 {"@type": "ListItem", "position": 2, "name": _(s.title), "item": lang_url("/tendery/" ~ s.slug)}] %}
+{% if region %}{% set __ = crumbs.append({"@type": "ListItem", "position": 3, "name": where, "item": lang_url("/tendery/" ~ s.slug ~ "/" ~ region)}) %}{% endif %}
+<script type="application/ld+json">{{ {"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": crumbs} | tojson }}</script>
+{% endblock %}
+{% block style %}
+  .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; margin: 12px 0; }
+  .tile { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+  .tile b { display: block; font-size: 22px; }
+  h2 { font-size: 18px; margin: 28px 0 10px; }
+  .chips-row { display: flex; flex-wrap: wrap; gap: 6px 8px; }
+  .chips-row a { padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px; font-size: 14px; }
+  .chips-row a.on { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  td.when { white-space: nowrap; font-variant-numeric: tabular-nums; }
+{% endblock %}
+{% block main %}
+<p class="crumbs muted"><a href="/tendery">{{ _("Подборки тендеров") }}</a>{% if region %} · <a href="/tendery/{{ s.slug }}">{{ _(s.title) }}</a> · <a href="/region/{{ region }}">{{ where }}</a>{% endif %}</p>
+<h1>{{ heading }}</h1>
+<p class="muted">{{ _(s.lead) }}</p>
+<div class="tiles">
+  <div class="tile"><span class="muted">{{ _("Открыто лотов") }}</span><b>{{ d.total }}</b></div>
+  <div class="tile"><span class="muted">{{ _("На сумму") }}</span><b>{{ d.amount | money }} ₸</b></div>
+</div>
+
+{% if d.lots %}
+<div class="table-wrap"><table>
+  <tr><th>{{ _("Лот") }}</th><th>{{ _("Заказчик") }}</th><th>{{ _("Сумма, ₸") }}</th><th>{{ _("Приём заявок до") }}</th></tr>
+  {% for id, name_ru, name_kz, amount, cbin, cname, end, number in d.lots %}
+  <tr>
+    <td><a href="/lots/{{ id }}">{{ pick(name_ru, name_kz) or number }}</a></td>
+    <td>{{ org_link(cbin, cname) }}</td>
+    <td class="num">{{ amount | money if amount is not none else "" }}</td>
+    <td class="when">{{ (end|local).strftime("%d.%m.%Y %H:%M") if end else "—" }}</td>
+  </tr>
+  {% endfor %}
+</table></div>
+{% if d.total > d.lots|length %}<p><a href="{{ d.search }}">{{ _("Все открытые лоты в поиске") }} ({{ d.total }}) →</a></p>{% endif %}
+{% else %}<p class="muted">{{ _("Сейчас открытых лотов нет.") }}</p>{% endif %}
+
+{% if d.nearby %}
+<h2>{{ _(s.title) }} — {{ _("по регионам") }}</h2>
+<div class="chips-row">
+  {% for code, n in d.nearby %}<a href="/tendery/{{ s.slug }}/{{ code }}"{% if code == region %} class="on"{% endif %}>{{ region_name(code) }} · {{ n }}</a>{% endfor %}
+</div>
+{% endif %}
+
+<h2>{{ _("Другие подборки") }}</h2>
+<div class="chips-row">
+  {% for o in others %}<a href="/tendery/{{ o.slug }}{{ '/' ~ region if region else '' }}">{{ _(o.title) }}</a>{% endfor %}
+  <a href="/categories">{{ _("По категориям") }}</a><a href="/regions">{{ _("По регионам") }}</a>
+</div>
+{% endblock %}

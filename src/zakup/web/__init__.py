@@ -32,6 +32,7 @@ async def lifespan(_: FastAPI):
     if "pytest" not in sys.modules:
         core._spawn(public._recount_market)
         core._spawn(public._recount_catalog)
+        core._spawn(public._recount_selections)
     yield
     core.pool.close()
 

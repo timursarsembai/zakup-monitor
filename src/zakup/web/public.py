@@ -39,6 +39,7 @@ from zakup import (
     research,
     results,
     securities,
+    selections,
     sellers,
     skk,
     spec,
@@ -327,6 +328,36 @@ def region_page(request: Request, user: Viewer, region: str):
     return _catalog_page(request, None, region)
 
 
+@router.get("/tendery")
+def selections_index(request: Request, user: Viewer):
+    """Подборки тендеров: горящие, крупные, запрос ценовых предложений, для малого бизнеса."""
+    with core.pool.connection() as conn:
+        items = selections.overview(conn, _selections_in_background)
+    return templates.TemplateResponse(request, "selection_index.html", {"items": items})
+
+
+@router.get("/tendery/{slug}")
+def selection_page(request: Request, user: Viewer, slug: str):
+    return _selection_page(request, slug, None)
+
+
+@router.get("/tendery/{slug}/{region}")
+def selection_region_page(request: Request, user: Viewer, slug: str, region: str):
+    return _selection_page(request, slug, region)
+
+
+def _selection_page(request: Request, slug: str, region: str | None):
+    if slug not in selections.SELECTIONS or (region and region not in REGIONS):
+        raise HTTPException(404, "Нет такой подборки или региона")
+    with core.pool.connection() as conn:
+        data = selections.page(conn, slug, region, _selections_in_background)
+        # Другие подборки — те, где есть открытые лоты (в регионе — в нём): пустые страницы не множим.
+        others = [s for s, n, _ in selections.overview(conn, _selections_in_background, region)
+                  if s.slug != slug and n]
+    return templates.TemplateResponse(request, "selection_page.html", {
+        "s": selections.SELECTIONS[slug], "region": region, "d": data, "others": others})
+
+
 @router.get("/offer")
 def offer_page(request: Request, user: Viewer):
     return templates.TemplateResponse(request, "legal_offer.html", {"docs_date": legal.OFFER_DATE})
@@ -453,7 +484,8 @@ def sitemap_index() -> Response:
 def sitemap_part(kind: str) -> Response:
     if kind == "static":
         with core.pool.connection() as conn:
-            catalog_paths = catalog.sitemap_paths(conn, _catalog_in_background)
+            catalog_paths = catalog.sitemap_paths(conn, _catalog_in_background) + selections.sitemap_paths(
+                conn, _selections_in_background)
         urls = [(f"{SITE_URL}{path}", None) for path in (
             "/", "/announcements", "/lots", "/orgs/customers", "/orgs/suppliers", "/results", "/analytics", "/calculator", "/pricing", "/offer", "/privacy", "/contacts",
             "/products", "/sellers", *catalog_paths)]
@@ -875,6 +907,25 @@ def _recount_catalog() -> None:
 
 def _catalog_in_background() -> None:
     core._spawn(_recount_catalog)
+
+
+_selections_lock = threading.Lock()
+
+
+def _recount_selections() -> None:
+    if not _selections_lock.acquire(blocking=False):
+        return
+    try:
+        with _analytics_connection() as conn:
+            selections.refresh(conn)
+    except Exception:
+        core.logger.exception("selections: background recount failed")  # повтор — через минуту
+    finally:
+        _selections_lock.release()
+
+
+def _selections_in_background() -> None:
+    core._spawn(_recount_selections)
 
 
 # После сбоя пересчёта — пауза: иначе каждый заход запускал бы новый тяжёлый расчёт.

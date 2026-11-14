@@ -11,7 +11,7 @@
 {% endblock %}
 {% block main %}
 <h1>{{ heading }}</h1>
-<p class="switch">{% if kind == "division" %}<a href="/regions">{{ _("По регионам →") }}</a>{% else %}<a href="/categories">{{ _("По категориям →") }}</a>{% endif %} · <a href="/orgs/customers">{{ _("Заказчики →") }}</a> · <a href="/orgs/suppliers">{{ _("Поставщики →") }}</a></p>
+<p class="switch">{% if kind == "division" %}<a href="/regions">{{ _("По регионам →") }}</a>{% else %}<a href="/categories">{{ _("По категориям →") }}</a>{% endif %} · <a href="/tendery">{{ _("Подборки тендеров →") }}</a> · <a href="/orgs/customers">{{ _("Заказчики →") }}</a> · <a href="/orgs/suppliers">{{ _("Поставщики →") }}</a></p>
 <div class="cat-grid">
   {% for code, (n, amount) in items %}
   <a href="/{{ 'category' if kind == 'division' else 'region' }}/{{ code }}"><b>{{ division_name(code) if kind == "division" else region_name(code) }}</b>
