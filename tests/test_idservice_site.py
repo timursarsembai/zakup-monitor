@@ -243,3 +243,47 @@ def test_staff_action_changes_nothing_when_service_fails(service, conn):
     failed = [r[0] for r in conn.execute("SELECT action FROM user_actions WHERE action LIKE '%%_failed' ORDER BY id")]
     assert failed == ["user_delete_failed", "user_reregister_failed", "user_disable_failed",
                       "settings_registration_failed"]
+
+
+def test_migrate_then_scrub_personal_data(service, conn):
+    conn.execute("INSERT INTO users (id, email, password_hash, phone) VALUES (13, '+77015556677', 'scrypt$x', "
+                 "'+77015556677'), (14, 'amir', 'scrypt$y', NULL)")
+    conn.execute("INSERT INTO user_actions (user_id, login, action, target) VALUES (1, 'owner@mail.kz', "
+                 "'user_delete', '+77015556677'), (NULL, '+77019998877', 'otp_sent', NULL)")
+    conn.execute("INSERT INTO login_attempts (email, ip, ok) VALUES ('+77015556677', '10.0.0.1', false)")
+    conn.commit()
+    sent = {}
+
+    def imported(kwargs):
+        sent["rows"] = kwargs["json"]["accounts"]
+        return Reply(200, {"imported": [r["id"] for r in sent["rows"]], "present": [], "conflicts": [],
+                           "errors": []})
+    service.answers["/api/import"] = imported
+    result = idservice.migrate(conn)
+    logins = {r["id"]: r["login"] for r in sent["rows"]}
+    assert logins[13] == "+77015556677" and logins[14] == "amir" and result["conflicts"] == []
+    assert next(r for r in sent["rows"] if r["id"] == 13)["password_hash"] == "scrypt$x"
+    verdict = {"same": [i for i in logins if i != 14], "missing": [], "different": [14]}
+    service.answers["/api/verify"] = lambda kwargs: Reply(200, verdict)
+    # Проверка — ничего не стирает.
+    assert idservice.scrub(conn, dry_run=True)["different"] == [14]
+    assert conn.execute("SELECT email FROM users WHERE id = 13").fetchone() == ("+77015556677",)
+    # Под номером 14 в Казахстане чужая запись — его не трогаем, записи о входах храним.
+    stats = idservice.scrub(conn)
+    assert stats["scrubbed"] == len(logins) - 1 and stats["different"] == [14]
+    assert conn.execute("SELECT email, password_hash, phone FROM users WHERE id = 13").fetchone() == ("id:13", None, None)
+    assert conn.execute("SELECT email, password_hash FROM users WHERE id = 14").fetchone() == ("amir", "scrypt$y")
+    assert conn.execute("SELECT login, target FROM user_actions WHERE user_id = 1").fetchone() == ("id:1", "id:13")
+    assert conn.execute("SELECT count(*) FROM login_attempts").fetchone() == (1,)
+    # Разобрались — переехали все: стираем 14, телефоны в журнале и записи о входах.
+    verdict.update(same=[14], different=[])
+    stats = idservice.scrub(conn)
+    assert stats["scrubbed"] == 1 and stats["login_attempts"] == 1
+    assert conn.execute("SELECT login FROM user_actions WHERE action = 'otp_sent'").fetchone() == (None,)
+    # Сервис не ответил — ничего не стираем.
+    conn.execute("UPDATE users SET email = 'serik' WHERE id = 14")
+    conn.commit()
+    service.answers["/api/verify"] = idservice.ServiceError("ConnectTimeout")
+    with pytest.raises(idservice.ServiceError):
+        idservice.scrub(conn)
+    assert conn.execute("SELECT email FROM users WHERE id = 14").fetchone() == ("serik",)

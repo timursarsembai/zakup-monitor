@@ -129,6 +129,66 @@ def cleanup(conn: psycopg.Connection) -> None:
     conn.commit()
 
 
+IMPORT_FIELDS = ("id", "login", "password_hash", "phone", "disabled", "deleted_at", "may_reregister",
+                 "created_at")
+
+
+def _same(stored: tuple | None, login: str, password_hash: str | None) -> bool:
+    """Запись сервиса — та же, что на сайте: номер совпал, и ещё логин или хэш пароля (соль
+    у каждого хэша своя). Логин мог смениться (смена телефона), пароль — тоже, но не оба сразу
+    до проверки; чужая запись под тем же номером не совпадёт ни тем, ни другим."""
+    return bool(stored) and (stored[1] == login or (bool(password_hash) and stored[2] == password_hash))
+
+
+def verify_accounts(conn: psycopg.Connection, rows: list[dict]) -> dict[str, list[int]]:
+    """Перед стиранием на сайте: same — запись есть и та же, missing — нет, different — под
+    этим номером другая запись (её стирать нельзя)."""
+    result: dict[str, list[int]] = {"same": [], "missing": [], "different": []}
+    for row in rows:
+        stored = conn.execute("SELECT id, login, password_hash FROM accounts WHERE id = %s",
+                              (row["id"],)).fetchone()
+        key = "missing" if stored is None else "same" if _same(
+            stored, normalize_login(row["login"]), row.get("password_hash")) else "different"
+        result[key].append(row["id"])
+    conn.rollback()
+    return result
+
+
+def import_accounts(conn: psycopg.Connection, rows: list[dict]) -> dict[str, list]:
+    """Записи с сайта — с прежними номерами и хэшами паролей (тот же scrypt: входить можно с
+    прежним паролем). Логин — в том виде, в каком его ищет вход (normalize_login). Уже
+    перенесённую (_same) пропускаем — перенос можно повторить; номер или логин занят другой
+    записью — conflicts; запись не легла (странные данные) — errors; остальные переносятся."""
+    result: dict[str, list] = {"imported": [], "present": [], "conflicts": [], "errors": []}
+    for row in rows:
+        login = normalize_login(row["login"])
+        stored = conn.execute("SELECT id, login, password_hash FROM accounts WHERE id = %s",
+                              (row["id"],)).fetchone()
+        if stored is not None:
+            result["present" if _same(stored, login, row.get("password_hash")) else "conflicts"].append(row["id"])
+            continue
+        if conn.execute("SELECT 1 FROM accounts WHERE login = %s", (login,)).fetchone():
+            result["conflicts"].append(row["id"])
+            continue
+        try:
+            with conn.transaction():
+                conn.execute(
+                    """INSERT INTO accounts (id, login, password_hash, phone, email, disabled, deleted_at,
+                                             may_reregister, created_at)
+                       VALUES (%(id)s, %(login)s, %(password_hash)s, %(phone)s, %(email)s, %(disabled)s,
+                               %(deleted_at)s, %(may_reregister)s, coalesce(%(created_at)s, now()))""",
+                    {**{k: row.get(k) for k in IMPORT_FIELDS}, "login": login,
+                     "disabled": bool(row.get("disabled")), "may_reregister": bool(row.get("may_reregister")),
+                     "email": login if "@" in login else None})
+        except psycopg.Error as error:
+            result["errors"].append({"id": row["id"], "error": type(error).__name__})
+            continue
+        result["imported"].append(row["id"])
+    conn.commit()
+    sync_ids(conn)
+    return result
+
+
 def sync_ids(conn: psycopg.Connection) -> None:
     """После переноса с прежними номерами: счётчик новых — дальше самого большого номера."""
     conn.execute("SELECT setval(pg_get_serial_sequence('accounts', 'id'), "

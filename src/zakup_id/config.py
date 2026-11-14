@@ -35,6 +35,12 @@ def service_key() -> str:
     return _get("ID_SERVICE_KEY")
 
 
+def import_allowed() -> bool:
+    """Перенос учётных записей с сайта (/api/import) — только пока включён на время переезда
+    (ID_ALLOW_IMPORT=1): в обычное время ключ сайта не заводит записи с готовым паролем."""
+    return _get("ID_ALLOW_IMPORT", "") == "1"
+
+
 def site_url() -> str:
     """Адрес основного сайта: туда возвращаем после входа и только оттуда принимаем формы."""
     return _get("ID_SITE_URL", "https://tenderim.com").rstrip("/")

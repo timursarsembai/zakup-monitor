@@ -65,6 +65,9 @@ def _parser() -> argparse.ArgumentParser:
     research_cmd.add_argument("--providers", default="claude_code",
                               help="через запятую: claude_code, anthropic, openai")
     research_cmd.add_argument("--once", action="store_true", help="одна задача и выход")
+    sub.add_parser("id-migrate", help="перенести учётные записи в сервис учётных записей (Казахстан)")
+    scrub_cmd = sub.add_parser("id-scrub", help="стереть здесь логины, пароли и телефоны перенесённых")
+    scrub_cmd.add_argument("--yes", action="store_true", help="да, стереть (без него — только проверка)")
     passwd = sub.add_parser("set-password", help="задать пароль (создаст пользователя, если нет)")
     passwd.add_argument("email")
     user = sub.add_parser("add-user", help="завести пользователя")
@@ -206,6 +209,8 @@ LOCAL = {
     "reserve": lambda args: _reserve(args.loop),
     "oldportal": lambda args: _oldportal(args.loop),
     "set-password": lambda args: _set_password(args.email),
+    "id-migrate": lambda args: _id_migrate(),
+    "id-scrub": lambda args: _id_scrub(args.yes),
 }
 
 
@@ -329,6 +334,33 @@ def _securities(loop: bool) -> int:
             return 0
         if done < securities.BATCH:
             time.sleep(300)
+
+
+def _id_migrate() -> int:
+    """Номера записей — на экран; логины, телефоны и пароли — нет."""
+    from zakup import idservice
+
+    if not idservice.enabled():
+        print("Сервис учётных записей не настроен (ZAKUP_ID_*).", file=sys.stderr)
+        return 1
+    with db.connect(config.database_url()) as conn:
+        result = idservice.migrate(conn)
+    for key in ("imported", "present", "conflicts", "errors"):
+        print(f"{key}: {len(result.get(key, []))} {result.get(key, [])}")
+    return 1 if result.get("conflicts") or result.get("errors") else 0
+
+
+def _id_scrub(yes: bool) -> int:
+    """Без --yes — только проверка (то же, что сверит scrub); на экран — только номера."""
+    from zakup import idservice
+
+    if not idservice.enabled():
+        print("Сервис учётных записей не настроен (ZAKUP_ID_*).", file=sys.stderr)
+        return 1
+    with db.connect(config.database_url()) as conn:
+        stats = idservice.scrub(conn, dry_run=not yes)
+    print(f"id-scrub{'' if yes else ' (проверка, без --yes ничего не стёрто)'}: {stats}")
+    return 1 if stats["missing"] or stats["different"] else 0
 
 
 def _set_password(email: str) -> int:

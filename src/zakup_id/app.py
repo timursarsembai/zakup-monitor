@@ -497,6 +497,48 @@ def account(user_id: int):
     return {"previous_id": row[0], "deleted": row[1]}
 
 
+@app.post("/api/import", dependencies=[Depends(service)])
+def import_accounts(accounts_: Annotated[list[dict], Body(embed=True, alias="accounts")]):
+    """Перенос учётных записей с сайта (zakup id-migrate) — только при ID_ALLOW_IMPORT=1."""
+    if not config.import_allowed():
+        raise HTTPException(404, "Not Found")
+    rows = _account_rows(accounts_)
+    with pool.connection() as conn:
+        return accounts.import_accounts(conn, rows)
+
+
+@app.post("/api/verify", dependencies=[Depends(service)])
+def verify_accounts(accounts_: Annotated[list[dict], Body(embed=True, alias="accounts")]):
+    """Перед стиранием личных данных на сайте (zakup id-scrub): эти записи здесь и те же?"""
+    rows = _account_rows(accounts_)
+    with pool.connection() as conn:
+        return accounts.verify_accounts(conn, rows)
+
+
+MAX_IMPORT = 10_000
+
+
+def _account_rows(raw: list[dict]) -> list[dict]:
+    """Строки переноса с проверкой типов: странная — 422 с её номером (ничего не меняем)."""
+    if len(raw) > MAX_IMPORT:
+        raise HTTPException(413, f"at most {MAX_IMPORT} accounts per request")
+    rows = []
+    for row in raw:
+        number = row.get("id") if isinstance(row, dict) else None
+        ok = isinstance(number, int) and not isinstance(number, bool) and number > 0
+        ok = ok and isinstance(row.get("login"), str) and bool(row["login"].strip())
+        ok = ok and all(row.get(k) is None or isinstance(row[k], str) for k in ("password_hash", "phone"))
+        for key in ("deleted_at", "created_at"):
+            try:
+                ok = ok and (row.get(key) is None or bool(datetime.fromisoformat(row[key])))
+            except (TypeError, ValueError):
+                ok = False
+        if not ok:
+            raise HTTPException(422, f"bad account row {number!r}")
+        rows.append({k: row.get(k) for k in accounts.IMPORT_FIELDS})
+    return rows
+
+
 @app.post("/api/status", dependencies=[Depends(service)])
 def status(user_id: Annotated[int, Body()], deleted: Annotated[bool | None, Body()] = None,
            may_reregister: Annotated[bool | None, Body()] = None):

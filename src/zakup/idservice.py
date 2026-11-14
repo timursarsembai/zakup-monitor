@@ -37,9 +37,9 @@ def page(path: str, lang: str | None = None) -> str:
     return f"{config.id_service_url()}{path}{tail}"
 
 
-def _api(method: str, path: str, **kwargs) -> httpx.Response:
+def _api(method: str, path: str, timeout: httpx.Timeout = TIMEOUT, **kwargs) -> httpx.Response:
     try:
-        response = httpx.request(method, f"{config.id_service_url()}{path}", timeout=TIMEOUT,
+        response = httpx.request(method, f"{config.id_service_url()}{path}", timeout=timeout,
                                  headers={"authorization": f"Bearer {config.id_service_key()}"}, **kwargs)
     except httpx.HTTPError as error:
         raise ServiceError(type(error).__name__) from None
@@ -179,6 +179,79 @@ def registration_open() -> bool:
 
 def set_registration(open_: bool) -> None:
     _staff_call("/api/registration", {"open": open_}, account=False)
+
+
+# --- Переезд учётных записей в Казахстан (zakup id-migrate, zakup id-scrub) ---
+
+
+def _local_accounts(conn: psycopg.Connection) -> list[dict]:
+    """Пользователи, чьи логин и пароль ещё здесь (не заглушка «id:N»)."""
+    rows = conn.execute(
+        """SELECT id, email, password_hash, phone, disabled, deleted_at, may_reregister, created_at
+           FROM users WHERE email NOT LIKE 'id:%%' ORDER BY id""").fetchall()
+    keys = ("id", "login", "password_hash", "phone", "disabled", "deleted_at", "may_reregister", "created_at")
+    return [dict(zip(keys, row, strict=True)) for row in rows]
+
+
+# Перенос — разовый и большой (до тысяч записей одним запросом): ждём дольше обычного.
+BULK_TIMEOUT = httpx.Timeout(300, connect=5)
+
+
+def _bulk(path: str, rows: list[dict]) -> dict:
+    response = _api("POST", path, json={"accounts": rows}, timeout=BULK_TIMEOUT)
+    if response.status_code != 200:
+        raise ServiceError(f"http {response.status_code} {_detail(response) or ''}".strip())
+    return response.json()
+
+
+def migrate(conn: psycopg.Connection) -> dict[str, list]:
+    """Логины, хэши паролей и телефоны — в сервис (с прежними номерами). Повторять можно:
+    перенесённые сервис пропускает. Здесь ничего не меняется (это делает scrub)."""
+    rows = [{**row, **{k: row[k].isoformat() for k in ("deleted_at", "created_at") if row[k]}}
+            for row in _local_accounts(conn)]
+    conn.commit()  # данные прочитаны — соединение не держим, пока ждём Казахстан
+    return _bulk("/api/import", rows)
+
+
+def check(conn: psycopg.Connection) -> dict[str, list[int]]:
+    """Кого можно стирать здесь: same — в Казахстане та же запись; missing — нет;
+    different — под этим номером там чужая (стирать нельзя)."""
+    rows = [{"id": a["id"], "login": a["login"], "password_hash": a["password_hash"]}
+            for a in _local_accounts(conn)]
+    conn.commit()
+    return _bulk("/api/verify", rows) if rows else {"same": [], "missing": [], "different": []}
+
+
+_PERSONAL = r"^\+?[78]\d{10}$|@"  # телефон или e-mail в журнале действий
+
+
+def scrub(conn: psycopg.Connection, dry_run: bool = False) -> dict:
+    """Личные данные — прочь отсюда, когда запись уже есть в Казахстане и та же (check):
+    логин становится «id:N», пароль и телефон стираются; в журнале действий у этих людей
+    логин — «id:N», упоминания их логинов в target — тоже. Когда переехали все — из журнала
+    стираются оставшиеся телефоны и e-mail (коды на номера без аккаунта, старые логины),
+    удаляются неудачные входы и SMS-коды. Остальных не трогаем."""
+    if not enabled():
+        raise ServiceError("service is not configured")
+    found = check(conn)
+    stats: dict = {"scrubbed": 0, "missing": found["missing"], "different": found["different"]}
+    if dry_run or not found["same"]:
+        return {**stats, "would_scrub": len(found["same"])} if dry_run else stats
+    ids = found["same"]
+    conn.execute(
+        """UPDATE user_actions a SET target = 'id:' || u.id FROM users u
+           WHERE u.id = ANY(%s) AND a.target = u.email""", (ids,))
+    conn.execute("UPDATE user_actions SET login = 'id:' || user_id WHERE user_id = ANY(%s)", (ids,))
+    stats["scrubbed"] = conn.execute(
+        "UPDATE users SET email = 'id:' || id, password_hash = NULL, phone = NULL WHERE id = ANY(%s)",
+        (ids,)).rowcount
+    if not found["missing"] and not found["different"]:
+        conn.execute("UPDATE user_actions SET login = NULL WHERE login ~ %s", (_PERSONAL,))
+        conn.execute("UPDATE user_actions SET target = NULL WHERE target ~ %s", (_PERSONAL,))
+        stats["login_attempts"] = conn.execute("DELETE FROM login_attempts").rowcount
+        stats["otp_requests"] = conn.execute("DELETE FROM otp_requests").rowcount
+    conn.commit()
+    return stats
 
 
 # --- События сервиса → Telegram (вызывает бот) ---

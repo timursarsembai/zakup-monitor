@@ -392,3 +392,37 @@ def test_sms_overspend_alert_goes_to_site_as_event(service, sms, monkeypatch):
     events = _api_get(service, "/api/events")["events"]
     assert [(e["user_id"], e["kind"]) for e in events] == [(None, "owner_alert")]
     assert "SMS" in events[0]["detail"] and "2233" not in events[0]["detail"]
+
+
+def test_import_keeps_ids_and_passwords(service, monkeypatch):
+    rows = [{"id": 1, "login": "Owner@Mail.kz", "password_hash": hash_password("пароль-владельца"),
+             "phone": None, "disabled": False, "deleted_at": None, "may_reregister": False,
+             "created_at": "2026-11-06T10:00:00+00:00"},
+            {"id": 13, "login": "+77015556677", "password_hash": hash_password("пароль-клиента"),
+             "phone": "+77015556677", "disabled": False, "deleted_at": None, "may_reregister": False}]
+    # Вне переезда (ID_ALLOW_IMPORT не задан) — пути нет.
+    assert _api(service, "/api/import", {"accounts": rows}).status_code == 404
+    monkeypatch.setenv("ID_ALLOW_IMPORT", "1")
+    reply = _api(service, "/api/import", {"accounts": rows})
+    assert reply.json() == {"imported": [1, 13], "present": [], "conflicts": [], "errors": []}
+    # Повтор — уже есть; под номером 7 другая запись — конфликт, ничего не меняем.
+    again = _api(service, "/api/import", {"accounts": rows + [{"id": 7, "login": "+77019990000"}]}).json()
+    assert again == {"imported": [], "present": [1, 13], "conflicts": [7], "errors": []}
+    # Странная строка — отказ целиком, с её номером.
+    bad = _api(service, "/api/import", {"accounts": [{"id": 20, "login": "x", "deleted_at": "вчера"}]})
+    assert bad.status_code == 422 and "20" in bad.json()["detail"]
+    # Входят с прежним паролем; логин — в том виде, в каком его ищет вход.
+    assert _login(service, password="пароль-клиента", login="+77015556677").headers["location"] == f"{SITE}/my"
+    assert _login(service, password="пароль-владельца", login="owner@mail.kz").headers["location"] == f"{SITE}/my"
+    assert service.db.execute("SELECT email FROM accounts WHERE id = 1").fetchone() == ("owner@mail.kz",)
+    # Сверка перед стиранием на сайте: номер 7 — чужая запись, 13 сменил телефон (хэш тот же).
+    service.db.execute("UPDATE accounts SET login = '+77012223344' WHERE id = 13")
+    service.db.commit()
+    verdict = _api(service, "/api/verify", {"accounts": [
+        {"id": 1, "login": "owner@mail.kz"}, {"id": 13, "login": "+77015556677",
+                                              "password_hash": rows[1]["password_hash"]},
+        {"id": 7, "login": "serik@mail.kz", "password_hash": "scrypt$other"}, {"id": 99, "login": "nobody"}]}).json()
+    assert verdict == {"same": [1, 13], "missing": [99], "different": [7]}
+    # Счётчик новых — после перенесённых.
+    new = service.db.execute("INSERT INTO accounts (login) VALUES ('n@example.com') RETURNING id").fetchone()[0]
+    assert new > 13
