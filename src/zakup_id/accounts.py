@@ -126,7 +126,54 @@ def cleanup(conn: psycopg.Connection) -> None:
     """Старые попытки и истёкшие сессии (по индексам; вызывается не чаще раза в час)."""
     conn.execute("DELETE FROM login_attempts WHERE created_at < now() - interval '30 days'")
     conn.execute("DELETE FROM sessions WHERE expires_at < now()")
+    # Журнал действий сайта хранится 30 дней (zakup.audit.RETENTION) — адреса к нему тоже.
+    conn.execute("DELETE FROM action_ips WHERE at < now() - interval '30 days'")
     conn.commit()
+
+
+ORG_KINDS = ("ip", "too", "other")
+
+
+def get_orgs(conn: psycopg.Connection, ids: list[int]) -> dict[int, dict]:
+    rows = conn.execute("SELECT account_id, kind, bin, name, results_bin FROM orgs WHERE account_id = ANY(%s)",
+                        (ids,)).fetchall()
+    conn.rollback()
+    return {r[0]: {"kind": r[1], "bin": r[2], "name": r[3], "results_bin": r[4]} for r in rows}
+
+
+def set_orgs(conn: psycopg.Connection, items: list[dict]) -> None:
+    """Организация клиента (org: {kind, bin, name} или None — убрать) и/или «БИН для итогов»
+    (results_bin) — что передано, то и меняем, остальное остаётся. Пустая запись удаляется."""
+    for item in items:
+        account_id = item["user_id"]
+        conn.execute("INSERT INTO orgs (account_id) VALUES (%s) ON CONFLICT DO NOTHING", (account_id,))
+        if "org" in item:
+            org = item["org"] or {}
+            conn.execute("UPDATE orgs SET kind = %s, bin = %s, name = %s, updated_at = now() WHERE account_id = %s",
+                         (org.get("kind"), org.get("bin"), org.get("name"), account_id))
+        if "results_bin" in item:
+            conn.execute("UPDATE orgs SET results_bin = %s, updated_at = now() WHERE account_id = %s",
+                         (item["results_bin"], account_id))
+        conn.execute("""DELETE FROM orgs WHERE account_id = %s AND bin IS NULL AND name IS NULL
+                        AND results_bin IS NULL""", (account_id,))
+    conn.commit()
+
+
+def add_ips(conn: psycopg.Connection, items: list[dict]) -> int:
+    added = 0
+    for item in items:
+        added += conn.execute(
+            """INSERT INTO action_ips (action_id, account_id, ip, at)
+               VALUES (%s, %s, %s, coalesce(%s::timestamptz, now())) ON CONFLICT (action_id) DO NOTHING""",
+            (item["action_id"], item.get("user_id"), item["ip"], item.get("at"))).rowcount
+    conn.commit()
+    return added
+
+
+def get_ips(conn: psycopg.Connection, ids: list[int]) -> dict[int, str]:
+    rows = conn.execute("SELECT action_id, ip FROM action_ips WHERE action_id = ANY(%s)", (ids,)).fetchall()
+    conn.rollback()
+    return dict(rows)
 
 
 IMPORT_FIELDS = ("id", "login", "password_hash", "phone", "disabled", "deleted_at", "may_reregister",

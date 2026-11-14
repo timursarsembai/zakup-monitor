@@ -345,6 +345,7 @@ def _id_migrate() -> int:
         return 1
     with db.connect(config.database_url()) as conn:
         result = idservice.migrate(conn)
+    print(f"orgs: {len(result.get('orgs', []))}, ips: {result.get('ips', [0])[0]}")
     for key in ("imported", "present", "conflicts", "errors"):
         print(f"{key}: {len(result.get(key, []))} {result.get(key, [])}")
     return 1 if result.get("conflicts") or result.get("errors") else 0
@@ -360,7 +361,7 @@ def _id_scrub(yes: bool) -> int:
     with db.connect(config.database_url()) as conn:
         stats = idservice.scrub(conn, dry_run=not yes)
     print(f"id-scrub{'' if yes else ' (проверка, без --yes ничего не стёрто)'}: {stats}")
-    return 1 if stats["missing"] or stats["different"] else 0
+    return 1 if stats["missing"] or stats["different"] or stats["orgs_missing"] or stats["ips_missing"] else 0
 
 
 def _set_password(email: str) -> int:

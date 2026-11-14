@@ -8,6 +8,7 @@ from fastapi.responses import RedirectResponse
 
 from zakup import (
     auth,
+    client_orgs,
     config,
     i18n,
     idservice,
@@ -23,6 +24,7 @@ from zakup.web.core import (
     _audit,
     _safe_next,
     _with_session,
+    logger,
     same_origin,
     templates,
 )
@@ -279,14 +281,13 @@ def _finish(request: Request, purpose: str, flow: str, code: str, password: str,
     return _remember_device(_with_session(RedirectResponse(target, status_code=303), token), user_id)
 
 
-ORG_KINDS = {"ip": "ИП", "too": "ТОО", "other": "Другое"}
+ORG_KINDS = client_orgs.KINDS
 
 
 @router.get("/welcome/company")
 def company_step(request: Request, user: User):
-    with core.pool.connection() as conn:
-        row = conn.execute("SELECT kind, bin, name FROM client_orgs WHERE user_id = %s", (user,)).fetchone()
-    kind, bin_, name = row or ("", "", "")
+    org = client_orgs.many(core.pool, [user], fresh=True).get(user) or {}
+    kind, bin_, name = org.get("kind") or "", org.get("bin") or "", org.get("name") or ""
     return templates.TemplateResponse(request, "company_step.html", {
         "kinds": ORG_KINDS, "kind": kind, "bin": bin_, "name": name, "error": None})
 
@@ -316,17 +317,16 @@ def company_save(request: Request, user: User, kind: Annotated[str, Form()],
             "kinds": ORG_KINDS, "kind": kind, "bin": bin, "name": name,
             "error": i18n.gettext("Выберите форму, укажите 12 цифр БИН/ИИН и название.")},
             status_code=422)
-    with core.pool.connection() as conn:
-        conn.execute(
-            """INSERT INTO client_orgs (user_id, kind, bin, name) VALUES (%s, %s, %s, %s)
-               ON CONFLICT (user_id) DO UPDATE SET kind = excluded.kind, bin = excluded.bin,
-                   name = excluded.name, updated_at = now()""",
-            (user, kind, bin, name),
-        )
-        # Этот же БИН отмечает «Вы выиграли / не выиграли» в итогах.
-        conn.execute("UPDATE users SET company_bin = %s WHERE id = %s AND company_bin IS NULL",
-                     (bin, user))
-    _audit(request, user, "client_org", bin, kind=kind)
+    try:
+        client_orgs.save(core.pool, user, kind, bin, name)   # с сервисом — в Казахстан, здесь не храним
+    except idservice.ServiceError as error:
+        logger.warning("client org not saved: %s", error)
+        return templates.TemplateResponse(request, "company_step.html", {
+            "kinds": ORG_KINDS, "kind": kind, "bin": bin, "name": name,
+            "error": i18n.gettext("Не удалось сохранить — попробуйте ещё раз через минуту.")},
+            status_code=503)
+    # В журнал — без БИН: у ИП это ИИН (личные данные — в Казахстане).
+    _audit(request, user, "client_org", None, kind=kind)
     return RedirectResponse("/", status_code=303)
 
 

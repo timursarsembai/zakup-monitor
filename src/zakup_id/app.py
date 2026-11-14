@@ -539,6 +539,81 @@ def _account_rows(raw: list[dict]) -> list[dict]:
     return rows
 
 
+def _ids(raw: list) -> list[int]:
+    if len(raw) > MAX_IMPORT or not all(isinstance(i, int) and not isinstance(i, bool) for i in raw):
+        raise HTTPException(422, "ids: list of numbers")
+    return raw
+
+
+@app.post("/api/orgs/get", dependencies=[Depends(service)])
+def orgs_get(ids: Annotated[list, Body(embed=True)]):
+    """Организации пользователей — сайт не хранит их у себя (итоги «это вы», сотрудникам)."""
+    with pool.connection() as conn:
+        return {"orgs": {str(k): v for k, v in accounts.get_orgs(conn, _ids(ids)).items()}}
+
+
+def _bin(value) -> str | None:
+    if value is None or value == "":
+        return None
+    if not (isinstance(value, str) and value.isdigit() and len(value) == 12):
+        raise HTTPException(422, "bin: 12 digits")
+    return value
+
+
+@app.post("/api/orgs/set", dependencies=[Depends(service)])
+def orgs_set(items: Annotated[list[dict], Body(embed=True)]):
+    """Организации пачкой: {user_id, org?: {kind, bin, name} | null, results_bin?} — что
+    передано, то и меняем (шаг «Ваша организация» и «БИН для итогов» — порознь)."""
+    if len(items) > MAX_IMPORT:
+        raise HTTPException(413, "too many")
+    clean = []
+    for item in items:
+        user_id = item.get("user_id") if isinstance(item, dict) else None
+        if not isinstance(user_id, int) or isinstance(user_id, bool):
+            raise HTTPException(422, "user_id")
+        row: dict = {"user_id": user_id}
+        if "org" in item:
+            org = item["org"]
+            if org is not None:
+                if not isinstance(org, dict) or (org.get("kind") is not None and org["kind"] not in accounts.ORG_KINDS):
+                    raise HTTPException(422, "org")
+                name = org.get("name")
+                name = " ".join(name.split())[:300] or None if isinstance(name, str) else None
+                org = {"kind": org.get("kind"), "bin": _bin(org.get("bin")), "name": name}
+            row["org"] = org
+        if "results_bin" in item:
+            row["results_bin"] = _bin(item["results_bin"])
+        clean.append(row)
+    with pool.connection() as conn:
+        accounts.set_orgs(conn, clean)
+    return {"ok": True}
+
+
+@app.post("/api/ips", dependencies=[Depends(service)])
+def ips_add(items: Annotated[list[dict], Body(embed=True)]):
+    """IP-адреса записей журнала действий сайта (у него в журнале адреса нет)."""
+    rows = []
+    for item in items[:MAX_IMPORT]:
+        action_id, ip = item.get("action_id"), item.get("ip")
+        if not isinstance(action_id, int) or not isinstance(ip, str) or not ip or len(ip) > 64:
+            raise HTTPException(422, "action_id and ip required")
+        at = item.get("at")
+        try:
+            at = datetime.fromisoformat(at).isoformat() if at else None
+        except (TypeError, ValueError):
+            raise HTTPException(422, "at") from None
+        user_id = item.get("user_id") if isinstance(item.get("user_id"), int) else None
+        rows.append({"action_id": action_id, "user_id": user_id, "ip": ip, "at": at})
+    with pool.connection() as conn:
+        return {"added": accounts.add_ips(conn, rows)}
+
+
+@app.post("/api/ips/get", dependencies=[Depends(service)])
+def ips_get(ids: Annotated[list, Body(embed=True)]):
+    with pool.connection() as conn:
+        return {"ips": {str(k): v for k, v in accounts.get_ips(conn, _ids(ids)).items()}}
+
+
 @app.post("/api/status", dependencies=[Depends(service)])
 def status(user_id: Annotated[int, Body()], deleted: Annotated[bool | None, Body()] = None,
            may_reregister: Annotated[bool | None, Body()] = None):

@@ -10,6 +10,8 @@ from typing import Any
 import psycopg
 from psycopg.types.json import Jsonb
 
+from zakup import idservice
+
 RETENTION = timedelta(days=30)
 # Повторный просмотр той же страницы тем же человеком в течение этого времени не пишем.
 VIEW_DEDUP = timedelta(minutes=10)
@@ -86,12 +88,18 @@ def log(conn: psycopg.Connection, user_id: int | None, action: str, target: str 
         ).fetchone()
         if recent:
             return
-    conn.execute(
+    # С сервисом учётных записей IP — в Казахстане (по номеру записи журнала), здесь — нет.
+    remote = ip if ip and idservice.enabled() else None
+    row = conn.execute(
         """INSERT INTO user_actions (user_id, login, action, target, details, ip)
-           VALUES (%s, coalesce(%s, (SELECT email FROM users WHERE id = %s)), %s, %s, %s, %s)""",
-        (user_id, login, user_id, action, target, Jsonb(details) if details else None, ip),
-    )
+           VALUES (%s, coalesce(%s, (SELECT email FROM users WHERE id = %s)), %s, %s, %s, %s)
+           RETURNING id""",
+        (user_id, login, user_id, action, target, Jsonb(details) if details else None,
+         None if remote else ip),
+    ).fetchone()
     conn.commit()
+    if remote:
+        idservice.queue_ip(row[0], user_id, remote)
 
 
 def purge(conn: psycopg.Connection) -> int:

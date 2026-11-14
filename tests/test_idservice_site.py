@@ -48,9 +48,10 @@ def test_fresh_token_signs_in_and_creates_user(service, conn):
     _enter(service, 500)
     page = service.get("/settings")
     assert page.status_code == 200 and f'href="{ID}/password"' in page.text
-    assert service.calls == [("GET", "/api/accounts/500", None)]      # один раз — запись заведена
+    accounts = [c for c in service.calls if c[1].startswith("/api/accounts")]
+    assert accounts == [("GET", "/api/accounts/500", None)]      # один раз — запись заведена
     service.get("/settings")
-    assert len(service.calls) == 1
+    assert len([c for c in service.calls if c[1].startswith("/api/accounts")]) == 1
     row = conn.execute("SELECT email, role, trial_until > now() + interval '29 days' FROM users WHERE id = 500").fetchone()
     assert row == ("id:500", "user", True)
     assert "id:500" not in page.text and "№ 500" in page.text   # заглушку логина не показываем
@@ -200,7 +201,7 @@ def test_staff_actions_go_to_service_first(service, conn):
     assert _staff(service, "restore").status_code == 200
     service.post("/settings/registration", headers={"origin": "https://testserver"})
     # Регистрация закрыта в Казахстане (копия здесь могла разойтись) — открываем.
-    assert [c for c in service.calls if c[0] == "POST" or c[1] == "/api/registration"] == [
+    assert [c for c in service.calls if c[1] in ("/api/revoke", "/api/status", "/api/registration")] == [
         ("POST", "/api/revoke", {"user_id": 700, "block": True}),
         ("POST", "/api/status", {"user_id": 700, "deleted": True, "may_reregister": None}),
         ("POST", "/api/status", {"user_id": 700, "deleted": None, "may_reregister": True}),
@@ -251,8 +252,24 @@ def test_migrate_then_scrub_personal_data(service, conn):
     conn.execute("INSERT INTO user_actions (user_id, login, action, target) VALUES (1, 'owner@mail.kz', "
                  "'user_delete', '+77015556677'), (NULL, '+77019998877', 'otp_sent', NULL)")
     conn.execute("INSERT INTO login_attempts (email, ip, ok) VALUES ('+77015556677', '10.0.0.1', false)")
+    conn.execute("INSERT INTO client_orgs (user_id, kind, bin, name) VALUES (13, 'ip', '900101300123', 'ИП Иванов')")
+    conn.execute("UPDATE user_actions SET ip = '10.0.0.9' WHERE user_id = 1")
     conn.commit()
     sent = {}
+    pushed = {"orgs": {}, "ips": {}}
+
+    def org_set(kwargs):
+        for item in kwargs["json"]["items"]:
+            pushed["orgs"][str(item["user_id"])] = {**(item["org"] or {}), "results_bin": item.get("results_bin")}
+        return Reply(200, {"ok": True})
+
+    def ips_add(kwargs):
+        pushed["ips"].update({str(i["action_id"]): i["ip"] for i in kwargs["json"]["items"]})
+        return Reply(200, {"added": len(kwargs["json"]["items"])})
+    service.answers["/api/orgs/set"] = org_set
+    service.answers["/api/ips"] = ips_add
+    service.answers["/api/orgs/get"] = lambda kwargs: Reply(200, {"orgs": pushed["orgs"]})
+    service.answers["/api/ips/get"] = lambda kwargs: Reply(200, {"ips": pushed["ips"]})
 
     def imported(kwargs):
         sent["rows"] = kwargs["json"]["accounts"]
@@ -273,7 +290,11 @@ def test_migrate_then_scrub_personal_data(service, conn):
     assert stats["scrubbed"] == len(logins) - 1 and stats["different"] == [14]
     assert conn.execute("SELECT email, password_hash, phone FROM users WHERE id = 13").fetchone() == ("id:13", None, None)
     assert conn.execute("SELECT email, password_hash FROM users WHERE id = 14").fetchone() == ("amir", "scrypt$y")
-    assert conn.execute("SELECT login, target FROM user_actions WHERE user_id = 1").fetchone() == ("id:1", "id:13")
+    assert conn.execute("SELECT login, target, ip FROM user_actions WHERE user_id = 1").fetchone() == (
+        "id:1", "id:13", None)
+    # Организация и IP — уже в Казахстане (те же) — здесь стёрты.
+    assert pushed["orgs"]["13"]["bin"] == "900101300123" and list(pushed["ips"].values()) == ["10.0.0.9"]
+    assert conn.execute("SELECT count(*) FROM client_orgs").fetchone() == (0,)
     assert conn.execute("SELECT count(*) FROM login_attempts").fetchone() == (1,)
     # Разобрались — переехали все: стираем 14, телефоны в журнале и записи о входах.
     verdict.update(same=[14], different=[])
@@ -287,3 +308,55 @@ def test_migrate_then_scrub_personal_data(service, conn):
     with pytest.raises(idservice.ServiceError):
         idservice.scrub(conn)
     assert conn.execute("SELECT email FROM users WHERE id = 14").fetchone() == ("serik",)
+
+
+def test_org_and_ips_live_in_service(service, conn, monkeypatch):
+    """С сервисом организация клиента и IP журнала — в Казахстане, здесь их нет."""
+    from zakup import audit, client_orgs
+    idservice._org_cache.clear()
+    saved = {}
+
+    def set_org(kwargs):
+        item = kwargs["json"]["items"][0]
+        saved.update(user_id=item["user_id"], **item["org"])
+        return Reply(200, {"ok": True})
+    service.answers["/api/orgs/set"] = set_org
+    service.answers["/api/orgs/get"] = lambda kwargs: Reply(200, {"orgs": {
+        str(saved["user_id"]): {"kind": saved["kind"], "bin": saved["bin"], "name": saved["name"],
+                                "results_bin": None}} if saved else {}})
+    _enter(service, 500)
+    service.get("/settings")
+    reply = service.post("/welcome/company", data={"kind": "ip", "bin": "900101300123", "name": "ИП Иванов"},
+                         headers={"origin": "https://testserver"}, follow_redirects=False)
+    assert reply.status_code == 303 and saved == {"user_id": 500, "bin": "900101300123", "kind": "ip",
+                                                  "name": "ИП Иванов"}
+    assert conn.execute("SELECT count(*) FROM client_orgs").fetchone() == (0,)
+    assert conn.execute("SELECT company_bin FROM users WHERE id = 500").fetchone() == (None,)
+    assert client_orgs.bin_of(None, 500) == "900101300123"
+    # В журнал — без БИН.
+    assert conn.execute("SELECT target FROM user_actions WHERE action = 'client_org'").fetchone() == (None,)
+    # IP журнала — в очередь для Казахстана, здесь пусто.
+    queued = []
+    monkeypatch.setattr(idservice, "queue_ip", lambda *args: queued.append(args))
+    audit.log(conn, 500, "export", "/lots", ip="10.1.2.3")
+    row = conn.execute("SELECT id, ip FROM user_actions WHERE action = 'export'").fetchone()
+    assert row[1] is None and queued == [(row[0], 500, "10.1.2.3")]
+
+
+def test_orgs_before_migration_come_from_local_copy(service, conn):
+    """До переноса в Казахстане пусто — берём здешнюю копию (итоги не теряют «Вы выиграли»);
+    изменение уходит туда и стирает здешнюю — повтор переноса не затрёт свежее."""
+    from zakup import client_orgs
+    idservice._org_cache.clear()
+    conn.execute("INSERT INTO users (id, email, company_bin) VALUES (600, 'id:600', '111111111111')")
+    conn.execute("INSERT INTO client_orgs (user_id, kind, bin, name) VALUES (600, 'too', '222222222222', 'ТОО Альфа')")
+    conn.commit()
+    sent = []
+    service.answers["/api/orgs/get"] = Reply(200, {"orgs": {}})
+    service.answers["/api/orgs/set"] = lambda kwargs: (sent.extend(kwargs["json"]["items"]), Reply(200, {}))[1]
+    assert client_orgs.bin_of(conn, 600, fresh=True) == "111111111111"   # «БИН для итогов» важнее
+    client_orgs.set_bin(conn, 600, "333333333333")
+    conn.commit()
+    assert sent == [{"user_id": 600, "results_bin": "333333333333",
+                     "org": {"kind": "too", "bin": "222222222222", "name": "ТОО Альфа"}}]
+    assert client_orgs.local(conn, [600]) == {}

@@ -11,7 +11,7 @@ from typing import Any
 
 import psycopg
 
-from zakup import stats, tariff
+from zakup import client_orgs, stats, tariff
 from zakup.audit import ACTIONS
 from zakup.auth import CLIENT_SQL
 from zakup.filters import METHODS, REGIONS, SUBJECTS
@@ -158,8 +158,8 @@ def funnel(conn: psycopg.Connection, p: Period) -> dict[str, Any]:
     # Дальше — по клиентам, зарегистрированным в периоде (когорта).
     cohort = f"{CLIENT} AND u.created_at >= %(from)s AND u.created_at < %(to)s"
     registered = _one(conn, f"SELECT count(*) FROM users u WHERE {cohort}", b)
-    org = _one(conn, f"SELECT count(*) FROM users u WHERE {cohort} AND EXISTS "
-                     "(SELECT 1 FROM client_orgs o WHERE o.user_id = u.id)", b)
+    # Организации — в Казахстане (zakup.client_orgs): считаем по ответу сервиса.
+    org = len(client_orgs.many(conn, [r[0] for r in _rows(conn, f"SELECT u.id FROM users u WHERE {cohort}", b)]))
     started = _one(conn, f"SELECT count(*) FROM users u WHERE {cohort} AND EXISTS "
                          "(SELECT 1 FROM payments p WHERE p.user_id = u.id)", b)
     paid = _one(conn, f"SELECT count(*) FROM users u WHERE {cohort} AND EXISTS "
@@ -318,15 +318,17 @@ def retention(conn: psycopg.Connection, p: Period, now: datetime) -> dict[str, A
 
 def _at_risk(conn) -> list[list]:
     """Платят, но не заходят неделю, или тариф кончается в ближайшие 7 дней без активности."""
-    return [[login, org, until.isoformat() if until else None, last.isoformat() if last else None, uid]
-            for uid, login, org, until, last in _rows(conn, f"""
-        SELECT u.id, u.email, o.name, u.paid_until,
+    rows = _rows(conn, f"""
+        SELECT u.id, u.email, u.paid_until,
                (SELECT max(at) FROM user_actions x WHERE x.user_id = u.id) AS last
-        FROM users u LEFT JOIN client_orgs o ON o.user_id = u.id
+        FROM users u
         WHERE {CLIENT} AND u.paid_until > now()
           AND (coalesce((SELECT max(at) FROM user_actions x WHERE x.user_id = u.id), u.created_at)
                < now() - interval '7 days' OR u.paid_until < now() + interval '7 days')
-        ORDER BY u.paid_until LIMIT 50""")]
+        ORDER BY u.paid_until LIMIT 50""")
+    found = client_orgs.many(conn, [r[0] for r in rows])
+    return [[login, (found.get(uid) or {}).get("name"), until.isoformat() if until else None,
+             last.isoformat() if last else None, uid] for uid, login, until, last in rows]
 
 
 # --- Деньги ---------------------------------------------------------------------------
@@ -362,7 +364,7 @@ def money(conn: psycopg.Connection, p: Period) -> dict[str, Any]:
 
 def clients(conn: psycopg.Connection) -> dict[str, Any]:
     rows = _rows(conn, f"""
-        SELECT u.id, u.email, o.name, o.bin, u.created_at, u.paid_until,
+        SELECT u.id, u.email, u.created_at, u.paid_until,
                (SELECT max(at) FROM user_actions x WHERE x.user_id = u.id),
                (SELECT count(*) FROM lot_research r WHERE r.user_id = u.id),
                (SELECT coalesce(sum(delta), 0) FROM search_ledger l WHERE l.user_id = u.id),
@@ -373,11 +375,13 @@ def clients(conn: psycopg.Connection) -> dict[str, Any]:
                                    'subscription_create')),
                (SELECT v.region FROM visits v WHERE v.user_id = u.id AND v.region IS NOT NULL
                   ORDER BY v.at DESC LIMIT 1)
-        FROM users u LEFT JOIN client_orgs o ON o.user_id = u.id
+        FROM users u
         WHERE {CLIENT} ORDER BY u.created_at DESC LIMIT 1000""")
+    found = client_orgs.many(conn, [r[0] for r in rows])  # организации — из Казахстана (zakup.client_orgs)
     out = []
-    for (uid, login, org, bin_, created, until, last, searches_n, balance, paid, tg, used, region) in rows:
-        out.append({"id": uid, "login": login, "org": org, "bin": bin_,
+    for (uid, login, created, until, last, searches_n, balance, paid, tg, used, region) in rows:
+        org = found.get(uid) or {}
+        out.append({"id": uid, "login": login, "org": org.get("name"), "bin": client_orgs.effective_bin(org),
                     "created": created.isoformat() if created else None,
                     "until": until.isoformat() if until else None,
                     "last": last.isoformat() if last else None, "searches": searches_n, "balance": balance,

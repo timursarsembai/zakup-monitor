@@ -12,6 +12,7 @@ from psycopg.types.json import Jsonb
 
 from zakup import (
     SITE_URL,
+    client_orgs,
     marks,
     matcher,
 )
@@ -135,9 +136,8 @@ def my_lots(request: Request, user: Paid):
                        WHERE (lot->>'id')::bigint = l.id),
                       a.detail->'RefBuyStatus'->>'nameRu',
                       r.outcome, r.winner_name, r.winner_total, r.reason,
-                      r.winner_bin = u.company_bin
+                      r.winner_bin
                FROM lot_marks m
-               JOIN users u ON u.id = m.user_id
                JOIN lots l ON l.id = m.lot_id
                LEFT JOIN announcements a ON a.id = l.trd_buy_id
                LEFT JOIN lot_results r ON r.lot_id = l.id
@@ -145,6 +145,10 @@ def my_lots(request: Request, user: Paid):
                ORDER BY a.end_date NULLS LAST, l.trd_buy_id, l.id""",
             (user,),
         ).fetchall()
+    # БИН — с сервисом из Казахстана: спрашиваем уже без соединения с базой.
+    company_bin = client_orgs.bin_of(core.pool, user) if any(r[19] for r in rows) else None
+    # Последний столбец — «победитель — вы» (как раньше сравнивалось в запросе).
+    rows = [(*r[:19], r[19] == company_bin if r[19] and company_bin else None) for r in rows]
     now = datetime.now(UTC)
     # Сначала открытые — по сроку, потом завершённые.
     rows.sort(key=lambda r: (r[10] is None or r[10] < now, r[10] or now))

@@ -23,6 +23,7 @@ from zakup import (
     bids,
     branding,
     catalog,
+    client_orgs,
     dashboard,
     details,
     i18n,
@@ -1063,9 +1064,6 @@ def _lot_extras(request: Request, user: int | None, detail: dict, lots: list, in
             (list(info),))} if request.state.paid else {}
         lot_marks = marks.of_user(conn, user, list(info)) if user else {}
         lot_results = results.by_lot(conn, list(info))
-        company_bin = (conn.execute(
-            "SELECT company_bin FROM users WHERE id = %s", (user,)
-        ).fetchone() or (None,))[0]
         org_bins = [detail.get("customerBin"), detail.get("orgBin")] + [
             lot.get("customerBin") for lot in lots]
         org_cards = {b: subjects.card(conn, b) for b in dict.fromkeys(filter(None, org_bins))}
@@ -1074,6 +1072,9 @@ def _lot_extras(request: Request, user: int | None, detail: dict, lots: list, in
         # Карточки организации ещё нет — догрузим после ответа, следующий заход увидит.
         # Гостям и поисковым роботам — только база: обход сайта не должен бить по порталу.
         background.add_task(_subjects_in_background, missing)
+    # «это вы» в итогах — только когда итоги есть; БИН (с сервисом — из Казахстана) — уже без
+    # соединения с базой.
+    company_bin = client_orgs.bin_of(core.pool, user) if user and lot_results else None
     return {"specs": specs, "summaries": summaries, "marks": lot_marks, "results": lot_results,
             "company_bin": company_bin, "org_cards": org_cards}
 

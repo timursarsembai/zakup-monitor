@@ -15,6 +15,7 @@ from zakup import (
     bot,
     branding,
     client_bot,
+    client_orgs,
     credits,
     history,
     idservice,
@@ -68,9 +69,7 @@ def _settings_page(request: Request, user: int, *, sent: str = "", saved: str = 
     is_admin = request.state.role == "admin"
     is_staff = request.state.role in auth.STAFF_ROLES
     with core.pool.connection() as conn:
-        chat_id, company_bin = conn.execute(
-            "SELECT telegram_chat_id, company_bin FROM users WHERE id = %s", (user,)
-        ).fetchone()
+        chat_id = conn.execute("SELECT telegram_chat_id FROM users WHERE id = %s", (user,)).fetchone()[0]
         context = {
             **_telegram_tab(conn, request, user, chat_id, is_staff),
             **_ai_tab(conn, user, is_admin),
@@ -80,6 +79,10 @@ def _settings_page(request: Request, user: int, *, sent: str = "", saved: str = 
         }
     # Имя бота может спрашиваться у Telegram по сети — уже без соединения с базой.
     context.update(_telegram_bot(is_staff))
+    # Организации (с сервисом — из Казахстана) — без соединения с базой.
+    found = client_orgs.many(core.pool, [user] + [u[0] for u in context.get("users") or []], fresh=True)
+    company_bin = (found.get(user) or {}).get("results_bin")   # поле «БИН для итогов»
+    context["user_orgs"] = found
     context.update({
         "is_admin": is_admin,
         "is_staff": is_staff,
@@ -145,10 +148,11 @@ def _users_tab(conn, user: int, is_admin: bool, is_staff: bool) -> dict:
         """SELECT u.id, u.email, u.role, u.telegram_chat_id IS NOT NULL,
                   (SELECT max(created_at) FROM sessions s WHERE s.user_id = u.id
                    AND s.impersonated_by IS NULL),
-                  u.disabled, o.name, o.bin, u.paid_until,
+                  -- организация — отдельно (user_orgs, zakup.client_orgs); NULL держат номера столбцов шаблона
+                  u.disabled, NULL, NULL, u.paid_until,
                   (SELECT coalesce(sum(g.delta), 0) FROM search_ledger g WHERE g.user_id = u.id),
                   u.trial_until
-           FROM users u LEFT JOIN client_orgs o ON o.user_id = u.id
+           FROM users u
            WHERE u.deleted_at IS NULL AND (%s OR u.role <> 'admin' OR u.id = %s)
            ORDER BY array_position(ARRAY['admin', 'moderator', 'user'], u.role), u.email""",
         (is_admin, user),
@@ -632,11 +636,14 @@ def save_company(request: Request, user: Admin, company_bin: Annotated[str, Form
     company_bin = company_bin.strip()
     if company_bin and not (company_bin.isdigit() and len(company_bin) == 12):
         raise HTTPException(422, "БИН или ИИН — 12 цифр")
-    with core.pool.connection() as conn:
-        conn.execute(
-            "UPDATE users SET company_bin = %s WHERE id = %s", (company_bin or None, user)
-        )
-    _audit(request, user, "settings_company", company_bin or "—")
+    try:
+        client_orgs.set_bin(core.pool, user, company_bin or None)
+    except idservice.ServiceError as error:
+        logger.warning("company bin not saved: %s", error)
+        return _settings_page(request, user, tab="company", status_code=503,
+                              error="Сервис учётных записей не ответил — БИН не сохранён. Попробуйте ещё раз.")
+    # В журнал — без самого БИН: у ИП это ИИН (личные данные — в Казахстане).
+    _audit(request, user, "settings_company", "указан" if company_bin else "—")
     return RedirectResponse("/settings?saved=bin#company", status_code=303)
 
 

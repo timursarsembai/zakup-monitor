@@ -426,3 +426,26 @@ def test_import_keeps_ids_and_passwords(service, monkeypatch):
     # Счётчик новых — после перенесённых.
     new = service.db.execute("INSERT INTO accounts (login) VALUES ('n@example.com') RETURNING id").fetchone()[0]
     assert new > 13
+
+
+def test_orgs_and_action_ips(service):
+    def put(*items):
+        return _api(service, "/api/orgs/set", {"items": list(items)})
+    assert put({"user_id": 13, "org": {"kind": "ip", "bin": "123", "name": "x"}}).status_code == 422
+    put({"user_id": 13, "org": {"kind": "ip", "bin": "900101300123", "name": "ИП  Иванов"}})
+    # «БИН для итогов» сотрудника — отдельно: организация остаётся.
+    put({"user_id": 13, "results_bin": "900101300124"})
+    got = _api(service, "/api/orgs/get", {"ids": [13, 14]}).json()
+    assert got == {"orgs": {"13": {"kind": "ip", "bin": "900101300123", "name": "ИП Иванов",
+                                   "results_bin": "900101300124"}}}
+    put({"user_id": 13, "results_bin": None})
+    assert _api(service, "/api/orgs/get", {"ids": [13]}).json()["orgs"]["13"]["bin"] == "900101300123"
+    put({"user_id": 13, "org": None})   # пустая запись удаляется
+    assert _api(service, "/api/orgs/get", {"ids": [13]}).json() == {"orgs": {}}
+    items = [{"action_id": 5, "user_id": 13, "ip": "10.0.0.5"},
+             {"action_id": 6, "ip": "10.0.0.6", "at": "2026-10-01T10:00:00+00:00"}]
+    assert _api(service, "/api/ips", {"items": items}).json() == {"added": 2}
+    assert _api(service, "/api/ips", {"items": items}).json() == {"added": 0}   # повтор — без дублей
+    assert _api(service, "/api/ips/get", {"ids": [5, 6, 7]}).json() == {"ips": {"5": "10.0.0.5", "6": "10.0.0.6"}}
+    accounts.cleanup(service.db)   # старше 30 дней — как журнал сайта
+    assert _api(service, "/api/ips/get", {"ids": [5, 6]}).json() == {"ips": {"5": "10.0.0.5"}}

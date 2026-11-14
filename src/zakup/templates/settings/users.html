@@ -13,7 +13,7 @@
     {% for u in users %}
     {% set manageable = u[0] != me and (is_admin or u[2] == "user") %}
     <tr class="{{ 'off' if u[5] }}">
-      <td>{{ u[1] }}{% if u[0] == me %} <span class="muted">{{ _("(вы)") }}</span>{% endif %}{% if u[5] %} <span class="muted">{{ _("· отключён") }}</span>{% endif %}{% if u[6] %}<div class="muted">{{ u[6] }} · {{ u[7] }}</div>{% endif %}</td>
+      <td>{{ u[1] }}{% if u[0] == me %} <span class="muted">{{ _("(вы)") }}</span>{% endif %}{% if u[5] %} <span class="muted">{{ _("· отключён") }}</span>{% endif %}{% set org = (user_orgs or {}).get(u[0]) %}{% if org and org.name %}<div class="muted">{{ org.name }} · {{ org.bin }}</div>{% endif %}</td>
       <td>{% if not is_admin or u[0] == me %}{{ _(roles[u[2]]) }}{% else %}
         <form method="post" action="/settings/users/{{ u[0] }}/role">
           <select name="role" onchange="this.form.submit()" aria-label="{{ _("Роль") }} {{ u[1] }}">

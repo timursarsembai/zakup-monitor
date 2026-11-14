@@ -8,6 +8,8 @@
 
 import html
 import logging
+import threading
+import time
 from datetime import UTC, datetime
 
 import httpx
@@ -181,6 +183,109 @@ def set_registration(open_: bool) -> None:
     _staff_call("/api/registration", {"open": open_}, account=False)
 
 
+# --- Организация клиента и IP журнала действий — хранятся в Казахстане ---
+# Сайт спрашивает, когда нужно, и держит ответ недолго в памяти процесса (не в базе).
+# Ответ держим недолго: у сайта несколько процессов (две копии и сборщик), сброс после
+# изменения — только в своём. Где ответ окончательный (итоги в Telegram) — fresh, без памяти.
+ORG_CACHE_SECONDS = 60
+ORG_CHUNK = 1000
+_org_cache: dict[int, tuple[float, dict | None]] = {}
+
+
+def _post(path: str, body: dict, timeout: httpx.Timeout = TIMEOUT) -> dict:
+    response = _api("POST", path, json=body, timeout=timeout)
+    if response.status_code != 200:
+        raise ServiceError(f"http {response.status_code}")
+    try:
+        return response.json()
+    except ValueError:
+        raise ServiceError("bad answer") from None
+
+
+def orgs(ids: list[int], fresh: bool = False) -> dict[int, dict]:
+    """Организации пользователей {номер: {kind, bin, name, results_bin}}; нет — нет ключа.
+    ServiceError — сервис не ответил (вызывающий решает: показать без организации или ждать)."""
+    now = time.monotonic()
+    known = {} if fresh else {i: c[1] for i in ids if (c := _org_cache.get(i)) and c[0] > now}
+    wanted = [i for i in dict.fromkeys(ids) if i not in known]
+    for start in range(0, len(wanted), ORG_CHUNK):
+        chunk = wanted[start:start + ORG_CHUNK]
+        found = {int(k): v for k, v in _post("/api/orgs/get", {"ids": chunk},
+                                             timeout=TIMEOUT if len(chunk) < 50 else BULK_TIMEOUT
+                                             ).get("orgs", {}).items()}
+        if len(_org_cache) > 10_000:
+            _org_cache.clear()
+        for i in chunk:
+            known[i] = found.get(i)
+            _org_cache[i] = (now + ORG_CACHE_SECONDS, found.get(i))
+    return {i: org for i, org in known.items() if org}
+
+
+def set_orgs(items: list[dict]) -> None:
+    """Пачкой: {user_id, org?: {kind, bin, name} | None, results_bin?} (см. /api/orgs/set)."""
+    for start in range(0, len(items), ORG_CHUNK):
+        _post("/api/orgs/set", {"items": items[start:start + ORG_CHUNK]},
+              timeout=TIMEOUT if len(items) < 50 else BULK_TIMEOUT)
+    for item in items:
+        _org_cache.pop(item["user_id"], None)
+
+
+_ips: list[dict] = []
+_ips_lock = threading.Lock()
+_ips_wake = threading.Event()
+_ips_thread: threading.Thread | None = None
+IPS_MAX_QUEUE = 5_000
+_ips_dropped = 0
+
+
+def queue_ip(action_id: int, user_id: int | None, ip: str) -> None:
+    """IP записи журнала — в Казахстан, в фоне (журнал пишется на каждый просмотр: ждать
+    ответа нельзя). Не дошло (сервис лежит дольше очереди) — адрес теряется, журнал остаётся."""
+    global _ips_thread, _ips_dropped
+    with _ips_lock:
+        if len(_ips) < IPS_MAX_QUEUE:
+            _ips.append({"action_id": action_id, "user_id": user_id, "ip": ip[:64]})
+        else:
+            _ips_dropped += 1
+            if _ips_dropped in (1, 100) or _ips_dropped % 1000 == 0:
+                logger.warning("action ips queue full: %d dropped", _ips_dropped)
+        if _ips_thread is None or not _ips_thread.is_alive():
+            _ips_thread = threading.Thread(target=_send_ips, name="id-ips", daemon=True)
+            _ips_thread.start()
+    _ips_wake.set()
+
+
+def _send_ips() -> None:
+    while True:
+        _ips_wake.wait(30)
+        _ips_wake.clear()
+        time.sleep(2)  # копим пачку
+        with _ips_lock:
+            batch = _ips[:500]
+        if not batch:
+            continue
+        try:
+            _post("/api/ips", {"items": batch})
+        except ServiceError as error:
+            if str(error).startswith("http 4"):
+                # Сервис отказал (не сбой связи) — повтор не поможет: пачку не держим, очередь не встаёт.
+                logger.warning("action ips rejected (%d): %s", len(batch), error)
+            else:
+                logger.warning("action ips not sent (%d): %s", len(batch), error)
+                time.sleep(30)
+                continue
+        with _ips_lock:
+            del _ips[:len(batch)]
+        if _ips:
+            _ips_wake.set()
+
+
+def ips(ids: list[int]) -> dict[int, str]:
+    if not ids:
+        return {}
+    return {int(k): v for k, v in _post("/api/ips/get", {"ids": ids}).get("ips", {}).items()}
+
+
 # --- Переезд учётных записей в Казахстан (zakup id-migrate, zakup id-scrub) ---
 
 
@@ -204,13 +309,28 @@ def _bulk(path: str, rows: list[dict]) -> dict:
     return response.json()
 
 
+def _local_ips(conn: psycopg.Connection) -> list[dict]:
+    rows = conn.execute("SELECT id, user_id, ip, at FROM user_actions WHERE ip IS NOT NULL ORDER BY id").fetchall()
+    return [{"action_id": r[0], "user_id": r[1], "ip": r[2], "at": r[3].isoformat()} for r in rows]
+
+
 def migrate(conn: psycopg.Connection) -> dict[str, list]:
-    """Логины, хэши паролей и телефоны — в сервис (с прежними номерами). Повторять можно:
-    перенесённые сервис пропускает. Здесь ничего не меняется (это делает scrub)."""
+    """Логины, хэши паролей и телефоны — в сервис (с прежними номерами), туда же организации
+    клиентов и IP журнала действий. Повторять можно: перенесённое сервис пропускает или
+    перезаписывает тем же. Здесь ничего не меняется (это делает scrub)."""
     rows = [{**row, **{k: row[k].isoformat() for k in ("deleted_at", "created_at") if row[k]}}
             for row in _local_accounts(conn)]
+    from zakup import client_orgs
+
+    # Здесь остаются только те, кого после включения сервиса не меняли (изменение сразу
+    # уходит туда и стирает здешнюю копию) — повтор переноса свежее не затрёт.
+    local_orgs, local_ips = client_orgs.local(conn), _local_ips(conn)
     conn.commit()  # данные прочитаны — соединение не держим, пока ждём Казахстан
-    return _bulk("/api/import", rows)
+    result = _bulk("/api/import", rows)
+    set_orgs([{"user_id": i, **client_orgs.as_item(org)} for i, org in local_orgs.items()])
+    for start in range(0, len(local_ips), 1000):
+        _post("/api/ips", {"items": local_ips[start:start + 1000]}, timeout=BULK_TIMEOUT)
+    return {**result, "orgs": list(local_orgs), "ips": [len(local_ips)]}
 
 
 def check(conn: psycopg.Connection) -> dict[str, list[int]]:
@@ -235,8 +355,35 @@ def scrub(conn: psycopg.Connection, dry_run: bool = False) -> dict:
         raise ServiceError("service is not configured")
     found = check(conn)
     stats: dict = {"scrubbed": 0, "missing": found["missing"], "different": found["different"]}
-    if dry_run or not found["same"]:
-        return {**stats, "would_scrub": len(found["same"])} if dry_run else stats
+    # Организации и IP: стираем здесь только то, что в Казахстане уже есть то же самое.
+    from zakup import client_orgs
+
+    local_orgs, local_ips = client_orgs.local(conn), _local_ips(conn)
+    conn.commit()
+    remote_orgs = orgs(list(local_orgs), fresh=True) if local_orgs else {}
+    orgs_ready = [i for i, org in local_orgs.items() if client_orgs.same(remote_orgs.get(i), org)]
+    remote_ips: dict[int, str] = {}
+    for start in range(0, len(local_ips), 5000):
+        chunk = [i["action_id"] for i in local_ips[start:start + 5000]]
+        remote_ips.update({int(k): v for k, v in _post("/api/ips/get", {"ids": chunk},
+                                                       timeout=BULK_TIMEOUT).get("ips", {}).items()})
+    ips_ready = [i["action_id"] for i in local_ips if remote_ips.get(i["action_id"]) == i["ip"]]
+    stats.update(orgs_missing=[i for i in local_orgs if i not in orgs_ready],
+                 ips_missing=len(local_ips) - len(ips_ready))
+    if dry_run:
+        return {**stats, "would_scrub": len(found["same"]), "orgs": len(orgs_ready), "ips": len(ips_ready)}
+    if orgs_ready:
+        conn.execute("DELETE FROM client_orgs WHERE user_id = ANY(%s)", (orgs_ready,))
+        conn.execute("UPDATE users SET company_bin = NULL WHERE id = ANY(%s)", (orgs_ready,))
+    if ips_ready:
+        conn.execute("UPDATE user_actions SET ip = NULL WHERE id = ANY(%s)", (ips_ready,))
+    # БИН в журнале действий («Указал организацию», «БИН для итогов») — у ИП это ИИН.
+    conn.execute("UPDATE user_actions SET target = NULL WHERE action IN ('client_org', 'settings_company') "
+                 "AND target ~ '^[0-9]{12}$'")
+    stats.update(orgs=len(orgs_ready), ips=len(ips_ready))
+    if not found["same"]:
+        conn.commit()
+        return stats
     ids = found["same"]
     conn.execute(
         """UPDATE user_actions a SET target = 'id:' || u.id FROM users u

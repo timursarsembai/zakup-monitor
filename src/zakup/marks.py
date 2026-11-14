@@ -13,7 +13,7 @@ from datetime import UTC, datetime, timedelta
 
 import psycopg
 
-from zakup import telegram
+from zakup import client_orgs, idservice, telegram
 from zakup.auth import ENTITLED_SQL
 from zakup.goszakup import PORTAL_TZ
 from zakup.matcher import lot_url
@@ -194,7 +194,7 @@ def announce_results(conn: psycopg.Connection, pause: float = 1.1) -> int:
     """Сообщает итог по избранным лотам; если в протоколе есть БИН организации
     пользователя — пишет, выиграли или нет."""
     rows = conn.execute(
-        """SELECT m.user_id, m.lot_id, m.status, u.telegram_chat_id, u.company_bin,
+        """SELECT m.user_id, m.lot_id, m.status, u.telegram_chat_id,
                   r.outcome, r.reason, r.winner_bin, r.winner_name, r.winner_total, r.offers,
                   l.trd_buy_id, l.name_ru, l.amount, u.notify_results, l.name_kz, """ + _LANGS_SQL + """
            FROM lot_marks m
@@ -204,9 +204,19 @@ def announce_results(conn: psycopg.Connection, pause: float = 1.1) -> int:
            WHERE m.status NOT IN ('', 'rejected') AND m.result_notified_at IS NULL
              AND """ + ENTITLED_SQL
     ).fetchall()
+    try:
+        # БИН организации — из Казахстана (zakup.orgs); не ответил — итоги подождут: без БИН
+        # строка «Вы выиграли» пропала бы навсегда (итог отмечается отправленным).
+        found = client_orgs.many(conn, [r[0] for r in rows], strict=True, fresh=True)
+        bins = {k: client_orgs.effective_bin(v) for k, v in found.items()}
+    except idservice.ServiceError as error:
+        conn.rollback()
+        logger.warning("results wait for orgs: %s", error)
+        return 0
     sent = 0
-    for (user_id, lot_id, _status, chat_id, company_bin, outcome, reason, winner_bin,
+    for (user_id, lot_id, _status, chat_id, outcome, reason, winner_bin,
          winner_name, winner_total, offers, _a_id, name, amount, wanted, name_kz, langs) in rows:
+        company_bin = bins.get(user_id)
         mine = company_bin and any(o.get("bin") == company_bin for o in offers or [])
         title = name_kz if langs == "kk" and name_kz else name
         lines = [f"🏁 <b>{_say(langs, *OUTCOME_TEXT[outcome]) if outcome in OUTCOME_TEXT else outcome}</b>",

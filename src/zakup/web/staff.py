@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from zakup import (
     audit,
+    idservice,
     insights,
 )
 from zakup.goszakup import PORTAL_TZ
@@ -14,6 +15,7 @@ from zakup.web import core
 from zakup.web.core import (
     MAX_PAGE,
     Staff,
+    logger,
     templates,
 )
 
@@ -72,7 +74,7 @@ def action_log(request: Request, _: Staff, page: int = 1, per_page: int = 50):
     with core.pool.connection() as conn:
         rows = conn.execute(
             f"""SELECT a.at, a.user_id, coalesce(u.email, a.login), a.action, a.target,
-                       a.details, a.ip
+                       a.details, a.ip, a.id
                 FROM user_actions a LEFT JOIN users u ON u.id = a.user_id
                 WHERE {where} ORDER BY a.at DESC, a.id DESC
                 LIMIT {per_page} OFFSET {(page - 1) * per_page}""",
@@ -84,6 +86,14 @@ def action_log(request: Request, _: Staff, page: int = 1, per_page: int = 50):
         all_users = conn.execute(
             "SELECT id, email FROM users WHERE NOT (%s AND role = 'admin') ORDER BY email", (moderator,)
         ).fetchall()
+    # IP — в Казахстане (zakup.idservice), здесь пусто: спрашиваем для этой страницы журнала.
+    remote = {}
+    if idservice.enabled():
+        try:
+            remote = idservice.ips([r[7] for r in rows if not r[6]])
+        except idservice.ServiceError as error:
+            logger.warning("action ips not loaded: %s", error)
+    rows = [(*r[:6], r[6] or remote.get(r[7])) for r in rows]
     keep = [(k, v) for k, vs in query.items() if k not in ("page",) for v in vs]
     return templates.TemplateResponse(request, "log.html", {
         "rows": rows, "total": total, "page": page, "per_page": per_page,
